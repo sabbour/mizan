@@ -304,7 +304,8 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     settingsButton.current?.focus()
   }
   const chooseMode = async (mode: ProcessingMode) => {
-    if (cloudStatusChecking) cloudStatusCancelRef.current?.()
+    const readinessCancelled = cloudStatusChecking
+    if (readinessCancelled) cloudStatusCancelRef.current?.()
     if (cloudOperationGate.isLocked()) return
     if (mode === 'cloud' && cloud && !cloud.configured && !cloud.jobCreated) {
       openCloudWizard()
@@ -315,7 +316,11 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     setCloudError(null)
     try {
       const selected = await host.setProcessingMode(mode)
-      setCloud((current) => ({ ...(current ?? { configured: false }), mode: selected }))
+      setCloud((current) => ({
+        ...(current ?? { configured: false }),
+        ...(readinessCancelled ? { configured: false } : {}),
+        mode: selected,
+      }))
     } catch (reason) {
       setCloudError(problem(reason).message)
     } finally {

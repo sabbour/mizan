@@ -188,6 +188,34 @@ test('Cloud intent is saved during blocked readiness without claiming Azure is r
   view.unmount()
 })
 
+test('selecting Cloud during a refresh does not reuse an older ready result', async () => {
+  const refresh = deferred(), chosen = []
+  let checks = 0
+  const h = harness({
+    cloudStatus: () => ++checks === 1
+      ? Promise.resolve({ mode: 'local', configured: true, jobCreated: true })
+      : refresh.promise,
+    getTranscriptionModel: async () => 'muscriptor-large',
+    setProcessingMode: async (mode) => { chosen.push(mode); return mode },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); await view.settle(); await view.settle()
+  assert.match(text(view.tree), /Azure is ready/)
+  button(view.tree, 'Close song analysis settings').props.onClick(); view.update()
+  button(view.tree, 'Song analysis settings').props.onClick(); view.update()
+  assert.match(text(view.tree), /Checking Azure setup/)
+  nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  await view.settle()
+  assert.deepEqual(chosen, ['cloud'])
+  assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  assert.doesNotMatch(text(view.tree), /Cloud is on|Azure is ready/)
+  refresh.resolve({ mode: 'local', configured: true, jobCreated: true })
+  await view.settle()
+  assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  view.unmount()
+})
+
 test('failed readiness does not send a locally saved Cloud Job back through setup', async () => {
   const h = harness({
     cloudStatus: async () => ({ mode: 'local', configured: false, available: true,
