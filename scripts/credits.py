@@ -531,6 +531,17 @@ def render_notices(credits: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _publish_licenses(staged: Path, destination: Path) -> None:
+    files = sorted(staged.iterdir())
+    names = {path.name for path in files}
+    destination.mkdir(exist_ok=True)
+    for source in files:
+        source.replace(destination / source.name)
+    for current in destination.iterdir():
+        if current.is_file() and current.name not in names:
+            current.unlink()
+
+
 def main() -> None:
     global OUTPUT_LICENSES
     temporary = ROOT / ".credits-licenses"
@@ -547,9 +558,7 @@ def main() -> None:
                   for item in credits]
         temporary_json.write_text(json.dumps(public, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
         temporary_notices.write_text(render_notices(credits), encoding="utf-8")
-        if LICENSES.exists():
-            shutil.rmtree(LICENSES)
-        temporary.replace(LICENSES)
+        _publish_licenses(temporary, LICENSES)
         temporary_json.replace(ROOT / "ui" / "src" / "credits.json")
         temporary_notices.replace(ROOT / "THIRD_PARTY_NOTICES.md")
     finally:
