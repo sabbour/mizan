@@ -612,15 +612,20 @@ async function harmonyChecks() {
     'Above/sixths mode follows the lead with high note coverage')
   check(sparse.piano.length === 0 && withoutKey.piano.length >= 17,
     'Long-notes filter and keyless chromatic fallback are usable')
-  check(chordLine.piano.length === 2 && chordLine.piano[0].beats === 12 &&
+  check(chordLine.piano.length === 14 && chordLine.piano.slice(0, 12).every((note, i) => note.startBeat === i) &&
+    chordLine.piano.slice(12).every((note, i) => note.startBeat === 16 + i) &&
     !chordLine.piano.some((note) => note.startBeat >= 12 && note.startBeat < 16),
-    'Chord harmony sustains identified tones without guessing through no-chord measures')
+    'Chord harmony follows source onsets without guessing through no-chord measures')
   const engine = new Engine({ ...song, piano: [] })
   engine.ctx = new AudioContext()
   engine.master = engine.ctx.createGain()
   const sounding = []
   engine.sampleNote = (time, midi, duration, velocity, destination) => sounding.push({ time, midi, duration, velocity, destination })
   engine.pad = (time, tones, duration) => sounding.push({ time, tones, duration })
+  engine.events(0, 2, 0, 0.5, false)
+  check(sounding.filter(({ tones }) => tones).map(({ time }) => time).join(',') === '0,0.5',
+    'Engine chord pads follow the selected accompaniment rhythm')
+  sounding.length = 0
   engine.events(10, 10.25, 0, 0.5, true)
   check(sounding.length > 0 && sounding.some(({ tones }) => tones?.includes(60)),
     'Chord playback remains audible near the end of an unknown span, using prior identified pitches')

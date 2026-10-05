@@ -111,6 +111,7 @@ function runningEngine() {
 
 const muted = runningEngine()
 muted.engine.muted.add('stem:mix')
+muted.media.setAttribute('src')
 const soundingPiano = []
 muted.engine.piano = (...args) => soundingPiano.push(args)
 muted.media.emit('error')
@@ -123,9 +124,22 @@ assert.equal(soundingPiano.length, 1, 'Synth piano notes remain schedulable afte
 
 const zeroVolume = runningEngine()
 zeroVolume.engine.trackGains.set('stem:mix', 0)
+zeroVolume.media.setAttribute('src')
 zeroVolume.media.emit('error')
 assert.equal(zeroVolume.engine.playing, true, 'A zero-volume recording error does not stop Synth playback')
 assert.deepEqual(zeroVolume.errors, [], 'A zero-volume recording error is not reported')
+
+const inactiveRejected = runningEngine()
+inactiveRejected.engine.muted.add('stem:mix')
+inactiveRejected.media.setAttribute('src')
+let rejectInactivePlay
+inactiveRejected.media.play = () => new Promise((_, reject) => { rejectInactivePlay = reject })
+inactiveRejected.engine.scheduleMedia(0, 0)
+timers.shift().callback()
+rejectInactivePlay(new Error('Inactive recording playback failure'))
+await new Promise((resolve) => setImmediate(resolve))
+assert.equal(inactiveRejected.engine.playing, true, 'An inactive recording rejection does not stop Synth playback')
+assert.deepEqual(inactiveRejected.errors, [], 'An inactive recording rejection is not reported')
 
 const active = runningEngine()
 active.media.setAttribute('src')

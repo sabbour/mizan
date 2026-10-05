@@ -1,5 +1,6 @@
 import type { Stem } from '../library/bridge'
 import { sustainedChords, type DrumHit, type DrumLane, type MelodyNote, type PianoNote, type Song } from './song'
+import { accompanimentRhythm, chordRhythm } from './creative'
 import { Recording } from './recording'
 
 export type Transport = {
@@ -89,6 +90,9 @@ export class Engine {
   private resumeNotes = false
   private noteBoundary = Infinity
   private openHats = new Set<AudioBufferSourceNode>()
+  private rhythmSource: Song | null = null
+  private rhythmInputs: unknown[] = []
+  private rhythm: number[] = []
 
   rate = 1
   loop: { startBar: number; endBar: number } | null = null
@@ -151,13 +155,18 @@ export class Engine {
       if (this.stems.length) {
         this.recording = new Recording(this.ctx, this.stems, this.master)
         this.recording.media.addEventListener('error', () => {
-          if (!this.timer || !this.recording?.media.hasAttribute('src')) return
+          if (!this.timer || !this.recording?.media.hasAttribute('src') || !this.hasAudibleStem()) return
           this.pause()
           this.onError?.('The recording could not be read. Try playing again.')
         })
       }
     }
     return this.ctx
+  }
+
+  private hasAudibleStem(): boolean {
+    return this.stems.some((stem) =>
+      !this.muted.has(`stem:${stem.id}`) && (this.trackGains.get(`stem:${stem.id}`) ?? 1) > 0)
   }
 
   private async loadSamples(): Promise<void> {
@@ -440,6 +449,12 @@ export class Engine {
     const at = (beat: number) => t0 + (beat - from) * spb
     const inRange = (b: number) => b >= from && b < to
     const song = this.song
+    const rhythmInputs = [song.drums, song.piano, song.vocals, song.instrumentNotes, song.beatsPerBar, song.beatUnit, song.bars]
+    if (song !== this.rhythmSource || rhythmInputs.some((input, index) => input !== this.rhythmInputs[index])) {
+      this.rhythmSource = song
+      this.rhythmInputs = rhythmInputs
+      this.rhythm = accompanimentRhythm(song)
+    }
 
     const sustained = new Map(sustainedChords(song.chords).map((chord) => [chord.startBeat, chord.beats]))
     song.chords.forEach((chord, i) => {
@@ -447,10 +462,11 @@ export class Engine {
       const tones = this.swaps.get(i) ?? chord.tones
       if (!tones.length) return
       const endBeat = chord.startBeat + (sustained.get(chord.startBeat) ?? chord.beats)
-      for (let b = chord.startBeat; b < endBeat; b += 2) {
-        const end = Math.min(b + 2, endBeat)
-        if (inRange(b) || (resume && b < from && end > from)) {
-          const start = Math.max(b, from)
+      const attacks = chordRhythm({ startBeat: chord.startBeat, beats: endBeat - chord.startBeat }, this.rhythm)
+      for (const attack of attacks) {
+        const end = attack.startBeat + attack.beats
+        if (inRange(attack.startBeat) || (resume && attack.startBeat < from && end > from)) {
+          const start = Math.max(attack.startBeat, from)
           this.sampleNote(at(start), tones[0] - 24, this.seconds(start, end), 0.52, this.bus('chords'), 0.01, 0.7)
           this.pad(at(start), tones, this.seconds(start, end))
         }
@@ -714,7 +730,7 @@ export class Engine {
       media.playbackRate = this.rate
       const revision = this.revision
       void media.play().catch((error: unknown) => {
-        if (revision !== this.revision || !media.hasAttribute('src')) return
+        if (revision !== this.revision || !media.hasAttribute('src') || !this.hasAudibleStem()) return
         this.pause()
         this.onError?.(error instanceof Error ? error.message : 'The recording could not be played.')
       })
