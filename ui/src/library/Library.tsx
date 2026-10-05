@@ -111,11 +111,20 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
               : cloud.jobCreated ? 'GPU Job created · Azure access needs checking'
               : cloud.prepared ? 'Azure infrastructure prepared · setup not complete'
                 : cloud.config ? 'Azure settings saved · setup not complete' : 'Cloud is not set up'
+  const cloudSetupConfirmedAbsent = cloud !== null
+    && typeof cloud.available === 'boolean'
+    && cloud.prepared === false
+    && cloud.jobCreated === false
+    && cloud.config === undefined
+    && cloud.workerImage === null
+  const cloudSetupCanContinue = cloud !== null && !cloud.configured
+    && cloud.jobCreated === false
+    && (cloud.config !== undefined || cloud.prepared === true || cloud.workerImage != null)
   const cloudActionText = cloudOperationBusy ? 'Working…'
     : cloudError || cloud === null ? 'Retry check'
       : cloud.configured ? 'Review Azure setup'
-        : cloud.jobCreated ? 'Check Azure access'
-          : cloud.config ? 'Continue Azure setup' : 'Set up Azure'
+        : cloudSetupConfirmedAbsent ? 'Set up Azure'
+          : cloudSetupCanContinue ? 'Continue Azure setup' : 'Check Azure access'
 
   const reload = useCallback(
     () => Promise.all([host.library(), host.folders()]).then(
@@ -308,7 +317,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     const readinessCancelled = cloudStatusChecking
     if (readinessCancelled) cloudStatusCancelRef.current?.()
     if (cloudOperationGate.isLocked()) return
-    if (mode === 'cloud' && cloud && !cloud.configured && !cloud.jobCreated) {
+    if (mode === 'cloud' && (cloudSetupConfirmedAbsent || cloudSetupCanContinue)) {
       openCloudWizard()
       return
     }
@@ -316,11 +325,12 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     if (!release) return
     setCloudError(null)
     try {
-      const selected = await host.setProcessingMode(mode)
+      const selected = await host.setProcessingModeWithStatus(mode)
       setCloud((current) => ({
         ...(current ?? { configured: false }),
+        ...selected,
         ...(readinessCancelled ? { configured: false } : {}),
-        mode: selected,
+        mode: selected.mode,
       }))
     } catch (reason) {
       setCloudError(problem(reason).message)
@@ -577,13 +587,16 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
                 onChange={() => void chooseMode('cloud')} /> Cloud <small>Use your own Azure GPU</small></label>
             </fieldset>
             <p className="model-settings-source">Processing selection applies to new analysis and Redo analysis. Queued and running jobs keep their chosen model and processing mode.</p>
+            <p className="model-settings-source">Cloud model sizes use different execution budgets in the selected Azure environment; a larger size does not require a new environment.</p>
             <div className="cloud-status" aria-busy={cloudOperationBusy}>
               <span role="status" aria-live="polite">
                 {cloudOperationBusy && <span className="cloud-inline-spinner" aria-hidden="true" />}
                 {cloudStatusText}
               </span>
               <button type="button" className="btn" disabled={cloudOperationBusy || (!cloud && !cloudError)}
-                onClick={() => cloudError || !cloud ? void checkCloudStatus() : openCloudWizard()}>
+                onClick={() => cloudError || !cloud || (!cloud.configured
+                  && !cloudSetupConfirmedAbsent && !cloudSetupCanContinue)
+                  ? void checkCloudStatus() : openCloudWizard()}>
                 {cloudActionText}
               </button>
               {cloud?.mode === 'cloud' && !cloudModelSupportKnown

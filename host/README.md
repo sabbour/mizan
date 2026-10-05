@@ -89,7 +89,13 @@ pilot does **not** verify any customer's Azure identity.
 `set_processing_mode("cloud")` saves processing intent, not Azure readiness.
 Invalid or incomplete local setup returns `cloud_failed`. `configure_cloud`
 validates and stores nonsecret identifiers **without provisioning Azure resources**.
-Once selected, Cloud remains selected across restarts and temporary readiness failures.
+On successful Cloud selection the host returns the saved local setup snapshot;
+the UI still requires a live access check before it calls Azure ready. If access
+is unknown or a check fails, check the existing Azure setup instead of starting
+new environment provisioning. Model sizes use per-execution budgets in the
+selected Container Apps environment; choosing a larger model does not require a
+new environment. Once selected, Cloud remains selected across restarts and
+temporary readiness failures.
 New analysis and Redo analysis snapshot the selected processing mode and MuScriptor
 size; queued jobs and retries keep that snapshot. A Cloud job that cannot pass
 execution preflight fails explicitly rather than using local model inference.

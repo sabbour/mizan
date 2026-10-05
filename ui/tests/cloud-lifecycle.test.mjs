@@ -27,7 +27,7 @@ function nodes(tree, predicate) {
 const button = (tree, label) => nodes(tree, (node) => node.type === 'button'
   && (node.props['aria-label'] === label || text(node) === label))[0]
 
-function harness(overrides = {}) {
+function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   let active
   const timers = []
   const host = {
@@ -100,7 +100,8 @@ function harness(overrides = {}) {
         if (specifier === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
         if (specifier === 'lucide-react') return new Proxy({}, { get: (_target, key) => key })
         if (specifier === './bridge') return { host, HostError, IMPORTABLE: /\.(mid|musicxml)$/i }
-        if (specifier === './CloudSetup') return { CloudSetup: 'cloud-setup' }
+        if (specifier === './CloudSetup') return loadCloudSetup
+          ? load('CloudSetup.tsx') : { CloudSetup: 'cloud-setup' }
         if (specifier.endsWith('.css')) return {}
         if (specifier.startsWith('./')) return load(specifier.slice(2) + '.ts')
         return require(specifier)
@@ -136,6 +137,14 @@ function harness(overrides = {}) {
 const libraryProps = { jobs: [], version: 0, onQueueChange() {}, onOpen() {}, onDetails() {}, onCredits() {} }
 const cloudReady = { mode: 'cloud', configured: true, available: true,
   supportedModels: ['muscriptor-small', 'muscriptor-medium', 'muscriptor-large'] }
+const savedCloudSetup = {
+  configured: false, mode: 'cloud', available: true, prepared: true, jobCreated: true,
+  config: { tenantId: 'tenant', subscriptionId: 'subscription', resourceGroup: 'rg-existing',
+    storageAccount: 'mizanexisting', container: 'jobs', jobName: 'mizan-gpu-transcribe',
+    location: 'italynorth', registry: 'mizanexistingacr', vnet: 'mizan-vnet',
+    subnet: 'aca-subnet', vnetCidr: '10.42.0.0/16', subnetCidr: '10.42.0.0/23',
+    environment: 'mizan-aca-env', identity: 'mizan-gpu-identity' },
+}
 const job = (overrides = {}) => ({
   id: 'running', kind: 'transcribe', songId: null, url: 'https://youtu.be/aB_12-cD345',
   title: 'Synthetic song', status: 'running', stage: 'detect', order: 0,
@@ -193,12 +202,110 @@ test('unknown Cloud model catalog keeps choices available; known omission is uns
   knownView.unmount()
 })
 
+test('Check Azure access retries status for unknown Job state instead of opening setup', async () => {
+  let checks = 0
+  const calls = []
+  const h = harness({
+    cloudStatus: async () => {
+      checks++
+      return checks === 1
+        ? { mode: 'local', configured: false, available: true }
+        : { ...savedCloudSetup, mode: 'local', issue: 'Azure access is still unknown' }
+    },
+    configureCloud: async (...args) => { calls.push(['configure', ...args]) },
+    prepareCloud: async (...args) => { calls.push(['prepare', ...args]) },
+    finishCloud: async (...args) => { calls.push(['finish', ...args]) },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick()
+  await view.settle(); await view.settle()
+  assert.ok(button(view.tree, 'Check Azure access'))
+  button(view.tree, 'Check Azure access').props.onClick()
+  await view.settle(); await view.settle()
+  assert.equal(checks, 2)
+  assert.equal(calls.length, 0)
+  assert.equal(nodes(view.tree, (node) => node.type === 'cloud-setup').length, 0)
+  view.unmount()
+})
+
+test('confirmed empty setup opens onboarding; absent Job metadata does not', async () => {
+  const selected = []
+  const h = harness({
+    cloudStatus: async () => ({ mode: 'local', configured: false, available: true,
+      prepared: false, jobCreated: false, workerImage: null }),
+    setProcessingModeWithStatus: async (mode) => { selected.push(mode); return { mode } },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick()
+  await view.settle(); await view.settle()
+  nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  view.update()
+  assert.equal(nodes(view.tree, (node) => node.type === 'cloud-setup').length, 1)
+  assert.deepEqual(selected, [])
+  view.unmount()
+
+  let checks = 0
+  const partial = harness({
+    cloudStatus: async () => {
+      checks++
+      return { mode: 'local', configured: false, prepared: false, jobCreated: false }
+    },
+    setProcessingModeWithStatus: async (mode) => ({ mode }),
+  })
+  const partialView = partial.render(partial.load('Library.tsx').Library, libraryProps)
+  button(partialView.tree, 'Song analysis settings').props.onClick()
+  await partialView.settle(); await partialView.settle()
+  nodes(partialView.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  await partialView.settle(); await partialView.settle()
+  assert.equal(nodes(partialView.tree, (node) => node.type === 'cloud-setup').length, 0)
+  assert.ok(button(partialView.tree, 'Check Azure access'))
+  button(partialView.tree, 'Check Azure access').props.onClick()
+  await partialView.settle(); await partialView.settle()
+  assert.equal(checks, 2)
+  assert.equal(nodes(partialView.tree, (node) => node.type === 'cloud-setup').length, 0)
+  partialView.unmount()
+})
+
+test('prepared environment without a worker resumes the saved worker-only path', async () => {
+  const saved = {
+    ...savedCloudSetup, mode: 'local', configured: false, jobCreated: false,
+    workerImage: null,
+  }
+  const actions = []
+  const h = harness({
+    buildCloudWorker: async () => {
+      actions.push('build-worker')
+      return { image: 'registry.azurecr.io/mizan-aca-gpu@sha256:test' }
+    },
+    cloudStatus: async () => ({ ...saved, workerImage: 'registry.azurecr.io/mizan-aca-gpu@sha256:test' }),
+    cloudSetupProgress: async () => ({ operation: null, stage: 'idle', completed: 0, total: 0, detail: null }),
+    configureCloud: async (...args) => { actions.push(['configure', ...args]) },
+    prepareCloud: async (...args) => { actions.push(['prepare', ...args]) },
+    finishCloud: async (...args) => { actions.push(['finish', ...args]) },
+    azureSubscriptions: async () => [{ id: 'subscription', name: 'Existing', tenantId: 'tenant' }],
+  }, { loadCloudSetup: true })
+  const component = h.load('CloudSetup.tsx').CloudSetup
+  const view = h.render(component, { status: saved, onStatus() {}, onClose() {},
+    acquireOperation: () => () => {} })
+  assert.match(text(view.tree), /Build the GPU worker, then create the Job/)
+  assert.ok(button(view.tree, 'Build GPU worker in my registry'))
+  button(view.tree, 'Build GPU worker in my registry').props.onClick()
+  await view.settle(); await view.settle()
+  assert.deepEqual(actions, ['build-worker'])
+  assert.match(text(view.tree), /GPU worker built and ready for the Job/)
+  assert.equal(nodes(view.tree, (node) => node.type === 'button'
+    && text(node) === 'Approve and provision infrastructure').length, 0)
+  view.unmount()
+})
+
 test('Cloud intent is saved during blocked readiness without claiming Azure is ready', async () => {
   const status = deferred(), chosen = [], cancelled = []
   const h = harness({
     cloudStatus: () => status.promise,
     getTranscriptionModel: async () => 'muscriptor-large',
-    setProcessingMode: async (mode) => { chosen.push(mode); return mode },
+    setProcessingModeWithStatus: async (mode) => { chosen.push(mode); return { ...savedCloudSetup, mode } },
     cancelCloudStatus: async (id) => { cancelled.push(id); return { cancelRequested: true } },
   })
   const view = h.render(h.load('Library.tsx').Library, libraryProps)
@@ -211,6 +318,9 @@ test('Cloud intent is saved during blocked readiness without claiming Azure is r
   assert.deepEqual(chosen, ['cloud'])
   assert.equal(cancelled.length, 1)
   assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  assert.ok(button(view.tree, 'Check Azure access'))
+  assert.ok(button(view.tree, 'Disconnect Azure from Mizan'))
+  assert.equal(nodes(view.tree, (node) => node.type === 'cloud-setup').length, 0)
   assert.doesNotMatch(text(view.tree), /Cloud is on|Azure is ready/)
   status.resolve({ mode: 'local', configured: false, issue: 'Azure readiness check timed out' })
   await view.settle()
@@ -228,7 +338,7 @@ test('selecting Cloud during a refresh does not reuse an older ready result', as
       ? Promise.resolve({ mode: 'local', configured: true, jobCreated: true })
       : refresh.promise,
     getTranscriptionModel: async () => 'muscriptor-large',
-    setProcessingMode: async (mode) => { chosen.push(mode); return mode },
+    setProcessingModeWithStatus: async (mode) => { chosen.push(mode); return { ...savedCloudSetup, mode } },
   })
   const view = h.render(h.load('Library.tsx').Library, libraryProps)
   button(view.tree, 'Song analysis settings').props.onClick(); await view.settle(); await view.settle()
@@ -252,7 +362,8 @@ test('failed readiness does not send a locally saved Cloud Job back through setu
   const h = harness({
     cloudStatus: async () => ({ mode: 'local', configured: false, available: true,
       jobCreated: true, issue: 'Synthetic Azure access failure' }),
-    setProcessingMode: async (mode) => mode,
+    setProcessingModeWithStatus: async (mode) => ({ ...savedCloudSetup, mode,
+      issue: 'Synthetic Azure access failure' }),
   })
   const view = h.render(h.load('Library.tsx').Library, libraryProps)
   button(view.tree, 'Song analysis settings').props.onClick(); await view.settle()
@@ -269,7 +380,7 @@ test('failed readiness does not send a locally saved Cloud Job back through setu
 test('invalid local Cloud selection shows an error without changing the selected mode', async () => {
   const h = harness({
     cloudStatus: async () => ({ mode: 'local', configured: false, jobCreated: true }),
-    setProcessingMode: async () => { throw new h.HostError('Selected model is not supported') },
+    setProcessingModeWithStatus: async () => { throw new h.HostError('Selected model is not supported') },
   })
   const view = h.render(h.load('Library.tsx').Library, libraryProps)
   button(view.tree, 'Song analysis settings').props.onClick(); await view.settle()

@@ -1951,6 +1951,8 @@ def set_mode(mode):
         if (_setting("transcription_model") or "muscriptor-small") not in check["supportedModels"]:
             raise CloudError("The selected MuScriptor size is not supported by this Cloud worker.")
     _setting("processing_mode", mode)
+    if mode == "cloud":
+        return {**check, "ok": True, "mode": mode}
     return {"ok": True, "mode": mode}
 
 

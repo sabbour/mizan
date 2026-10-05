@@ -159,6 +159,44 @@ def test_cancel_cloud_setup_only_signals_active_provision(api):
     assert bridge.cancel_cloud_status("unknown-request") == {"ok": True, "cancelRequested": False}
 
 
+def test_cloud_mode_api_returns_saved_setup_without_live_readiness(api, monkeypatch):
+    from mizan import cloud
+    from test_cloud import SETUP
+
+    bridge, runner = api
+    config = {**SETUP, "userObjectId": "dddddddd-dddd-dddd-dddd-dddddddddddd"}
+    cloud._setting("cloud_config", json.dumps(config))
+    cloud._setting("cloud_prepared", json.dumps(config))
+    cloud._setting("cloud_environment_ready", "yes")
+    cloud._setting("cloud_job_created",
+                   f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@{cloud.SUPPORTED_WORKER_DIGEST}")
+    cloud._setting("transcription_model", "muscriptor-large")
+    monkeypatch.setattr(cloud, "_job_capabilities",
+                        lambda *_args: pytest.fail("Cloud mode save ran live readiness"))
+    monkeypatch.setattr(cloud, "panel_status",
+                        lambda *_args: pytest.fail("Cloud mode save launched a panel check"))
+
+    result = bridge.set_processing_mode("cloud")
+
+    assert result["ok"] and result["mode"] == "cloud"
+    assert result["config"]["environment"] == SETUP["environment"]
+    assert result["prepared"] and result["jobCreated"]
+    assert result["configured"] is False
+    assert "userObjectId" not in result["config"]
+    assert runner.store.get_transcription_model() == "muscriptor-large"
+
+
+def test_local_mode_api_succeeds_when_saved_cloud_config_is_malformed(api):
+    from mizan import cloud
+
+    bridge, _ = api
+    cloud._setting("cloud_config", "{")
+    cloud._setting("processing_mode", "cloud")
+
+    assert bridge.set_processing_mode("local") == {"ok": True, "mode": "local"}
+    assert cloud._setting("processing_mode") == "local"
+
+
 def test_add_link_deduplicates_only_same_selected_provider_and_model(monkeypatch):
     from mizan import cloud
 

@@ -45,6 +45,7 @@ export type CloudStatus = {
   loggingConfigured?: boolean
   loggingLocation?: string
 }
+export type ProcessingModeResult = { mode: ProcessingMode } & Partial<Omit<CloudStatus, 'mode'>>
 export type CloudPrepared = {
   prepared: boolean
   configured: false
@@ -264,8 +265,10 @@ export const host = {
     call<{ image: string; digest: string }>('build_cloud_worker'),
   finishCloud: (image: string, useSavedToken: boolean) =>
     call<CloudStatus & { next: string }>('finish_cloud', image, useSavedToken),
-  setProcessingMode: (mode: ProcessingMode) =>
-    call<{ mode: ProcessingMode }>('set_processing_mode', mode).then((r) => r.mode),
+  setProcessingMode: async (mode: ProcessingMode) =>
+    (await call<ProcessingModeResult>('set_processing_mode', mode)).mode,
+  setProcessingModeWithStatus: (mode: ProcessingMode) =>
+    call<ProcessingModeResult>('set_processing_mode', mode),
   clearCloud: () => call<CloudStatus>('clear_cloud'),
   modelDownloadStatus: () => call<{ models: ModelDownloads }>('model_download_status').then((r) => r.models),
   modelPreflight: () => call<{ models: ModelPreflight }>('model_preflight').then((r) => r.models),

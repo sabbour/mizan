@@ -2320,7 +2320,7 @@ def test_cloud_large_choice_is_immediate_while_live_readiness_is_blocked(signed_
     cloud._setting("cloud_job_created", "synthetic-image")
     cloud._setting("transcription_model", "muscriptor-large")
     cloud._setting("processing_mode", "local")
-    monkeypatch.setattr(cloud, "READINESS_TIMEOUT", 0.08)
+    monkeypatch.setattr(cloud, "READINESS_TIMEOUT", 1.0)
     entered, release = threading.Event(), threading.Event()
 
     def blocked(*_args):
@@ -2334,7 +2334,10 @@ def test_cloud_large_choice_is_immediate_while_live_readiness_is_blocked(signed_
         try:
             assert entered.wait(3)
             started = time.monotonic()
-            assert cloud.set_mode("cloud") == {"ok": True, "mode": "cloud"}
+            selected = cloud.set_mode("cloud")
+            assert selected["ok"] and selected["mode"] == "cloud"
+            assert selected["jobCreated"] and selected["config"]["jobName"] == CONFIG["jobName"]
+            assert not selected["configured"]
             assert time.monotonic() - started < 0.5
             assert not pending.done()
             assert cloud._setting("processing_mode") == "cloud"
@@ -2349,6 +2352,38 @@ def test_cloud_large_choice_is_immediate_while_live_readiness_is_blocked(signed_
         finally:
             release.set()
             assert cloud._readiness_check.done.wait(3)
+
+
+def test_cloud_selection_returns_saved_snapshot_without_live_readiness(signed_in, monkeypatch):
+    config = {**SETUP, "userObjectId": "dddddddd-dddd-dddd-dddd-dddddddddddd"}
+    image = f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@{cloud.SUPPORTED_WORKER_DIGEST}"
+    cloud._setting("cloud_config", json.dumps(config))
+    cloud._setting("cloud_prepared", json.dumps(config))
+    cloud._setting("cloud_environment_ready", "yes")
+    cloud._setting("cloud_job_created", image)
+    cloud._setting("cloud_job_resources", json.dumps(cloud.JOB_RESOURCES))
+    cloud._setting("transcription_model", "muscriptor-large")
+    cloud._setting("processing_mode", "local")
+    monkeypatch.setattr(cloud, "_job_capabilities",
+                        lambda *_args: pytest.fail("Cloud preference save ran live readiness"))
+
+    result = cloud.set_mode("cloud")
+
+    assert result["ok"] and result["mode"] == "cloud"
+    assert result["config"]["resourceGroup"] == SETUP["resourceGroup"]
+    assert result["config"]["environment"] == SETUP["environment"]
+    assert result["prepared"] and result["jobCreated"]
+    assert result["configured"] is False
+    assert "userObjectId" not in result["config"]
+    assert cloud._setting("processing_mode") == "cloud"
+
+
+def test_local_selection_succeeds_with_malformed_saved_cloud_config():
+    cloud._setting("cloud_config", "{")
+    cloud._setting("processing_mode", "cloud")
+
+    assert cloud.set_mode("local") == {"ok": True, "mode": "local"}
+    assert cloud._setting("processing_mode") == "local"
 
 
 @pytest.mark.parametrize("invalid,reason", [
