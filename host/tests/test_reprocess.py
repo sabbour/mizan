@@ -77,8 +77,8 @@ def test_reprocess_api_reuses_exact_audio_and_deduplicates(saved_recording, monk
         entered.set()
         assert release.wait(5)
 
-        def progress(stage, value):
-            report(stage, value)
+        def progress(stage, value, **kwargs):
+            report(stage, value, **kwargs)
             snapshots.append(queue_job(runner.store.get(job["id"])))
 
         return pipeline.run_pipeline(job, progress, cancelled)
@@ -153,7 +153,7 @@ def test_reprocess_reuses_only_matching_six_stems(saved_recording, monkeypatch, 
         {name: Audio(np.zeros_like(mix.samples), mix.rate) for name in SOURCES},
         {"method": "htdemucs-6s-onnx", "provider": {"effectiveProviders": ["CPU"]}, "warnings": []}))
     monkeypatch.setattr(pipeline, "_demucs", separator)
-    result = pipeline.run_pipeline(reprocess_job(entry), lambda *args: None, Event())
+    result = pipeline.run_pipeline(reprocess_job(entry), lambda *args, **kwargs: None, Event())
     diagnostics = result["diagnostics"]["separate"]
     if damage is None:
         separator.assert_not_called()
@@ -202,7 +202,7 @@ def test_cached_cancel_never_deletes_prior_cache(saved_recording, monkeypatch, c
     forbid_ingestion(monkeypatch)
     job, event = reprocess_job(entry), Event()
 
-    def report(stage, progress):
+    def report(stage, progress, **kwargs):
         if stage == cancel_stage and progress == 1:
             event.set()
             raise Cancelled()
@@ -264,7 +264,7 @@ def test_bad_cached_audio_falls_back_explicitly(saved_recording, monkeypatch, da
         spies[name] = Mock(wraps=getattr(pipeline, name))
         monkeypatch.setattr(pipeline, name, spies[name])
     job = reprocess_job(entry)
-    result = pipeline.run_pipeline(job, lambda *args: None, Event())
+    result = pipeline.run_pipeline(job, lambda *args, **kwargs: None, Event())
     for spy in spies.values():
         spy.assert_called_once()
     assert any("downloading from YouTube again" in warning for warning in result["warnings"])
@@ -300,7 +300,7 @@ def test_valid_original_used_when_mix_is_bad(saved_recording, monkeypatch):
         "song_id": entry["id"], "url": URL,
         "details": {"artifacts": {**entry["artifacts"], "mix": str(broken)}},
     }, "v4")
-    result = pipeline.run_pipeline(reprocess_job(entry), lambda *args: None, Event())
+    result = pipeline.run_pipeline(reprocess_job(entry), lambda *args, **kwargs: None, Event())
     assert Path(result["artifacts"]["original"]).read_bytes() == original.read_bytes()
     assert broken.read_bytes() == b"not a wav"
 
@@ -329,7 +329,7 @@ def test_cache_trust_boundary(saved_recording, monkeypatch, tmp_path, mismatch):
         }, "v3")
     copied = Mock(wraps=pipeline.copy_decoded)
     monkeypatch.setattr(pipeline, "copy_decoded", copied)
-    result = pipeline.run_pipeline(job, lambda *args: None, Event())
+    result = pipeline.run_pipeline(job, lambda *args, **kwargs: None, Event())
     copied.assert_not_called()
     assert any("downloading from YouTube again" in warning for warning in result["warnings"])
     assert original.read_bytes() == before
@@ -343,7 +343,7 @@ def test_job_details_cannot_supply_audio_paths(saved_recording, monkeypatch):
     job["details"] = {"sourcePath": str(original), "artifacts": entry["artifacts"]}
     download = Mock(wraps=pipeline.download_video)
     monkeypatch.setattr(pipeline, "download_video", download)
-    pipeline.run_pipeline(job, lambda *args: None, Event())
+    pipeline.run_pipeline(job, lambda *args, **kwargs: None, Event())
     download.assert_called_once()
 
 
@@ -386,7 +386,7 @@ def test_copy_disk_failure_does_not_redownload_or_delete_source(saved_recording,
     monkeypatch.setattr(pipeline, "copy_decoded", Mock(side_effect=OSError(errno.ENOSPC, "disk full")))
     job = reprocess_job(entry)
     with pytest.raises(InsufficientDisk):
-        pipeline.run_pipeline(job, lambda *args: None, Event())
+        pipeline.run_pipeline(job, lambda *args, **kwargs: None, Event())
     assert original.read_bytes() == before
     assert not (app_dir("tmp") / job["id"]).exists()
 

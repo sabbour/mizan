@@ -242,7 +242,9 @@ async function call<T = object>(name: string, ...args: unknown[]): Promise<T> {
 let subscriptionsRequest: Promise<AzureSubscription[]> | null = null
 
 export const host = {
-  cloudStatus: () => call<CloudStatus>('cloud_status'),
+  cloudStatus: (requestId?: string) => call<CloudStatus>('cloud_status', requestId ?? null),
+  cancelCloudStatus: (requestId: string) =>
+    call<{ cancelRequested: boolean }>('cancel_cloud_status', requestId),
   cloudSetupProgress: () => call<CloudSetupProgress>('cloud_setup_progress'),
   cancelCloudSetup: () => call<{ cancelRequested: boolean }>('cancel_cloud_setup'),
   azureSubscriptions: () => {

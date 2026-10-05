@@ -87,6 +87,21 @@ and Job are not yet ready. A developer's CLI-token
 pilot does **not** verify any customer's Azure identity.
 `set_processing_mode("cloud")` returns `cloud_failed` until customer preflight succeeds. `configure_cloud`
 validates and stores nonsecret identifiers **without provisioning Azure resources**.
+Once selected, Cloud remains selected across restarts and temporary readiness failures.
+New analysis and Redo analysis snapshot the selected processing mode and MuScriptor
+size; queued jobs and retries keep that snapshot. A Cloud job that cannot pass
+execution preflight fails explicitly rather than using local model inference.
+Adding a YouTube link creates its queue entry before fetching video metadata;
+inspection errors are reported by that job, and the UI shows pending submission
+and prevents duplicate clicks while the host is accepting it.
+The Song analysis panel checks Azure asynchronously with a 15-second overall
+readiness deadline. Concurrent panel checks share the same read-only verification,
+and successful results are reused for up to 30 seconds; execution preflight still
+checks Azure again before starting GPU work. Closing the panel or choosing
+Cancel check cancels only that request, never provisioning or an analysis job.
+An in-progress Azure credential request may finish in the background, but a
+cancelled or timed-out check does not continue subsequent readiness requests or
+overwrite newer UI state.
 Only after explicit cost consent, `prepare_cloud` creates a dedicated resource
 group in the chosen subscription, private Blob storage/container, a one-day `jobs/` expiry
 policy, authenticated ACR, user-assigned identity and an ACA environment with an
@@ -133,6 +148,13 @@ The pilot's validated image digest is
 `sha256:5fe0f3b2fc894a8e9c3079baf3cc59f0f3b297ab049bc730d59882bfb8b79c5a`.
 A build in another registry gets its own digest; the Job must use that
 registry's completed-build digest, not a mutable tag or the pilot digest.
+Existing-job adoption also accepts 8 vCPU / 32 GiB on the same A100 profile.
+Readiness recognizes the authorized upgrade from a saved 2/8 or 4/16 pair to
+8/32 without changing Azure resources or transferring secrets; unchanged
+ephemeral storage, image, identity, secret binding and private-storage checks
+remain required. Other resource mismatches and downgrades remain unready.
+This compatibility is not evidence that Large succeeds or that 32 GiB is its
+minimum memory requirement.
 Sweden Central's stated component rates are $0.000688/GPU-s,
 $0.000024/vCPU-s and $0.000003/GiB-s, roughly $0.000760/s for 2/8 and
 $0.175 for the 230-second Large worker run before other charges; check
