@@ -30,11 +30,100 @@ WORKER_ERROR_STAGES = {
     "startup", "credentials", "storage", "download", "separate",
     "transcribe", "upload_stems", "upload_result",
 }
+MODEL_EXECUTION_BUDGETS = {
+    "muscriptor-small": (2, 8),
+    "muscriptor-medium": (4, 16),
+    "muscriptor-large": (8, 32),
+}
 logger = logging.getLogger(__name__)
 
 
 class CloudTransportError(Exception):
     pass
+
+
+def _model_execution_budget(model: str) -> tuple[int, int]:
+    if not isinstance(model, str) or model not in MODEL_EXECUTION_BUDGETS:
+        raise CloudTransportError("The selected MuScriptor size is not supported by this Cloud worker.")
+    return MODEL_EXECUTION_BUDGETS[model]
+
+
+def _execution_resources(model: str, resources: dict) -> dict:
+    cpu_budget, memory_budget = _model_execution_budget(model)
+    if not isinstance(resources, dict):
+        raise CloudTransportError("The Azure GPU Job has invalid container resources.")
+    cpu = resources.get("cpu")
+    if isinstance(cpu, bool) or not isinstance(cpu, (int, float)):
+        raise CloudTransportError("The Azure GPU Job has invalid container CPU resources.")
+    try:
+        cpu_value = float(cpu)
+    except (OverflowError, ValueError):
+        raise CloudTransportError("The Azure GPU Job has invalid container CPU resources.") from None
+    if not math.isfinite(cpu_value) or cpu_value <= 0:
+        raise CloudTransportError("The Azure GPU Job has invalid container CPU resources.")
+    memory = resources.get("memory")
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)Gi", memory) if isinstance(memory, str) else None
+    memory_value = float(match.group(1)) if match else 0
+    if not math.isfinite(memory_value) or memory_value <= 0:
+        raise CloudTransportError("The Azure GPU Job has invalid container memory resources.")
+    result = copy.deepcopy(resources)
+    if cpu_value < cpu_budget:
+        result["cpu"] = cpu_budget
+    if memory_value < memory_budget:
+        result["memory"] = f"{memory_budget}Gi"
+    return result
+
+
+def _execution_template(job: dict, model: str, source: str, result: str,
+                        config: dict) -> dict:
+    _model_execution_budget(model)
+    properties = job.get("properties") if isinstance(job, dict) else None
+    template = properties.get("template") if isinstance(properties, dict) else None
+    if not isinstance(template, dict):
+        raise CloudTransportError("The Azure GPU Job has an invalid execution template.")
+    execution = copy.deepcopy(template)
+    containers = execution.get("containers")
+    if not isinstance(containers, list) or not containers:
+        raise CloudTransportError("The Azure GPU Job has an invalid container template.")
+
+    required = {"HF_TOKEN", "AZURE_STORAGE_BLOB_URL", "AZURE_STORAGE_CONTAINER",
+                "AZURE_CLIENT_ID"}
+    candidates = []
+    for index, container in enumerate(containers):
+        if not isinstance(container, dict):
+            raise CloudTransportError("The Azure GPU Job has an invalid container template.")
+        env = container.get("env")
+        if not isinstance(env, list):
+            continue
+        environment = {
+            item["name"]: item for item in env
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+        if required <= environment.keys():
+            candidates.append((index, environment))
+    if len(candidates) != 1:
+        raise CloudTransportError("The Azure GPU Job must have exactly one configured worker container.")
+
+    index, environment = candidates[0]
+    container = containers[index]
+    if not all(isinstance(container.get(key), str) and container[key]
+               for key in ("name", "image")) or "resources" not in container:
+        raise CloudTransportError("The Azure GPU Job has an incomplete worker container template.")
+    storage_account = config.get("storageAccount")
+    storage_container = config.get("container")
+    if (not isinstance(storage_account, str) or not storage_account
+            or not isinstance(storage_container, str) or not storage_container
+            or not isinstance(environment["HF_TOKEN"].get("secretRef"), str)
+            or not environment["HF_TOKEN"]["secretRef"]
+            or environment["AZURE_STORAGE_BLOB_URL"].get("value")
+               != f"https://{storage_account}.blob.core.windows.net"
+            or environment["AZURE_STORAGE_CONTAINER"].get("value") != storage_container
+            or not isinstance(environment["AZURE_CLIENT_ID"].get("value"), str)
+            or not environment["AZURE_CLIENT_ID"]["value"]):
+        raise CloudTransportError("The GPU Job must bind a Hugging Face secret and private Blob identity.")
+    container["resources"] = _execution_resources(model, container["resources"])
+    container["args"] = [source, result, model]
+    return execution
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -401,6 +490,7 @@ class CloudTransport:
         stage = "starting"
         started_at = time.monotonic()
         last_status = None
+        _model_execution_budget(model)
         logger.info("Cloud GPU run started run_id=%s model=%s", run_id, model)
         try:
             if cancelled.is_set():
@@ -414,27 +504,15 @@ class CloudTransport:
             report("detect", 0, message="Checking Azure GPU Job")
             stage = "reading Job template"
             template = self._job_template(cancelled)
-            containers = template.get("properties", {}).get("template", {}).get("containers", [])
-            if len(containers) != 1:
-                raise CloudTransportError("The Azure GPU Job must have exactly one configured container.")
-            container = copy.deepcopy(containers[0])
-            if not all(key in container for key in ("name", "image", "resources")):
-                raise CloudTransportError("The Azure GPU Job has an incomplete container template.")
-            environment = {item.get("name"): item for item in container.get("env", [])}
-            if (not environment.get("HF_TOKEN", {}).get("secretRef")
-                    or environment.get("AZURE_STORAGE_BLOB_URL", {}).get("value")
-                       != f"https://{self.config['storageAccount']}.blob.core.windows.net"
-                    or environment.get("AZURE_STORAGE_CONTAINER", {}).get("value") != self.config["container"]
-                    or not environment.get("AZURE_CLIENT_ID", {}).get("value")):
-                raise CloudTransportError("The GPU Job must bind a Hugging Face secret and private Blob identity.")
+            execution_template = _execution_template(
+                template, model, source, result, self.config)
             if cancelled.is_set():
                 raise Cancelled()
-            container["args"] = [source, result, model]
             report("detect", 0, message="Starting Azure GPU Job")
             stage = "submitting execution"
             start_submitted = True
             started, location = self._arm(
-                "/start", method="POST", payload={"containers": [container]},
+                "/start", method="POST", payload=execution_template,
                 cancelled=cancelled)
             execution = started.get("name")
             if not execution and location:

@@ -23,7 +23,7 @@ CONFIG = {
 def job_template():
     return {"properties": {"template": {"containers": [{
         "name": "gpu", "image": "private.azurecr.io/mizan@sha256:test",
-        "resources": {"cpu": 8, "memory": "56Gi"},
+        "resources": {"cpu": 2, "memory": "8Gi"},
         "env": [
             {"name": "HF_TOKEN", "secretRef": "hf-token"},
             {"name": "AZURE_CLIENT_ID", "value": "identity-client"},
@@ -95,9 +95,25 @@ def test_http_failure_logs_request_id_without_bearer_token(monkeypatch, caplog):
     assert secret not in caplog.text
 
 
-def test_job_uses_per_execution_args_and_never_mutates_shared_template(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("model", "resources"), [
+    ("muscriptor-small", {"cpu": 2, "memory": "8Gi"}),
+    ("muscriptor-medium", {"cpu": 4, "memory": "16Gi"}),
+    ("muscriptor-large", {"cpu": 8, "memory": "32Gi"}),
+])
+def test_job_uses_per_execution_model_budget_and_preserves_template(
+        monkeypatch, tmp_path, model, resources):
     transport = CloudTransport(CONFIG)
     original = job_template()
+    template = original["properties"]["template"]
+    template["initContainers"] = [{"name": "prepare", "image": "helper:latest", "args": ["keep"]}]
+    template["volumes"] = [{"name": "cache", "storageType": "EmptyDir"}]
+    template["scale"] = {"minExecutions": 0, "maxExecutions": 1, "rules": []}
+    template["containers"].append({
+        "name": "sidecar", "image": "sidecar:latest", "args": ["unchanged"],
+        "resources": {"cpu": 0.25, "memory": "1Gi"},
+        "env": [{"name": "SIDE", "value": "car"}],
+    })
+    before = json.loads(json.dumps(original))
     calls = []
     reports = []
 
@@ -108,7 +124,7 @@ def test_job_uses_per_execution_args_and_never_mutates_shared_template(monkeypat
     monkeypatch.setattr(transport, "_put", put)
     monkeypatch.setattr(transport, "_get",
                         lambda name, path, *, limit, **kwargs:
-                        path.write_text('{"model":"muscriptor-small"}'))
+                        path.write_text(json.dumps({"model": model})))
 
     def arm(suffix="", *, method="GET", payload=None, **kwargs):
         if not suffix:
@@ -125,20 +141,85 @@ def test_job_uses_per_execution_args_and_never_mutates_shared_template(monkeypat
         return {"properties": {"status": "Succeeded"}}, None
 
     monkeypatch.setattr(transport, "_arm", arm)
-    result, names = transport.run(tmp_path / "source.wav", tmp_path, "muscriptor-small", Event(),
+    result, names = transport.run(tmp_path / "source.wav", tmp_path, model, Event(),
                                   lambda stage, progress, **kwargs:
                                   reports.append((stage, progress, kwargs.get("message"))))
-    assert result == {"model": "muscriptor-small"}
+    assert result == {"model": model}
     assert len(names) == 8 and names[0].endswith("/input.wav")
     started = next(call for call in calls if call[1] == "/start")
-    assert started[2]["containers"][0]["args"] == [
-        names[0], names[1], "muscriptor-small"]
+    expected = json.loads(json.dumps(before["properties"]["template"]))
+    expected["containers"][0]["args"] = [names[0], names[1], model]
+    expected["containers"][0]["resources"] = resources
+    assert started[2] == expected
+    assert started[2]["containers"][0]["args"] == [names[0], names[1], model]
     assert started[2]["containers"][0]["env"][0] == {"name": "HF_TOKEN", "secretRef": "hf-token"}
-    assert "args" not in original["properties"]["template"]["containers"][0]
+    assert original == before
     assert [message for stage, _, message in reports if stage == "detect"][:5] == [
         "Connecting to Azure GPU processing", "Uploading prepared audio",
         "Checking Azure GPU Job", "Starting Azure GPU Job", "Waiting for Azure GPU Job"]
     assert all(progress == 0 for stage, progress, _ in reports if stage == "detect")
+
+
+def test_large_execution_budget_never_reduces_existing_resources(monkeypatch, tmp_path):
+    from mizan.cloud_transport import _execution_template
+
+    template = job_template()
+    container = template["properties"]["template"]["containers"][0]
+    container["resources"] = {"cpu": 12, "memory": "64Gi", "ephemeralStorage": "20Gi"}
+    original = json.loads(json.dumps(template))
+    execution = _execution_template(template, "muscriptor-large", "input.wav", "result.json", CONFIG)
+    worker = execution["containers"][0]
+    assert worker["resources"] == {"cpu": 12, "memory": "64Gi", "ephemeralStorage": "20Gi"}
+    assert template == original
+
+
+@pytest.mark.parametrize(("current", "expected"), [
+    ({"cpu": 12, "memory": "8Gi"}, {"cpu": 12, "memory": "32Gi"}),
+    ({"cpu": 2, "memory": "64Gi"}, {"cpu": 8, "memory": "64Gi"}),
+])
+def test_execution_budget_uses_componentwise_max(current, expected):
+    from mizan.cloud_transport import _execution_resources
+
+    assert _execution_resources("muscriptor-large", current) == expected
+
+
+def test_unknown_model_fails_before_upload_or_job_start(monkeypatch, tmp_path):
+    transport = CloudTransport(CONFIG)
+    monkeypatch.setattr(transport, "_put", lambda *args, **kwargs:
+                        pytest.fail("Unknown model must fail before upload"))
+    monkeypatch.setattr(transport, "_arm", lambda *args, **kwargs:
+                        pytest.fail("Unknown model must fail before Job start"))
+    with pytest.raises(CloudTransportError, match="size is not supported"):
+        transport.run(tmp_path / "source.wav", tmp_path, "muscriptor-next", Event(),
+                      lambda *args, **kwargs: None)
+
+
+@pytest.mark.parametrize(("cpu", "memory", "message"), [
+    (0, "8Gi", "CPU"),
+    (2, "512Mi", "memory"),
+])
+def test_invalid_job_resources_fail_before_start_and_clean_uploads(
+        monkeypatch, tmp_path, cpu, memory, message):
+    transport = CloudTransport(CONFIG)
+    template = job_template()
+    template["properties"]["template"]["containers"][0]["resources"] = {
+        "cpu": cpu, "memory": memory,
+    }
+    deleted = []
+    arm_calls = []
+    monkeypatch.setattr(transport, "_put", lambda *args, **kwargs: None)
+    monkeypatch.setattr(transport, "delete", lambda names: deleted.append(names))
+
+    def arm(suffix="", **kwargs):
+        arm_calls.append(suffix)
+        return template, None
+
+    monkeypatch.setattr(transport, "_arm", arm)
+    with pytest.raises(CloudTransportError, match=message):
+        transport.run(tmp_path / "source.wav", tmp_path, "muscriptor-large", Event(),
+                      lambda *args, **kwargs: None)
+    assert "/start" not in arm_calls
+    assert len(deleted) == 1 and len(deleted[0]) == 8
 
 
 def test_open_retries_transient_tls_timeout_then_succeeds(monkeypatch):

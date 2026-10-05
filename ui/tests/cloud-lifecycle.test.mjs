@@ -161,6 +161,38 @@ test('slow Azure dialog opens immediately, shows checking, and never guesses Loc
   view.unmount()
 })
 
+test('unknown Cloud model catalog keeps choices available; known omission is unsupported', async () => {
+  const h = harness({
+    cloudStatus: async () => ({ mode: 'cloud', configured: false, available: true, jobCreated: true }),
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick()
+  await view.settle(); await view.settle()
+  const choices = nodes(view.tree, (node) => node.type === 'input'
+    && node.props.name === 'transcription-model')
+  assert.equal(choices.length, 3)
+  assert.deepEqual(choices.map((choice) => choice.props.disabled), [false, false, false], text(view.tree))
+  assert.match(text(view.tree), /Cloud worker model support has not been checked/)
+  assert.doesNotMatch(text(view.tree), /Not supported by this Cloud worker/)
+  view.unmount()
+
+  const known = harness({
+    cloudStatus: async () => ({ mode: 'cloud', configured: false, available: true,
+      jobCreated: true, supportedModels: ['muscriptor-small'] }),
+  })
+  const knownView = known.render(known.load('Library.tsx').Library, libraryProps)
+  button(knownView.tree, 'Song analysis settings').props.onClick()
+  await knownView.settle(); await knownView.settle()
+  const knownChoices = nodes(knownView.tree, (node) => node.type === 'input'
+    && node.props.name === 'transcription-model')
+  assert.equal(knownChoices[0].props.disabled, false)
+  assert.equal(knownChoices[1].props.disabled, true)
+  assert.equal(knownChoices[2].props.disabled, true)
+  assert.equal(nodes(knownView.tree, (node) => node.type === 'small'
+    && text(node) === 'Not supported by this Cloud worker').length, 2)
+  knownView.unmount()
+})
+
 test('Cloud intent is saved during blocked readiness without claiming Azure is ready', async () => {
   const status = deferred(), chosen = [], cancelled = []
   const h = harness({

@@ -303,6 +303,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     setCloudWizardOpen(false)
     settingsButton.current?.focus()
   }
+  const cloudModelSupportKnown = Array.isArray(cloud?.supportedModels)
   const chooseMode = async (mode: ProcessingMode) => {
     const readinessCancelled = cloudStatusChecking
     if (readinessCancelled) cloudStatusCancelRef.current?.()
@@ -585,6 +586,8 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
                 onClick={() => cloudError || !cloud ? void checkCloudStatus() : openCloudWizard()}>
                 {cloudActionText}
               </button>
+              {cloud?.mode === 'cloud' && !cloudModelSupportKnown
+                && <p className="model-settings-source" role="status">Cloud worker model support has not been checked; model choices remain available.</p>}
               {cloudStatusChecking && <button type="button" className="btn btn-quiet" onClick={() => {
                 cloudStatusCancelRef.current?.()
                 setCloudError('Azure readiness check cancelled. Processing selection is unchanged.')
@@ -608,13 +611,14 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
                     <label className="model-settings-choice">
                       <input type="radio" name="transcription-model" value={choice.id} checked={model === choice.id}
                         disabled={cloud?.mode === 'cloud'
-                          ? !cloud.supportedModels?.includes(choice.id)
+                        ? cloudModelSupportKnown && cloud.supportedModels?.includes(choice.id) === false
                           : !capacity?.eligible}
                         onChange={() => void chooseModel(choice.id)} />
                       <span><strong>{choice.label}</strong>
                         <small>{choice.detail}</small>
                         <small className="model-settings-metadata">{choice.info} · {cloud?.mode === 'cloud' ? 'Azure GPU' : 'CPU'}</small>
-                        {cloud?.mode === 'cloud' && !cloud.supportedModels?.includes(choice.id)
+                        {cloud?.mode === 'cloud' && cloudModelSupportKnown
+                          && cloud.supportedModels?.includes(choice.id) === false
                           && <small className="model-settings-incompatible">Not supported by this Cloud worker</small>}
                         {cloud?.mode !== 'cloud' && <small className={capacity?.reason ? 'model-settings-incompatible' : ''}>
                           {capacity?.reason ?? (capacity

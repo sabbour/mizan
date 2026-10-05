@@ -37,6 +37,7 @@ export type CloudStatus = {
   requiresHfTokenConsent?: boolean
   verified?: boolean
   verifiedModels?: TranscriptionModel[]
+  /** Missing means model support is unknown; an explicit list is authoritative. */
   supportedModels?: TranscriptionModel[]
   existingPilot?: boolean
   workerDigest?: string | null
