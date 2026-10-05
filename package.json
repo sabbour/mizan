@@ -1,0 +1,13 @@
+{
+  "name": "mizan",
+  "private": true,
+  "version": "0.2.6",
+  "scripts": {
+    "changeset": "changeset",
+    "changeset:status": "changeset status",
+    "changeset:version": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.7"
+  }
+}

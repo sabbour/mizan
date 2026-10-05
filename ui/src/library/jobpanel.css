@@ -1,0 +1,695 @@
+/* Job panel: slides over the library from the right; the queue stays live behind it. */
+
+.jp {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 40;
+  width: min(480px, 100vw);
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+  color: var(--ink);
+  background: #ffffff;
+  box-shadow: -18px 0 48px rgb(17 17 17 / 0.09), -2px 0 6px rgb(17 17 17 / 0.04);
+  animation: jp-in 420ms var(--ease) both;
+}
+
+@keyframes jp-in {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+
+.jp ::selection {
+  background: var(--accent-wash);
+}
+
+.jp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 16px 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.jp-thumb {
+  display: block;
+  width: 64px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--chrome);
+  object-fit: cover;
+}
+
+.jp-id {
+  min-width: 0;
+}
+
+.jp-id h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+}
+
+.jp-id p {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  align-content: start;
+  padding: 24px 24px 40px;
+}
+
+.jp[data-status='done'] .jp-body {
+  padding-bottom: 96px;
+}
+
+.jp-ready {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: min(480px, 100vw);
+  box-sizing: border-box;
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+  font-weight: 600;
+}
+
+/* The one number worth reading: time left */
+
+.jp-lead {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  font-variation-settings: 'wdth' 106;
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+
+.jp[data-status='failed'] .jp-lead {
+  color: var(--danger);
+}
+
+.jp-sub {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.jp-elapsed {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.jp-bar {
+  margin-top: 14px;
+}
+
+.jp-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.jp-actions:empty {
+  display: none;
+}
+
+.jp-error {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgb(179 38 30 / 0.06);
+  font-size: 14px;
+}
+
+.jp-error p {
+  margin: 0;
+}
+
+.jp-error p + p {
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+.jp-error strong {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.jp-incomplete {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--accent-wash);
+  font-size: 14px;
+}
+
+.jp-incomplete p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+}
+
+.jp-limits {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-2);
+}
+
+.jp-limits summary {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.jp-limits summary .num {
+  margin-left: 5px;
+  color: var(--ink-3);
+}
+
+.jp-warnings {
+  margin: 0;
+  padding: 4px 20px 14px 32px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.jp-warnings li + li {
+  margin-top: 5px;
+}
+
+.jp-level-note {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Found so far */
+
+.jp-h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+
+.jp-found {
+  display: grid;
+  gap: 16px;
+}
+
+.jp-found .jp-h3 {
+  margin: 0 0 -4px;
+}
+
+.jp-none {
+  margin: 0;
+  font-size: 14px;
+}
+
+.jp-reveal {
+  animation: jp-reveal 560ms var(--ease) both;
+}
+
+@keyframes jp-reveal {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(5px);
+  }
+}
+
+.jp-detect {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.jp-detect div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+}
+
+.jp-detect dt {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.jp-detect dd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.jp-detect .meter {
+  width: 160px;
+}
+
+.jp-facts {
+  display: flex;
+  gap: 32px;
+  margin: 0;
+}
+
+.jp-facts dt {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.jp-facts dd {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.jp-listen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.jp-play {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  color: #ffffff;
+  background: var(--ink);
+  cursor: pointer;
+  transition: background 160ms var(--ease), transform 160ms var(--ease);
+}
+
+.jp-play:hover {
+  background: #2b2e31;
+}
+
+.jp-play:active {
+  transform: scale(0.95);
+}
+
+.jp-seg {
+  display: flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--chrome);
+}
+
+.jp-seg button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  background: none;
+  cursor: pointer;
+}
+
+.jp-seg button:hover {
+  color: var(--ink);
+}
+
+.jp-seg button[aria-checked='true'] {
+  color: var(--ink);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(17 17 17 / 0.12);
+}
+
+/* Steps */
+
+.jp-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-steps li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.jp-steps li + li {
+  border-top: 1px solid var(--line);
+}
+
+.jp-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 50%;
+}
+
+.jp-steps [data-state='done'] .jp-dot {
+  border-color: var(--ink);
+  color: #ffffff;
+  background: var(--ink);
+}
+
+.jp-steps [data-state='failed'] .jp-dot {
+  border-color: var(--danger);
+  color: #ffffff;
+  background: var(--danger);
+}
+
+.jp-steps [data-state='cancelled'] .jp-dot {
+  border-color: var(--ink-2);
+  color: var(--ink-2);
+}
+
+.jp-steps [data-state='now'] .jp-dot {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 3.5px, transparent 4px);
+  animation: jp-pulse 1.6s var(--ease) infinite;
+}
+
+@keyframes jp-pulse {
+  50% {
+    box-shadow: 0 0 0 4px var(--accent-wash);
+  }
+}
+
+.jp-steps [data-state='todo'],
+.jp-steps [data-state='queued'],
+.jp-steps [data-state='not-run'] {
+  color: var(--ink-3);
+}
+
+.jp-steps [data-state='now'] .jp-step,
+.jp-steps [data-state='now'] .jp-time {
+  color: var(--accent-deep);
+  font-weight: 650;
+}
+
+.jp-steps [data-state='failed'] .jp-time {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.jp-step { overflow-wrap: anywhere; }
+
+.jp-time {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.jp-steps [data-state='todo'] .jp-time,
+.jp-steps [data-state='queued'] .jp-time,
+.jp-steps [data-state='not-run'] .jp-time {
+  color: var(--ink-3);
+}
+
+/* Technical detail */
+
+.jp-tech {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+
+.jp-tech summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.jp-tech summary::-webkit-details-marker {
+  display: none;
+}
+
+.jp-tech summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 180ms var(--ease);
+}
+
+.jp-tech[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.jp-tech summary:hover {
+  color: var(--ink);
+}
+
+.jp-stage-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-stage {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.jp-stage[data-active] {
+  margin: 4px -4px;
+  padding: 13px 16px;
+  border: 1px solid var(--accent-edge);
+  border-radius: 10px;
+  color: var(--accent-deep);
+  background: var(--accent-wash);
+}
+
+.jp-stage[data-todo]:not([data-active]) {
+  color: var(--ink-3);
+}
+
+.jp-stage-top {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.jp-stage-top strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.jp-stage-top .num { margin-left: auto; }
+
+.jp-stage-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.jp-stage-detail span { overflow-wrap: anywhere; }
+.jp-stage-bar {
+  height: 3px;
+  margin-top: 11px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--line-2);
+}
+
+.jp-stage-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  transition: transform 400ms ease-out;
+}
+
+.jp-stage-bar::after {
+  display: none;
+  width: 25%;
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.5;
+  content: '';
+}
+
+.jp-stage-bar[data-indeterminate='true']::after {
+  display: block;
+  animation: jp-running 2s ease-in-out infinite;
+}
+
+@keyframes jp-running {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+
+.jp-live::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: '';
+  animation: jp-pulse 1.6s var(--ease) infinite;
+}
+
+.jp-code {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+}
+
+.jp-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.jp-log-head h4 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+
+.jp-log {
+  max-height: 200px;
+  margin: 6px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  overflow: auto;
+  font-family: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--chrome);
+  white-space: pre;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+.jp-log:focus-visible,
+.jp-seg button:focus-visible,
+.jp-play:focus-visible,
+.jp-tech summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .jp {
+    box-shadow: none;
+  }
+
+  @media (max-width: 400px) {
+    .jp-steps li {
+      grid-template-columns: 20px minmax(0, 1fr);
+      padding-block: 7px;
+    }
+
+    .jp-time { grid-column: 2; }
+  }
+
+  .jp-lead {
+    font-size: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jp,
+  .jp-reveal {
+    animation-name: jp-fade;
+  }
+
+  .jp-steps [data-state='now'] .jp-dot {
+    animation: none;
+  }
+
+  .jp-live::before {
+    animation: none;
+  }
+
+  .jp-stage-bar[data-indeterminate='true']::after {
+    animation: none;
+  }
+
+}
+
+@keyframes jp-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The queue row whose panel is open */
+
+.job[data-selected] {
+  background: var(--accent-wash);
+  box-shadow: -12px 0 0 var(--accent-wash), 12px 0 0 var(--accent-wash);
+}
+
+
+/* Wide windows: the library makes room so the whole queue stays usable beside the panel. */
+@media (min-width: 1280px) {
+  .lib[data-panel] > .lib-main {
+    padding-inline: 32px calc(480px + 32px);
+  }
+}
+
+/* Narrow windows: the panel covers row actions, so a row's title switches the panel to it. */
+.lib[data-panel] .job:not([data-selected]) .job-main {
+  cursor: pointer;
+}
+
+.lib[data-panel] .job:not([data-selected]) .job-main:hover .job-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line-2);
+}

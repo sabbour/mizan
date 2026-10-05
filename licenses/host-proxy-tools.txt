@@ -1,0 +1,2 @@
+No license file was exposed by the installed distribution.
+Declared license: MIT

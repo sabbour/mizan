@@ -1,0 +1,73 @@
+name: MSIX
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: arm64
+          cache: pip
+          cache-dependency-path: host/pyproject.toml
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          choco install ffmpeg-full -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "FFmpeg installation failed." }
+          $ffmpeg = Get-ChildItem "$env:ChocolateyInstall\lib\ffmpeg-full" -Filter ffmpeg.exe -Recurse |
+            Where-Object { Test-Path (Join-Path $_.Directory.Parent.FullName "LICENSE") } |
+            Select-Object -First 1
+          if (-not $ffmpeg) { throw "The FFmpeg distribution and license were not found." }
+          "MIZAN_FFMPEG=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
+          npm.cmd ci --prefix ui
+          if ($LASTEXITCODE -ne 0) { throw "UI dependency installation failed." }
+          python -m venv host\.venv
+          if ($LASTEXITCODE -ne 0) { throw "Python environment creation failed." }
+          host\.venv\Scripts\python.exe -m pip install .\host pip-licenses
+          if ($LASTEXITCODE -ne 0) { throw "Host dependency installation failed." }
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must be vMAJOR.MINOR.PATCH." }
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $packageVersion) { throw "Tag v$version does not match Changesets version $packageVersion." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build unsigned MSIX
+        shell: pwsh
+        run: |
+          .\scripts\Build-Msix.ps1 `
+            -Version "${{ steps.version.outputs.version }}" `
+            -Publisher "${{ secrets.MSIX_PUBLISHER }}" `
+            -SkipSign
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mizan-${{ steps.version.outputs.version }}-msix-unsigned
+          path: artifacts/Mizan_${{ steps.version.outputs.version }}_arm64.msix
+          retention-days: 7

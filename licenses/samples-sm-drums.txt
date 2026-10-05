@@ -1,0 +1,12 @@
+SM Drums
+Samples by Scott McLean, Tod Stillwell, and Suleiman Ali
+
+The distributor identifies these samples as Public Domain:
+https://sfzinstruments.github.io/drums/
+
+Project and author credits: https://smmdrums.wordpress.com/about/
+Source: https://github.com/sfzinstruments/SMDrums/tree/32cfbff5df7f33226dfd64d021a58beed8c71ba6
+
+Mizan bundles eight selected hits transcoded from WAV to Ogg Vorbis.
+Public Domain is the upstream designation; Mizan does not assign CC0
+or another license on the authors' behalf.

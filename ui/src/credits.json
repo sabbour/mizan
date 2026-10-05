@@ -1,0 +1,1355 @@
+[
+  {
+    "name": "@types/vexflow",
+    "version": "1.2.42",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation.",
+    "url": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "core-util-is",
+    "version": "1.0.3",
+    "license": "MIT",
+    "author": "Copyright Node.js contributors. All rights reserved.",
+    "url": "https://github.com/isaacs/core-util-is",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "immediate",
+    "version": "3.0.6",
+    "license": "MIT",
+    "author": "Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier",
+    "url": "https://github.com/calvinmetcalf/immediate",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "inherits",
+    "version": "2.0.4",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter",
+    "url": "https://github.com/isaacs/inherits",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "isarray",
+    "version": "1.0.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2013 Julian Gruber &lt;julian@juliangruber.com&gt;",
+    "url": "https://github.com/juliangruber/isarray",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "jszip",
+    "version": "3.10.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, Ant\u00f3nio Afonso",
+    "url": "https://github.com/Stuk/jszip",
+    "group": "App UI libraries",
+    "note": "Upstream offers MIT or GPL-3.0-or-later; Mizan uses the MIT option."
+  },
+  {
+    "name": "lie",
+    "version": "3.3.0",
+    "license": "MIT",
+    "author": "Copyright Calvin Metcalf and contributors",
+    "url": "https://github.com/calvinmetcalf/lie",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "loglevel",
+    "version": "1.9.2",
+    "license": "MIT",
+    "author": "Copyright (c) 2013 Tim Perry",
+    "url": "https://github.com/pimterry/loglevel",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "lucide-react",
+    "version": "1.47.0",
+    "license": "ISC",
+    "author": "Copyright (c) 2026 Lucide Icons and Contributors",
+    "url": "https://github.com/lucide-icons/lucide",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "opensheetmusicdisplay",
+    "version": "2.1.2",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2019 PhonicScore",
+    "url": "https://github.com/opensheetmusicdisplay/opensheetmusicdisplay",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "pako",
+    "version": "1.0.11",
+    "license": "MIT AND Zlib",
+    "author": "Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn",
+    "url": "https://github.com/nodeca/pako",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "process-nextick-args",
+    "version": "2.0.1",
+    "license": "MIT",
+    "author": "Copyright Calvin Metcalf and contributors",
+    "url": "https://github.com/calvinmetcalf/process-nextick-args",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "react",
+    "version": "19.3.0",
+    "license": "MIT",
+    "author": "Copyright (c) Meta Platforms, Inc. and affiliates.",
+    "url": "https://github.com/react/react",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "react-dom",
+    "version": "19.3.0",
+    "license": "MIT",
+    "author": "Copyright (c) Meta Platforms, Inc. and affiliates.",
+    "url": "https://github.com/react/react",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "readable-stream",
+    "version": "2.3.8",
+    "license": "MIT",
+    "author": "Copyright Node.js contributors. All rights reserved.",
+    "url": "https://github.com/nodejs/readable-stream",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "safe-buffer",
+    "version": "5.1.2",
+    "license": "MIT",
+    "author": "Copyright (c) Feross Aboukhadijeh",
+    "url": "https://github.com/feross/safe-buffer",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "scheduler",
+    "version": "0.28.0",
+    "license": "MIT",
+    "author": "Copyright (c) Meta Platforms, Inc. and affiliates.",
+    "url": "https://github.com/react/react",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "setimmediate",
+    "version": "1.0.5",
+    "license": "MIT",
+    "author": "Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola",
+    "url": "https://github.com/YuzuJS/setImmediate",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "string_decoder",
+    "version": "1.1.1",
+    "license": "MIT",
+    "author": "Copyright Node.js contributors. All rights reserved.",
+    "url": "https://github.com/nodejs/string_decoder",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "typescript-collections",
+    "version": "1.3.3",
+    "license": "MIT",
+    "author": "Copyright (c) 2010-2017 Tomasz Ciborski",
+    "url": "https://github.com/basarat/typescript-collections",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "util-deprecate",
+    "version": "1.0.2",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net>",
+    "url": "https://github.com/TooTallNate/util-deprecate",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "vexflow",
+    "version": "1.2.93",
+    "license": "MIT",
+    "author": "Copyright (c) 2010 Mohit Muthanna Cheppudira",
+    "url": "https://github.com/0xfe/vexflow",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "anyio",
+    "version": "4.15.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2018 Alex Gr\u00f6nholm",
+    "url": "https://anyio.readthedocs.io/en/stable/versionhistory.html",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "azure-containerregistry",
+    "version": "1.2.0",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation.",
+    "url": "https://github.com/Azure/azure-sdk-for-python",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "azure-core",
+    "version": "1.41.0",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation.",
+    "url": "https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/core/azure-core",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "azure-identity",
+    "version": "1.25.3",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation.",
+    "url": "https://github.com/Azure/azure-sdk-for-python",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "bottle",
+    "version": "0.13.4",
+    "license": "MIT",
+    "author": "Copyright (c) 2009-2024, Marcel Hellkamp.",
+    "url": "http://bottlepy.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "certifi",
+    "version": "2026.7.22",
+    "license": "Mozilla Public License 2.0 (MPL 2.0)",
+    "author": "Project contributors",
+    "url": "https://github.com/certifi/python-certifi",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "cffi",
+    "version": "2.1.1",
+    "license": "MIT-0",
+    "author": "Copyright Armin Rigo and contributors",
+    "url": "https://cffi.readthedocs.io/en/latest/whatsnew.html",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "3.5.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2025 TAHRI Ahmed R.",
+    "url": "https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "click",
+    "version": "8.5.0",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2014 Pallets",
+    "url": "https://github.com/pallets/click/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "clr_loader",
+    "version": "0.3.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2019-2026 Benedikt Reinartz",
+    "url": "https://pythonnet.github.io/clr-loader/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "colorama",
+    "version": "0.4.6",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2010 Jonathan Hartley",
+    "url": "https://github.com/tartley/colorama",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "cryptography",
+    "version": "46.0.3",
+    "license": "Apache-2.0 OR BSD-3-Clause",
+    "author": "Project contributors",
+    "url": "https://github.com/pyca/cryptography",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "einops",
+    "version": "0.8.2",
+    "license": "MIT",
+    "author": "Copyright (c) 2018 Alex Rogozhnikov",
+    "url": "https://github.com/arogozhnikov/einops",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "filelock",
+    "version": "4.0.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
+    "url": "https://github.com/tox-dev/py-filelock",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "flatbuffers",
+    "version": "25.12.19",
+    "license": "Apache-2.0",
+    "author": "Copyright Google LLC",
+    "url": "https://google.github.io/flatbuffers/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "fsspec",
+    "version": "2026.9.0",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2018, Martin Durant",
+    "url": "https://github.com/fsspec/filesystem_spec",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "h11",
+    "version": "0.16.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2016 Nathaniel J. Smith <njs@pobox.com> and other contributors",
+    "url": "https://github.com/python-hyper/h11",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "httpcore",
+    "version": "1.0.9",
+    "license": "BSD-3-Clause",
+    "author": "Copyright \u00a9 2020, [Encode OSS Ltd](https://www.encode.io/).",
+    "url": "https://www.encode.io/httpcore/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "httpx",
+    "version": "0.28.1",
+    "license": "BSD-3-Clause",
+    "author": "Copyright \u00a9 2019, [Encode OSS Ltd](https://www.encode.io/).",
+    "url": "https://github.com/encode/httpx",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "huggingface_hub",
+    "version": "1.32.0",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/huggingface/huggingface_hub",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "idna",
+    "version": "3.20",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2013-2026, Kim Davies and contributors.",
+    "url": "https://github.com/kjd/idna",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "isodate",
+    "version": "0.7.2",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2021, Hugo van Kemenade and contributors",
+    "url": "https://github.com/gweis/isodate/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "Jinja2",
+    "version": "3.1.6",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2007 Pallets",
+    "url": "https://github.com/pallets/jinja/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "MarkupSafe",
+    "version": "3.0.3",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2010 Pallets",
+    "url": "https://github.com/pallets/markupsafe/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "mido",
+    "version": "1.3.3",
+    "license": "MIT",
+    "author": "Copyright (c) Ole Martin Bj\u00f8rndalen",
+    "url": "https://github.com/mido/mido",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "mpmath",
+    "version": "1.3.0",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2005-2021 Fredrik Johansson and mpmath contributors",
+    "url": "http://mpmath.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "msal",
+    "version": "1.39.0",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation.",
+    "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "msal-extensions",
+    "version": "1.3.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation. All rights reserved.",
+    "url": "https://github.com/AzureAD/microsoft-authentication-extensions-for-python/releases",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "muscriptor",
+    "version": "0.3.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2026 Kyutai x Mirelo",
+    "url": "https://github.com/muscriptor/muscriptor",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "networkx",
+    "version": "3.6.1",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2004-2025, NetworkX Developers",
+    "url": "https://networkx.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "numpy",
+    "version": "2.5.3",
+    "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "author": "Copyright (c) 2005-2025, NumPy Developers.",
+    "url": "https://numpy.org",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "onnxruntime-windowsml",
+    "version": "1.27.1.202607110137",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://onnxruntime.ai",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "packaging",
+    "version": "26.3",
+    "license": "Apache-2.0 OR BSD-2-Clause",
+    "author": "Python Packaging Authority and contributors",
+    "url": "https://github.com/pypa/packaging",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "protobuf",
+    "version": "7.36.2",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2008 Google Inc.  All rights reserved.",
+    "url": "https://developers.google.com/protocol-buffers/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "proxy_tools",
+    "version": "0.1.0",
+    "license": "MIT",
+    "author": "Copyright Jacob Tushman and contributors",
+    "url": "http://github.com/jtushman/proxy_tools",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "pycparser",
+    "version": "3.0",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2008-2022, Eli Bendersky",
+    "url": "https://github.com/eliben/pycparser",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "PyJWT",
+    "version": "2.14.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2015-2022 Jos\u00e9 Padilla",
+    "url": "https://github.com/jpadilla/pyjwt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "pythonnet",
+    "version": "3.1.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2006-2021 the contributors of the Python.NET project",
+    "url": "https://pythonnet.github.io/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "pywebview",
+    "version": "0.1.dev2430+ga2bf0df4a",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2014-2017, Roman Sirokov",
+    "url": "https://pywebview.flowrl.com/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "PyYAML",
+    "version": "6.0.3",
+    "license": "MIT",
+    "author": "Copyright (c) 2017-2021 Ingy d\u00f6t Net",
+    "url": "https://pyyaml.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "requests",
+    "version": "2.34.2",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/psf/requests",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "safetensors",
+    "version": "0.8.0",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/huggingface/safetensors",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "scipy",
+    "version": "1.18.1",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.",
+    "url": "https://scipy.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "sympy",
+    "version": "1.14.0",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2006-2023 SymPy Development Team",
+    "url": "https://sympy.org",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "torch",
+    "version": "2.14.0+cpu",
+    "license": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT",
+    "author": "Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)",
+    "url": "https://pytorch.org",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "tqdm",
+    "version": "4.70.1",
+    "license": "MPL-2.0 AND MIT",
+    "author": "Copyright (c) 2013 noamraph",
+    "url": "https://tqdm.github.io",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "typing_extensions",
+    "version": "4.16.0",
+    "license": "PSF-2.0",
+    "author": "Python Software Foundation and contributors",
+    "url": "https://github.com/python/typing_extensions",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "urllib3",
+    "version": "2.8.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2008-2020 Andrey Petrov and contributors.",
+    "url": "https://github.com/urllib3/urllib3/blob/main/CHANGES.rst",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "wasdk-Microsoft.Windows.AI.MachineLearning",
+    "version": "1.8.260209005",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap",
+    "version": "2.3.0",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-runtime",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Activation",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Appointments",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Appointments.AppointmentsProvider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.AppService",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Background",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Calls",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Calls.Background",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Contacts",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Contacts.Provider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Core",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.DataTransfer",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.DataTransfer.ShareTarget",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Email",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Search",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.UserDataAccounts",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.UserDataAccounts.Provider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.UserDataTasks",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.ApplicationModel.Wallet",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Data.Json",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Data.Text",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Data.Xml.Dom",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Bluetooth",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Bluetooth.Advertisement",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Bluetooth.Background",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Bluetooth.GenericAttributeProfile",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Bluetooth.Rfcomm",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Enumeration",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Geolocation",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Haptics",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Input",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Printers.Extensions",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Radios",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Sensors",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.SmartCards",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Devices.Sms",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Foundation",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Foundation.Collections",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Foundation.Numerics",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Globalization",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Graphics",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Graphics.DirectX",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Graphics.Display",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Graphics.Effects",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Media.SpeechRecognition",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Networking",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Networking.Connectivity",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Networking.Sockets",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Authentication.Web",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Authentication.Web.Core",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Authentication.Web.Provider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Credentials",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Cryptography.Certificates",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.Cryptography.Core",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Security.EnterpriseData",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage.FileProperties",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage.Pickers.Provider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage.Provider",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage.Search",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Storage.Streams",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.System",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.System.Diagnostics",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.System.RemoteSystems",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Composition",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Core",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Input",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Notifications",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Popups",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Text",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.Text.Core",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.ViewManagement",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.UI.WindowManagement",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Web",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Web.Http",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Web.Http.Filters",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "winrt-Windows.Web.Http.Headers",
+    "version": "3.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://github.com/pywinrt/pywinrt",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "Beat This! final0 ONNX weights",
+    "version": "e2c0d4376fac8141905a8312c1b327849751d59c",
+    "license": "MIT",
+    "author": "Institute of Computational Perception, JKU Linz; ONNX conversion by Hikari Tsai",
+    "url": "https://huggingface.co/aaatmy/beat-this-onnx",
+    "group": "Models",
+    "note": "Beat/downbeat model and frontend constants; not bundled. Downloaded on first use and checksum verified."
+  },
+  {
+    "name": "HT-Demucs 6s ONNX weights",
+    "version": "49df9b6989cf2150840ea65b0bef77a2e471b678",
+    "license": "MIT",
+    "author": "Meta AI Research; ONNX conversion by StemSplit",
+    "url": "https://huggingface.co/StemSplitio/htdemucs-6s-onnx",
+    "group": "Models",
+    "note": "Six-stem fp16-stored-weight ONNX model; not bundled. Downloaded on first use and checksum verified."
+  },
+  {
+    "name": "Spotify Basic Pitch ICASSP 2022 weights",
+    "version": "fa5997af0a8210982619003269994a1be25eddf3",
+    "license": "Apache-2.0",
+    "author": "Copyright 2022 Spotify AB",
+    "url": "https://github.com/spotify/basic-pitch/tree/fa5997af0a8210982619003269994a1be25eddf3",
+    "group": "Models",
+    "note": "Official ONNX weights; not bundled. Downloaded on first use and checksum verified; not converted by Mizan."
+  },
+  {
+    "name": ".NET Runtime",
+    "version": "10",
+    "license": "LicenseRef-Microsoft-.NET-Library",
+    "author": "Microsoft Corporation",
+    "url": "https://github.com/dotnet/runtime",
+    "group": "Tools",
+    "note": "The ARM64 runtime is bundled in the MSIX."
+  },
+  {
+    "name": "FFmpeg",
+    "version": "9.0.2-full_build-www.gyan.dev",
+    "license": "GPL-3.0-or-later",
+    "author": "FFmpeg developers",
+    "url": "https://www.gyan.dev/ffmpeg/builds/",
+    "group": "Tools",
+    "note": "Bundled executable; the Gyan x64 build runs under Windows ARM64 emulation. Exact configuration and upstream source reference are in licenses/tool-ffmpeg-build.txt. Public redistribution still requires corresponding source for FFmpeg and its linked libraries."
+  },
+  {
+    "name": "Microsoft Edge WebView2 Runtime",
+    "version": "System installed",
+    "license": "LicenseRef-Microsoft-WebView2-Runtime",
+    "author": "Microsoft Corporation",
+    "url": "https://developer.microsoft.com/microsoft-edge/webview2/",
+    "group": "Tools",
+    "note": "Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime."
+  },
+  {
+    "name": "Python",
+    "version": "3.12",
+    "license": "PSF-2.0",
+    "author": "Python Software Foundation",
+    "url": "https://www.python.org/",
+    "group": "Tools",
+    "note": "The ARM64 runtime is bundled in the MSIX."
+  },
+  {
+    "name": "Qualcomm QNN execution provider",
+    "version": "Catalog acquired",
+    "license": "LicenseRef-Qualcomm-QNN",
+    "author": "Qualcomm Technologies, Inc.",
+    "url": "https://learn.microsoft.com/windows/ai/new-windows-ml/supported-execution-providers",
+    "group": "Tools",
+    "note": "Optional proprietary provider downloaded by Windows ML on supported devices; review its displayed terms before redistribution."
+  },
+  {
+    "name": "Windows App SDK Runtime",
+    "version": "1.8.260921001",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
+    "group": "Tools",
+    "note": "The self-contained ARM64 runtime is bundled in the MSIX."
+  },
+  {
+    "name": "Windows ML Runtime and execution provider catalog",
+    "version": "1.8.260209005",
+    "license": "MIT",
+    "author": "Copyright (c) Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/ai/new-windows-ml/",
+    "group": "Tools",
+    "note": "CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms."
+  },
+  {
+    "name": "yt-dlp",
+    "version": "2026.8.19",
+    "license": "Unlicense",
+    "author": "Public-domain dedication by yt-dlp contributors",
+    "url": "https://github.com/yt-dlp/yt-dlp",
+    "group": "Tools",
+    "note": "Invoked as an external process for permitted media access."
+  },
+  {
+    "name": "@fontsource-variable/archivo",
+    "version": "5.3.0",
+    "license": "OFL-1.1",
+    "author": "Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo) Archivo-Italic[wdth,wght].ttf: Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)",
+    "url": "https://github.com/fontsource/font-files",
+    "group": "Fonts & assets",
+    "note": "Archivo is bundled for UI text; outlined Archivo glyphs are also embedded in the wordmark."
+  },
+  {
+    "name": "FluidR3 General MIDI samples",
+    "version": "044fab8e1456bfafc5776e86dfd6bb8697149aef",
+    "license": "CC-BY-3.0-US",
+    "author": "FluidR3: Frank Wen; Copyright \u00a9 2000\u20132002, 2008 Frank Wen; Copyright \u00a9 2008 Toby Smithe; Fluid contributors; MIDI.js rendering by gleitz/midi-js-soundfonts",
+    "url": "https://github.com/gleitz/midi-js-soundfonts/tree/044fab8e1456bfafc5776e86dfd6bb8697149aef/FluidR3_GM",
+    "group": "Fonts & assets",
+    "note": "Selected minor-third roots from all 128 GM programs are extracted from MP3 data URIs without transcoding. The license file separately documents the underlying FluidR3 soundfont's MIT copyright notice; the distributed renditions remain CC BY 3.0 US."
+  },
+  {
+    "name": "Noto Kufi Arabic",
+    "version": "Outlined glyphs in mizan-wordmark.svg",
+    "license": "OFL-1.1",
+    "author": "Copyright 2022 The Noto Project Authors",
+    "url": "https://github.com/notofonts/arabic",
+    "group": "Fonts & assets",
+    "note": "Only outlined Arabic glyphs are embedded in the wordmark."
+  },
+  {
+    "name": "Salamander Grand Piano v3 samples",
+    "version": "Selected v5/v13 minor-third samples",
+    "license": "CC-BY-3.0",
+    "author": "Copyright Alexander Holm",
+    "url": "https://github.com/sfzinstruments/SalamanderGrandPiano",
+    "group": "Fonts & assets",
+    "note": "Bundled subset transcoded from 48 kHz FLAC to Ogg Vorbis and trimmed to 12 seconds. Used for sampled piano and creative-track voices."
+  },
+  {
+    "name": "SM Drums samples",
+    "version": "32cfbff5df7f33226dfd64d021a58beed8c71ba6",
+    "license": "Public Domain",
+    "author": "Scott McLean, Tod Stillwell, and Suleiman Ali",
+    "url": "https://github.com/sfzinstruments/SMDrums",
+    "group": "Fonts & assets",
+    "note": "Eight bundled acoustic-kit hits were selected and transcoded from WAV to Ogg Vorbis."
+  }
+]

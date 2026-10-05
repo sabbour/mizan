@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mizan">
+  <rect width="64" height="64" rx="14" fill="#ffffff"/>
+  <!-- the fulcrum: a post and a base -->
+  <rect x="30.5" y="13" width="3" height="37" rx="1.5" fill="#0d7a63"/>
+  <rect x="22" y="49" width="20" height="4" rx="2" fill="#0d7a63"/>
+  <!-- the beam, the balance arm -->
+  <rect x="10" y="12" width="44" height="6" rx="1" fill="#111111"/>
+  <!-- stems, and the noteheads that are the pans -->
+  <rect x="16" y="14" width="3" height="24" fill="#111111"/>
+  <rect x="51" y="14" width="3" height="24" fill="#111111"/>
+  <ellipse cx="12.6" cy="39.2" rx="6.8" ry="4.9" transform="rotate(-22 12.6 39.2)" fill="#111111"/>
+  <ellipse cx="47.6" cy="39.2" rx="6.8" ry="4.9" transform="rotate(-22 47.6 39.2)" fill="#111111"/>
+</svg>

@@ -1,0 +1,68 @@
+@import '@fontsource-variable/archivo/standard.css';
+
+:root {
+  --ink: #111111;
+  --ink-2: #4a4f54;
+  --ink-3: #6b7177;
+  --line: #e2e4e6;
+  --line-2: #c9cdd1;
+  --chrome: #f6f7f7;
+  --accent: #0d7a63;
+  --accent-deep: #0a6150;
+  --accent-wash: rgb(13 122 99 / 0.09);
+  --accent-edge: rgb(13 122 99 / 0.45);
+  --danger: #b3261e;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: 'Archivo Variable', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  color: #111111;
+  background: #ffffff;
+  caret-color: #111111;
+  -webkit-font-smoothing: antialiased;
+  font-synthesis: none;
+}
+
+::selection {
+  background: #c0c4c8;
+  color: #111111;
+}
+
+:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 3px;
+}
+
+[aria-pressed='true']:focus-visible,
+.play:focus-visible {
+  outline-color: #111111;
+  box-shadow: 0 0 0 2px #ffffff inset;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
