@@ -161,6 +161,66 @@ test('slow Azure dialog opens immediately, shows checking, and never guesses Loc
   view.unmount()
 })
 
+test('Cloud intent is saved during blocked readiness without claiming Azure is ready', async () => {
+  const status = deferred(), chosen = [], cancelled = []
+  const h = harness({
+    cloudStatus: () => status.promise,
+    getTranscriptionModel: async () => 'muscriptor-large',
+    setProcessingMode: async (mode) => { chosen.push(mode); return mode },
+    cancelCloudStatus: async (id) => { cancelled.push(id); return { cancelRequested: true } },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); view.update()
+  const fieldset = nodes(view.tree, (node) => node.type === 'fieldset' && node.props.className === 'cloud-mode')[0]
+  assert.equal(fieldset.props.disabled, false)
+  nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  await view.settle()
+  assert.deepEqual(chosen, ['cloud'])
+  assert.equal(cancelled.length, 1)
+  assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  assert.doesNotMatch(text(view.tree), /Cloud is on|Azure is ready/)
+  status.resolve({ mode: 'local', configured: false, issue: 'Azure readiness check timed out' })
+  await view.settle()
+  const modes = nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')
+  assert.equal(modes[1].props.checked, true)
+  assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  view.unmount()
+})
+
+test('failed readiness does not send a locally saved Cloud Job back through setup', async () => {
+  const h = harness({
+    cloudStatus: async () => ({ mode: 'local', configured: false, available: true,
+      jobCreated: true, issue: 'Synthetic Azure access failure' }),
+    setProcessingMode: async (mode) => mode,
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); await view.settle()
+  nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  await view.settle()
+  assert.equal(nodes(view.tree, (node) => node.type === 'cloud-setup').length, 0)
+  assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  assert.match(text(view.tree), /Synthetic Azure access failure/)
+  assert.doesNotMatch(text(view.tree), /Cloud is on|Azure is ready/)
+  view.unmount()
+})
+
+test('invalid local Cloud selection shows an error without changing the selected mode', async () => {
+  const h = harness({
+    cloudStatus: async () => ({ mode: 'local', configured: false, jobCreated: true }),
+    setProcessingMode: async () => { throw new h.HostError('Selected model is not supported') },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); await view.settle()
+  nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[1]
+    .props.onChange()
+  await view.settle()
+  assert.match(text(view.tree), /Selected model is not supported/)
+  assert.equal(nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'processing-mode')[0].props.checked, true)
+  view.unmount()
+})
+
 test('close cancels only its request; late responses cannot overwrite a reopened panel', async () => {
   const first = deferred(), second = deferred(), ids = [], cancelled = []
   const h = harness({

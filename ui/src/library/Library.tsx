@@ -304,8 +304,9 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     settingsButton.current?.focus()
   }
   const chooseMode = async (mode: ProcessingMode) => {
+    if (cloudStatusChecking) cloudStatusCancelRef.current?.()
     if (cloudOperationGate.isLocked()) return
-    if (mode === 'cloud' && !cloud?.configured) {
+    if (mode === 'cloud' && cloud && !cloud.configured && !cloud.jobCreated) {
       openCloudWizard()
       return
     }
@@ -314,7 +315,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     setCloudError(null)
     try {
       const selected = await host.setProcessingMode(mode)
-      setCloud((current) => current && { ...current, mode: selected })
+      setCloud((current) => ({ ...(current ?? { configured: false }), mode: selected }))
     } catch (reason) {
       setCloudError(problem(reason).message)
     } finally {
@@ -562,7 +563,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
               </button>
             </div>
             <p className="model-settings-intro">Choose how Mizan processes new songs. Your saved songs won't change.</p>
-            <fieldset className="cloud-mode" disabled={cloudOperationBusy || cloud === null || cloudError !== null}>
+            <fieldset className="cloud-mode" disabled={cloudOperationBusy && !cloudStatusChecking}>
               <legend>Processing</legend>
               <label><input type="radio" name="processing-mode" checked={cloud?.mode === 'local'}
                 onChange={() => void chooseMode('local')} /> Local <small>Process on this PC</small></label>

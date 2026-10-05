@@ -68,8 +68,9 @@ installed), then select an accessible subscription in the wizard. Nonsecret
 resource settings and mode are stored in the host SQLite database; Azure
 access tokens are obtained on demand and reused in memory until shortly before
 expiry, never saved to disk.
-Local remains the default; a new customer must pass Azure preflight before Cloud
-can be selected. A revised GPU worker
+Local remains the default. Cloud selection requires valid saved Azure settings,
+a recorded GPU Job, a bundled worker, and a supported model, but does not wait
+for a live Azure check. A revised GPU worker
 can produce original-mix and vocal-stem MuScriptor events plus six HT-Demucs
 WAVs, and the host can validate and import these results without running its
 local separation or transcription. The combined worker produced six verified
@@ -85,7 +86,8 @@ Cloud worker; `verifiedModels` currently contains Small, while `supportedModels`
 contains Small, Medium and Large. `configured:false` means this customer's Azure identity
 and Job are not yet ready. A developer's CLI-token
 pilot does **not** verify any customer's Azure identity.
-`set_processing_mode("cloud")` returns `cloud_failed` until customer preflight succeeds. `configure_cloud`
+`set_processing_mode("cloud")` saves processing intent, not Azure readiness.
+Invalid or incomplete local setup returns `cloud_failed`. `configure_cloud`
 validates and stores nonsecret identifiers **without provisioning Azure resources**.
 Once selected, Cloud remains selected across restarts and temporary readiness failures.
 New analysis and Redo analysis snapshot the selected processing mode and MuScriptor

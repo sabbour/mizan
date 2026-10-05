@@ -2313,6 +2313,73 @@ def test_cloud_intent_survives_readiness_failure_without_local_fallback(signed_i
     assert cloud._setting("processing_mode") == "cloud"
 
 
+def test_cloud_large_choice_is_immediate_while_live_readiness_is_blocked(signed_in, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    cloud._setting("cloud_config", json.dumps(SETUP))
+    cloud._setting("cloud_job_created", "synthetic-image")
+    cloud._setting("transcription_model", "muscriptor-large")
+    cloud._setting("processing_mode", "local")
+    monkeypatch.setattr(cloud, "READINESS_TIMEOUT", 0.08)
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(*_args):
+        entered.set()
+        assert release.wait(3)
+        cloud._check_readiness()
+
+    monkeypatch.setattr(cloud, "_job_capabilities", blocked)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(cloud.panel_status, "slow-choice")
+        try:
+            assert entered.wait(3)
+            started = time.monotonic()
+            assert cloud.set_mode("cloud") == {"ok": True, "mode": "cloud"}
+            assert time.monotonic() - started < 0.5
+            assert not pending.done()
+            assert cloud._setting("processing_mode") == "cloud"
+            timed_out = pending.result(timeout=3)
+            assert not timed_out["configured"] and "timed out" in timed_out["issue"]
+            assert cloud._setting("processing_mode") == "cloud"
+            assert cloud.selected()
+            assert JobStore().get_transcription_model() == "muscriptor-large"
+            assert cloud._setting("processing_mode") == "cloud"
+            snapshot = cloud.status(check_connection=False)
+            assert snapshot["mode"] == "cloud" and not snapshot["configured"]
+        finally:
+            release.set()
+            assert cloud._readiness_check.done.wait(3)
+
+
+@pytest.mark.parametrize("invalid,reason", [
+    ("missing-config", "not complete"), ("invalid-config", "not complete"),
+    ("missing-job", "not complete"), ("unsupported-model", "not supported"),
+    ("missing-worker", "no supported"), ("invalid-mode", "Choose local or cloud"),
+])
+def test_cloud_choice_still_validates_local_setup_worker_and_model(signed_in, monkeypatch, invalid, reason):
+    cloud._setting("cloud_config", json.dumps(SETUP))
+    cloud._setting("cloud_job_created", "synthetic-image")
+    cloud._setting("processing_mode", "local")
+    monkeypatch.setattr(cloud, "panel_status",
+                        lambda *_args: pytest.fail("Choosing a provider waited for live readiness"))
+    monkeypatch.setattr(cloud, "_job_capabilities",
+                        lambda *_args: pytest.fail("Choosing a provider contacted Azure"))
+    if invalid == "missing-config":
+        cloud._setting("cloud_config", "")
+    elif invalid == "invalid-config":
+        cloud._setting("cloud_config", '{"tenantId":"invalid"}')
+    elif invalid == "missing-job":
+        cloud._setting("cloud_job_created", "")
+    elif invalid == "unsupported-model":
+        cloud._setting("transcription_model", "unsupported")
+    elif invalid == "missing-worker":
+        monkeypatch.setattr(cloud, "_worker_source",
+                            lambda: (_ for _ in ()).throw(cloud.CloudError("Missing bundled worker")))
+    with pytest.raises(cloud.CloudError, match=reason):
+        cloud.set_mode("invalid" if invalid == "invalid-mode" else "cloud")
+    assert cloud._setting("processing_mode") == "local"
+
+
 def test_preflight_checks_job_private_storage_roles_and_user_blob_token(signed_in, monkeypatch):
     cloud.configure(SETUP)
     image = f"mizanregistry.azurecr.io/mizan-aca-gpu@{cloud.SUPPORTED_WORKER_DIGEST}"
@@ -2485,6 +2552,9 @@ def test_panel_checks_share_readiness_and_cancel_only_the_named_request(signed_i
             assert calls == ["readiness"]
             cloud._setting("processing_mode", "local")
             assert cloud.panel_status("cached-local")["mode"] == "local"
+            assert calls == ["readiness"]
+            assert cloud.set_mode("cloud")["mode"] == "cloud"
+            assert cloud.panel_status("cached-cloud")["mode"] == "cloud"
             assert calls == ["readiness"]
         finally:
             release.set()

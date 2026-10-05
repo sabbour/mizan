@@ -1941,8 +1941,12 @@ def set_mode(mode):
     if mode not in ("local", "cloud"):
         raise CloudError("Choose local or cloud processing.")
     if mode == "cloud":
-        check = panel_status()
-        if not check["configured"]:
+        try:
+            _setup(json.loads(_setting("cloud_config") or "{}"))
+        except (ValueError, TypeError) as exc:
+            raise CloudError("Azure setup is not complete. Review the saved Azure settings.") from exc
+        check = status(check_connection=False)
+        if not check["available"] or not check["jobCreated"]:
             raise CloudError(check["issue"])
         if (_setting("transcription_model") or "muscriptor-small") not in check["supportedModels"]:
             raise CloudError("The selected MuScriptor size is not supported by this Cloud worker.")
