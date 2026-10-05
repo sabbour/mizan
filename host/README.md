@@ -102,10 +102,11 @@ execution preflight fails explicitly rather than using local model inference.
 Adding a YouTube link creates its queue entry before fetching video metadata;
 inspection errors are reported by that job, and the UI shows pending submission
 and prevents duplicate clicks while the host is accepting it.
-The Song analysis panel checks Azure asynchronously with a 15-second overall
-readiness deadline. Concurrent panel checks share the same read-only verification,
-and successful results are reused for up to 30 seconds; execution preflight still
-checks Azure again before starting GPU work. Closing the panel or choosing
+The Song analysis panel checks Azure asynchronously with a 120-second overall
+readiness deadline and shows the current local check stage while it waits.
+Concurrent panel checks share the same read-only verification, and successful
+results are reused for up to 30 seconds; execution preflight still checks Azure
+again before starting GPU work. Closing the panel or choosing
 Cancel check cancels only that request, never provisioning or an analysis job.
 An in-progress Azure credential request may finish in the background, but a
 cancelled or timed-out check does not continue subsequent readiness requests or

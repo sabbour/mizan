@@ -152,6 +152,10 @@ class Api:
         from .cloud import setup_progress
         return {"ok": True, **setup_progress()}
 
+    def cloud_readiness_progress(self, request_id: str) -> dict[str, Any]:
+        from .cloud import readiness_progress
+        return response(lambda: {"ok": True, **readiness_progress(request_id)})
+
     def cancel_cloud_setup(self) -> dict[str, Any]:
         from .cloud import cancel_setup
         return response(lambda: {"ok": True, **cancel_setup()})

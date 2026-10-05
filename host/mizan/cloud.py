@@ -84,7 +84,7 @@ def _job_resources_compatible(actual, expected):
     return _job_resources_match(actual, {**expected, "cpu": 8, "memory": "32Gi"})
 
 
-READINESS_TIMEOUT = 15
+READINESS_TIMEOUT = 120
 READINESS_CACHE_SECONDS = 30
 _readiness_lock = Lock()
 _readiness_context = local()
@@ -96,12 +96,33 @@ _cancelled_readiness_requests = {}
 class _ReadinessCheck:
     def __init__(self, key):
         self.key = key
-        self.deadline = time.monotonic() + READINESS_TIMEOUT
+        self.started_at = time.monotonic()
+        self.deadline = self.started_at + READINESS_TIMEOUT
         self.cancelled = Event()
         self.done = Event()
         self.result = None
         self.error = None
         self.completed_at = None
+        self.progress_lock = Lock()
+        self.stage = "Azure GPU Job"
+        self.detail = "Starting the Azure access check."
+
+    def set_progress(self, stage, detail):
+        with self.progress_lock:
+            self.stage = stage
+            self.detail = detail
+
+    def progress(self):
+        with self.progress_lock:
+            return {"stage": self.stage, "detail": self.detail,
+                    "elapsedSeconds": round(max(0, time.monotonic() - self.started_at), 1),
+                    "timeoutSeconds": READINESS_TIMEOUT}
+
+
+def _readiness_timeout_message(check):
+    stage = check.progress()["stage"]
+    return (f"Azure readiness check timed out while checking {stage}. "
+            "Check connectivity and retry; processing selection is unchanged.")
 
 
 def _check_readiness():
@@ -110,8 +131,24 @@ def _check_readiness():
         if check.cancelled.is_set():
             raise CloudError("Azure readiness check was cancelled. Processing selection is unchanged.")
         if time.monotonic() >= check.deadline:
-            raise CloudError("Azure readiness check timed out. Check connectivity and retry; "
-                             "processing selection is unchanged.")
+            raise CloudError(_readiness_timeout_message(check))
+
+
+def _readiness_phase(stage, detail):
+    check = getattr(_readiness_context, "check", None)
+    if check:
+        _check_readiness()
+        check.set_progress(stage, detail)
+
+
+def readiness_progress(request_id):
+    if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
+        raise CloudError("The Azure readiness request ID is invalid.")
+    with _readiness_lock:
+        request = _readiness_requests.get(request_id)
+        if not request:
+            return {"stage": "idle", "detail": None, "elapsedSeconds": 0, "timeoutSeconds": READINESS_TIMEOUT}
+        return request[0].progress()
 
 
 def _readiness_timeout(seconds):
@@ -162,6 +199,7 @@ def panel_status(request_id=None):
                 _readiness_context.check = check
                 try:
                     result = status()
+                    _readiness_phase("complete", "Azure access checks are complete.")
                     _check_readiness()
                     check.result = result
                 except Exception as exc:
@@ -181,8 +219,7 @@ def panel_status(request_id=None):
                         "Processing selection is unchanged."}
             if time.monotonic() >= check.deadline:
                 check.cancelled.set()
-                return {**snapshot, "issue": "Azure readiness check timed out. Check connectivity "
-                        "and retry; processing selection is unchanged."}
+                return {**snapshot, "issue": _readiness_timeout_message(check)}
         if cancelled.is_set() or check.cancelled.is_set():
             return {**snapshot, "issue": "Azure readiness check was cancelled. "
                     "Processing selection is unchanged."}
@@ -1472,8 +1509,20 @@ def _registry_manifest(config, reference, digest):
             manifest = client.get_manifest("mizan-aca-gpu", reference, **options)
             _check_readiness()
     except (AzureError, AzureSignInError, KeyError, ValueError) as exc:
-        raise CloudError("Could not verify the ACR image. Grant the selected identity AcrPull "
-                         "on the destination registry and check that the build or import completed.") from exc
+        _check_readiness()
+        response = getattr(exc, "response", None)
+        status_code = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+        if status_code == 403:
+            raise CloudError("Azure RBAC action required: the selected Azure identity needs "
+                             "AcrPull permission on the destination registry.") from exc
+        if status_code == 401:
+            raise CloudError("The selected Azure identity could not authenticate to the destination "
+                             "registry; sign in again and retry the access check.") from exc
+        if status_code == 404:
+            raise CloudError("The expected GPU worker image or manifest was not found in the "
+                             "destination registry; confirm the build or import completed.") from exc
+        raise CloudError("Could not verify the ACR image because of an Azure or registry error. "
+                         "Check connectivity and retry the access check.") from exc
     if manifest.digest != digest:
         raise CloudError("The ACR manifest digest differs from the recorded build; Cloud remains unready.")
 
@@ -1727,6 +1776,7 @@ def _job_capabilities(config, image):
     if not config.get("userObjectId"):
         raise CloudError("Reconnect the Azure identity in Cloud setup before enabling Cloud jobs.")
     azure = _Azure(config)
+    _readiness_phase("Azure GPU Job", "Checking the configured Azure GPU Job.")
     job = azure.request(_resource(azure, "Microsoft.App", "jobs", config["jobName"]), "2024-03-01")
     if not job:
         raise CloudError("The configured Azure GPU Job no longer exists.")
@@ -1738,6 +1788,7 @@ def _job_capabilities(config, image):
         resources = json.loads(_setting("cloud_job_resources") or "{}")
     except ValueError:
         resources = {}
+    _readiness_phase("ACR image", "Authenticating with the selected registry and checking the Job image.")
     image_matches = (len(containers) == 1
                      and _job_image_matches(config, image, containers[0].get("image")))
     if (properties.get("environmentId", "").lower() != environment.lower()
@@ -1765,11 +1816,14 @@ def _job_capabilities(config, image):
             f"https://{config['storageAccount']}.blob.core.windows.net"
             or env.get("AZURE_STORAGE_CONTAINER", {}).get("value") != config["container"]):
         raise CloudError("The GPU Job storage settings do not match the saved private Blob container.")
+    _readiness_phase("Job managed identity", "Checking the configured Job managed identity.")
     managed = azure.request(identity, "2023-01-31")
     if not managed or env.get("AZURE_CLIENT_ID", {}).get("value") != managed.get(
             "properties", {}).get("clientId"):
         raise CloudError("The GPU Job does not use the configured managed identity.")
+    _readiness_phase("Azure role assignments", "Checking selected-user and Job identity role assignments.")
     _roles_ready(azure, config, managed)
+    _readiness_phase("GPU environment", "Checking the Azure GPU environment and A100 profile.")
     gpu_environment = _environment_ready(azure, environment)
     if not any(
             profile.get("name") == GPU_PROFILE
@@ -1777,6 +1831,7 @@ def _job_capabilities(config, image):
             for profile in gpu_environment.get("properties", {}).get("workloadProfiles", [])):
         raise CloudError("The Container Apps environment no longer has the A100 GPU profile.")
     storage = _resource(azure, "Microsoft.Storage", "storageAccounts", config["storageAccount"])
+    _readiness_phase("private Blob storage", "Checking the private storage account and container settings.")
     account = azure.request(storage, "2023-05-01")
     container = azure.request(
         f"{storage}/blobServices/default/containers/{config['container']}", "2023-05-01")
@@ -1784,6 +1839,7 @@ def _job_capabilities(config, image):
             or account.get("properties", {}).get("supportsHttpsTrafficOnly") is not True
             or not container or container.get("properties", {}).get("publicAccess") != "None"):
         raise CloudError("The configured Blob container must be private and require HTTPS.")
+    _readiness_phase("private Blob container read access", "Checking read access to the private Blob container.")
     _blob_access(config)
     return azure
 

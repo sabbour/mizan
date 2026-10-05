@@ -30,12 +30,17 @@ const button = (tree, label) => nodes(tree, (node) => node.type === 'button'
 function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   let active
   const timers = []
+  const intervals = new Map()
+  let nextInterval = 1
   const host = {
     library: async () => [], folders: async () => [],
     getTranscriptionModel: async () => 'muscriptor-small',
     hfTokenStatus: async () => true, modelPreflight: async () => ({}),
     modelDownloadStatus: async () => ({}), resourceUsage: async () => null,
     cancelCloudStatus: async () => ({ cancelRequested: true }),
+    cloudReadinessProgress: async () => ({
+      stage: 'idle', detail: null, elapsedSeconds: 0, timeoutSeconds: 120,
+    }),
     ...overrides,
   }
   class HostError extends Error { fix = null }
@@ -75,7 +80,12 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   const jsx = (type, props) => ({ type, props })
   const browser = {
     addEventListener() {}, removeEventListener() {},
-    setInterval: () => 1, clearInterval() {},
+    setInterval: (callback, ms) => {
+      const id = nextInterval++
+      intervals.set(id, { callback, ms })
+      return id
+    },
+    clearInterval: (id) => intervals.delete(id),
     setTimeout: (callback) => { timers.push(callback); return timers.length },
     clearTimeout() {},
   }
@@ -131,7 +141,13 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
     renderer.update()
     return renderer
   }
-  return { host, HostError, load, render, runTimers: () => { for (const callback of timers.splice(0)) callback() } }
+  return {
+    host, HostError, load, render,
+    runTimers: () => { for (const callback of timers.splice(0)) callback() },
+    runIntervals: (ms) => {
+      for (const interval of intervals.values()) if (interval.ms === ms) interval.callback()
+    },
+  }
 }
 
 const libraryProps = { jobs: [], version: 0, onQueueChange() {}, onOpen() {}, onDetails() {}, onCredits() {} }
@@ -167,6 +183,78 @@ test('slow Azure dialog opens immediately, shows checking, and never guesses Loc
   status.resolve(cloudReady)
   await view.settle()
   assert.match(text(view.tree), /Cloud is on for new and redone analyses/)
+  view.unmount()
+})
+
+test('readiness progress shows local phases while the Azure check is pending', async () => {
+  const status = deferred(), requests = []
+  const h = harness({
+    cloudStatus: () => status.promise,
+    cloudReadinessProgress: async (id) => {
+      requests.push(id)
+      return { stage: 'Azure role assignments',
+        detail: 'Checking selected-user and Job identity role assignments.',
+        elapsedSeconds: 18, timeoutSeconds: 120 }
+    },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); view.update()
+  h.runIntervals(500)
+  await view.settle()
+  assert.match(text(view.tree), /Checking selected-user and Job identity role assignments\. \(18s\)/)
+  assert.equal(requests.length, 1)
+  status.resolve(cloudReady)
+  await view.settle()
+  h.runIntervals(500)
+  assert.equal(requests.length, 1, 'progress polling stops when readiness completes')
+  view.unmount()
+})
+
+test('readiness progress polling does not overlap unresolved bridge calls', async () => {
+  const status = deferred(), progress = deferred(), requests = []
+  const h = harness({
+    cloudStatus: () => status.promise,
+    cloudReadinessProgress: (id) => {
+      requests.push(id)
+      return requests.length === 1 ? progress.promise : Promise.resolve({
+        stage: 'private Blob storage', detail: 'Checking private storage settings.',
+        elapsedSeconds: 8, timeoutSeconds: 120,
+      })
+    },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); view.update()
+  h.runIntervals(500)
+  h.runIntervals(500)
+  assert.equal(requests.length, 1)
+  progress.resolve({ stage: 'Azure role assignments',
+    detail: 'Checking role assignments.', elapsedSeconds: 4, timeoutSeconds: 120 })
+  await view.settle()
+  assert.match(text(view.tree), /Checking role assignments\. \(4s\)/)
+  h.runIntervals(500)
+  await view.settle()
+  assert.equal(requests.length, 2)
+  assert.match(text(view.tree), /Checking private storage settings\. \(8s\)/)
+  status.resolve(cloudReady)
+  await view.settle()
+  view.unmount()
+})
+
+test('successful readiness clears a failed progress poll', async () => {
+  const status = deferred()
+  const h = harness({
+    cloudStatus: () => status.promise,
+    cloudReadinessProgress: async () => { throw new h.HostError('Progress polling failed') },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick(); view.update()
+  h.runIntervals(500)
+  await view.settle()
+  assert.match(text(view.tree), /Progress polling failed/)
+  status.resolve(cloudReady)
+  await view.settle()
+  assert.match(text(view.tree), /Cloud is on for new and redone analyses/)
+  assert.doesNotMatch(text(view.tree), /Progress polling failed|Azure access check failed/)
   view.unmount()
 })
 
@@ -361,7 +449,7 @@ test('selecting Cloud during a refresh does not reuse an older ready result', as
 test('failed readiness does not send a locally saved Cloud Job back through setup', async () => {
   const h = harness({
     cloudStatus: async () => ({ mode: 'local', configured: false, available: true,
-      jobCreated: true, issue: 'Synthetic Azure access failure' }),
+      jobCreated: true, issue: 'Azure connection preflight failed: Synthetic Azure access failure' }),
     setProcessingModeWithStatus: async (mode) => ({ ...savedCloudSetup, mode,
       issue: 'Synthetic Azure access failure' }),
   })
@@ -372,8 +460,21 @@ test('failed readiness does not send a locally saved Cloud Job back through setu
   await view.settle()
   assert.equal(nodes(view.tree, (node) => node.type === 'cloud-setup').length, 0)
   assert.match(text(view.tree), /Cloud selected.*no Local fallback/)
+  assert.match(text(view.tree), /Azure access check failed/)
   assert.match(text(view.tree), /Synthetic Azure access failure/)
   assert.doesNotMatch(text(view.tree), /Cloud is on|Azure is ready/)
+  view.unmount()
+})
+
+test('saved Job without a completed check is shown as unverified', async () => {
+  const h = harness({
+    cloudStatus: async () => ({ ...savedCloudSetup, issue: 'Azure readiness has not been checked.' }),
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  button(view.tree, 'Song analysis settings').props.onClick()
+  await view.settle(); await view.settle()
+  assert.match(text(view.tree), /Azure readiness is not verified/)
+  assert.doesNotMatch(text(view.tree), /Azure is not ready/)
   view.unmount()
 })
 

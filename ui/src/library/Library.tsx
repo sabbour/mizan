@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, AudioLines, ChevronDown, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
-import { host, HostError, IMPORTABLE, toBase64, type CloudStatus, type Entry, type Folder, type ModelDownloads, type ModelPreflight, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { host, HostError, IMPORTABLE, toBase64, type CloudReadinessProgress, type CloudStatus, type Entry, type Folder, type ModelDownloads, type ModelPreflight, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
 import { activeAnalysis, analysisProgress, ago, clock, decodingErrorHeadline, jobExecutionLabel, jobQueueLabel, jobQueuePosition, jobTitle, jobStageLabel, jobStagePercent, resumeParts, sourceLine, took } from './format'
@@ -62,6 +62,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cloud, setCloud] = useState<CloudStatus | null>(null)
   const [cloudStatusChecking, setCloudStatusChecking] = useState(false)
+  const [cloudReadinessProgress, setCloudReadinessProgress] = useState<CloudReadinessProgress | null>(null)
   const [cloudOperationBusy, setCloudOperationBusy] = useState(false)
   const [cloudOperationLabel, setCloudOperationLabel] = useState<string | null>(null)
   const [cloudError, setCloudError] = useState<string | null>(null)
@@ -101,13 +102,20 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
   const picker = useRef<HTMLInputElement>(null)
   const isLink = /^https?:\/\//i.test(query.trim())
   const searchQuery = isLink ? '' : query
-  const cloudStatusText = cloudStatusChecking ? 'Checking Azure setup…'
+  const cloudStatusText = cloudStatusChecking
+    ? cloudReadinessProgress?.detail
+      ? `${cloudReadinessProgress.detail} (${cloudReadinessProgress.elapsedSeconds}s)`
+      : 'Checking Azure setup…'
     : cloudOperationBusy ? cloudOperationLabel ?? 'Updating settings…'
       : cloudError ? 'Azure access check failed'
         : cloud === null ? 'Cloud status unavailable'
           : cloud.configured
             ? cloud.mode === 'cloud' ? 'Cloud is on for new and redone analyses' : 'Azure is ready · Processing is Local'
-            : cloud.mode === 'cloud' ? 'Cloud selected · Azure is not ready; no Local fallback'
+            : cloud.mode === 'cloud' ? cloud.jobCreated
+              ? cloud.issue && !cloud.issue.includes('readiness has not been checked')
+                ? 'Cloud selected · Azure access check failed; no Local fallback'
+                : 'Cloud selected · Azure readiness is not verified; no Local fallback'
+              : 'Cloud selected · Azure setup is not complete; no Local fallback'
               : cloud.jobCreated ? 'GPU Job created · Azure access needs checking'
               : cloud.prepared ? 'Azure infrastructure prepared · setup not complete'
                 : cloud.config ? 'Azure settings saved · setup not complete' : 'Cloud is not set up'
@@ -163,13 +171,29 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     cloudStatusLastCheckRef.current = token
     let active = true
     setCloudStatusChecking(true)
+    setCloudReadinessProgress(null)
     setCloudError(null)
+    let progressPending = false
+    const progressTimer = window.setInterval(() => {
+      if (progressPending) return
+      progressPending = true
+      void host.cloudReadinessProgress(requestId).then(
+        (progress) => {
+          if (active && cloudStatusCheckRef.current === token) setCloudReadinessProgress(progress)
+        },
+        (reason) => {
+          if (active && cloudStatusCheckRef.current === token) setCloudError(problem(reason).message)
+        },
+      ).finally(() => { progressPending = false })
+    }, 500)
     const cancel = () => {
       active = false
+      window.clearInterval(progressTimer)
       if (cloudStatusCheckRef.current === token) {
         cloudStatusCheckRef.current = null
         cloudStatusCancelRef.current = null
         setCloudStatusChecking(false)
+        setCloudReadinessProgress(null)
         void host.cancelCloudStatus(requestId).catch((reason) => {
           if (cloudStatusLastCheckRef.current === token) setCloudError(problem(reason).message)
         })
@@ -179,16 +203,21 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
     cloudStatusCancelRef.current = cancel
     void host.cloudStatus(requestId).then(
       (status) => {
-        if (active && cloudStatusCheckRef.current === token) setCloud(status)
+        if (active && cloudStatusCheckRef.current === token) {
+          setCloud(status)
+          setCloudError(null)
+        }
       },
       (reason) => {
         if (active && cloudStatusCheckRef.current === token) setCloudError(problem(reason).message)
       },
     ).finally(() => {
+      window.clearInterval(progressTimer)
       if (active && cloudStatusCheckRef.current === token) {
         cloudStatusCheckRef.current = null
         cloudStatusCancelRef.current = null
         setCloudStatusChecking(false)
+        setCloudReadinessProgress(null)
       }
       release()
     })

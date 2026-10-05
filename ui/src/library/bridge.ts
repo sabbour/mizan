@@ -62,6 +62,12 @@ export type CloudSetupProgress = {
   total: number
   detail: string | null
 }
+export type CloudReadinessProgress = {
+  stage: string
+  detail: string | null
+  elapsedSeconds: number
+  timeoutSeconds: number
+}
 export type ModelDownload = {
   downloaded: boolean
   active: boolean
@@ -247,6 +253,8 @@ export const host = {
   cloudStatus: (requestId?: string) => call<CloudStatus>('cloud_status', requestId ?? null),
   cancelCloudStatus: (requestId: string) =>
     call<{ cancelRequested: boolean }>('cancel_cloud_status', requestId),
+  cloudReadinessProgress: (requestId: string) =>
+    call<CloudReadinessProgress>('cloud_readiness_progress', requestId),
   cloudSetupProgress: () => call<CloudSetupProgress>('cloud_setup_progress'),
   cancelCloudSetup: () => call<{ cancelRequested: boolean }>('cancel_cloud_setup'),
   azureSubscriptions: () => {

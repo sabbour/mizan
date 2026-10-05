@@ -2523,6 +2523,43 @@ def test_preflight_checks_job_private_storage_roles_and_user_blob_token(signed_i
     assert "environment failed to provision" in check["issue"]
 
 
+def test_registry_manifest_errors_keep_auth_rbac_and_missing_image_distinct(signed_in, monkeypatch):
+    from azure import containerregistry
+    from azure.core.exceptions import AzureError
+
+    class RegistryFailure(AzureError):
+        def __init__(self, status_code):
+            super().__init__("synthetic registry failure")
+            self.status_code = status_code
+
+    status = [403]
+
+    class Registry:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def get_manifest(self, *_args, **_kwargs):
+            raise RegistryFailure(status[0])
+
+    monkeypatch.setattr(containerregistry, "ContainerRegistryClient", Registry)
+    for code, message in (
+        (403, "Azure RBAC action required"),
+        (401, "could not authenticate"),
+        (404, "was not found"),
+        (503, "Azure or registry error"),
+    ):
+        status[0] = code
+        with pytest.raises(cloud.CloudError, match=message):
+            cloud._registry_manifest(SETUP, cloud.SUPPORTED_WORKER_DIGEST,
+                                     cloud.SUPPORTED_WORKER_DIGEST)
+
+
 def test_panel_readiness_has_overall_bound_and_preserves_cloud_intent(signed_in, monkeypatch):
     cloud._setting("cloud_config", json.dumps(SETUP))
     cloud._setting("cloud_job_created", "synthetic-image")
@@ -2531,6 +2568,8 @@ def test_panel_readiness_has_overall_bound_and_preserves_cloud_intent(signed_in,
     monkeypatch.setattr(cloud, "READINESS_TIMEOUT", 0.08)
 
     def slow(*_args):
+        cloud._readiness_phase("private Blob container read access",
+                               "Checking read access to the private Blob container.")
         entered.set()
         assert release.wait(3)
         cloud._check_readiness()
@@ -2542,10 +2581,40 @@ def test_panel_readiness_has_overall_bound_and_preserves_cloud_intent(signed_in,
         assert entered.is_set()
         assert time.monotonic() - started < 0.8
         assert not result["configured"] and "timed out" in result["issue"]
+        assert "private Blob container read access" in result["issue"]
+        assert "RBAC" not in result["issue"]
         assert result["mode"] == cloud._setting("processing_mode") == "cloud"
     finally:
         release.set()
         assert cloud._readiness_check.done.wait(3)
+
+
+def test_panel_readiness_completes_after_previous_fifteen_second_limit(signed_in, monkeypatch):
+    cloud._setting("cloud_config", json.dumps(SETUP))
+    cloud._setting("cloud_job_created", "synthetic-image")
+    cloud._setting("processing_mode", "cloud")
+    elapsed = [100.0]
+    monkeypatch.setattr(cloud.time, "monotonic", lambda: elapsed[0])
+    phases = (
+        ("Azure GPU Job", "Checking the configured Azure GPU Job."),
+        ("ACR image", "Checking the registry image."),
+        ("Azure role assignments", "Checking Azure role assignments."),
+        ("GPU environment", "Checking the GPU environment."),
+        ("private Blob storage", "Checking private storage."),
+        ("private Blob container read access", "Checking Blob read access."),
+    )
+
+    def sequential(*_args):
+        for stage, detail in phases:
+            cloud._readiness_phase(stage, detail)
+            elapsed[0] += 4
+            cloud._check_readiness()
+
+    monkeypatch.setattr(cloud, "_job_capabilities", sequential)
+    result = cloud.panel_status("slow-but-successful-panel")
+    assert elapsed[0] - 100 > 15
+    assert result["configured"] and result["mode"] == "cloud"
+    assert cloud._readiness_check.result["configured"]
 
 
 def test_panel_checks_share_readiness_and_cancel_only_the_named_request(signed_in, monkeypatch):

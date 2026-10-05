@@ -159,6 +159,38 @@ def test_cancel_cloud_setup_only_signals_active_provision(api):
     assert bridge.cancel_cloud_status("unknown-request") == {"ok": True, "cancelRequested": False}
 
 
+def test_cloud_readiness_progress_is_local_and_request_scoped(api, monkeypatch):
+    from mizan import cloud
+
+    bridge, _ = api
+    check = cloud._ReadinessCheck(("settings",))
+    check.set_progress("ACR image", "Authenticating with the selected registry.")
+    cancelled = Event()
+    cloud._readiness_requests["progress-request"] = (check, cancelled)
+    monkeypatch.setattr(cloud, "_job_capabilities",
+                        lambda *_args: pytest.fail("Progress polling launched Azure readiness"))
+    try:
+        progress = bridge.cloud_readiness_progress("progress-request")
+        assert progress["ok"] is True
+        assert progress["stage"] == "ACR image"
+        assert progress["detail"] == "Authenticating with the selected registry."
+        assert progress["elapsedSeconds"] >= 0
+        assert bridge.cloud_readiness_progress("unknown-request") == {
+            "ok": True, "stage": "idle", "detail": None, "elapsedSeconds": 0,
+            "timeoutSeconds": cloud.READINESS_TIMEOUT}
+    finally:
+        cloud._readiness_requests.pop("progress-request", None)
+
+
+@pytest.mark.parametrize("request_id", [None, "", "x" * 129, 42, []])
+def test_cloud_readiness_progress_rejects_invalid_request_ids(api, request_id):
+    bridge, _ = api
+    result = bridge.cloud_readiness_progress(request_id)
+    assert result["ok"] is False
+    assert result["error"]["code"] == "cloud_failed"
+    assert result["error"]["message"] == "The Azure readiness request ID is invalid."
+
+
 def test_cloud_mode_api_returns_saved_setup_without_live_readiness(api, monkeypatch):
     from mizan import cloud
     from test_cloud import SETUP
