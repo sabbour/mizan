@@ -1,5 +1,6 @@
 from threading import Event
 from io import BytesIO
+import http.client
 import json
 import logging
 import socket
@@ -8,7 +9,8 @@ import urllib.error
 
 import pytest
 
-from mizan.cloud_transport import CloudTransport, CloudTransportError
+from mizan.cloud_transport import (MAX_ARM_ERROR_BYTES, CloudTransport,
+                                   CloudTransportError)
 from mizan.cloud_auth import AzureSignInError
 from mizan.errors import Cancelled
 
@@ -95,23 +97,166 @@ def test_http_failure_logs_request_id_without_bearer_token(monkeypatch, caplog):
     assert secret not in caplog.text
 
 
+def test_http_failure_surfaces_sanitized_provider_details_without_replaying_post(
+        monkeypatch, caplog):
+    from mizan import cloud_transport
+
+    token = "hf_abcdefghijklmnopqrstuvwxyz"
+    message = (f"Unknown properties volumes are not supported; Bearer private-token "
+               f"{token} https://storage.example/?sig=private-signature")
+    calls = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request.get_method())
+            raise cloud_transport.urllib.error.HTTPError(
+                request.full_url, 400, "Bad Request",
+                {"x-ms-request-id": "request-400"},
+                BytesIO(json.dumps({"error": {
+                    "code": "BadRequest", "message": message,
+                }}).encode()),
+            )
+
+    monkeypatch.setattr(cloud_transport, "token", lambda *args: "unused-token")
+    monkeypatch.setattr(cloud_transport.urllib.request, "build_opener", lambda *args: Opener())
+    with caplog.at_level(logging.WARNING, logger="mizan.cloud_transport"):
+        with pytest.raises(CloudTransportError) as raised:
+            CloudTransport(CONFIG)._open(
+                "https://management.azure.com/subscriptions/test/jobs/test/start",
+                scope="https://management.azure.com/.default", method="POST", data=b"{}")
+
+    assert "HTTP 400" in str(raised.value)
+    assert "BadRequest" in str(raised.value)
+    assert "Unknown properties volumes" in str(raised.value)
+    assert token not in str(raised.value)
+    assert "private-token" not in str(raised.value)
+    assert "private-signature" not in str(raised.value)
+    assert "request_id=request-400" in caplog.text
+    assert "BadRequest" in caplog.text
+    assert "private-token" not in caplog.text
+    assert calls == ["POST"]
+
+
+def test_http_failure_redacts_bearer_credentials_from_provider_message(monkeypatch):
+    from mizan import cloud_transport
+
+    message = "Provider rejected the request: " + "Bear" + "er private-token"
+
+    class Opener:
+        def open(self, request, timeout):
+            raise cloud_transport.urllib.error.HTTPError(
+                request.full_url, 400, "Bad Request", {},
+                BytesIO(json.dumps({"error": {"message": message}}).encode()),
+            )
+
+    monkeypatch.setattr(cloud_transport, "token", lambda *args: "unused-token")
+    monkeypatch.setattr(cloud_transport.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(CloudTransportError) as raised:
+        CloudTransport(CONFIG)._open(
+            "https://management.azure.com/subscriptions/test/jobs/test/start",
+            scope="https://management.azure.com/.default", method="POST", data=b"{}")
+
+    assert "Provider rejected the request" in str(raised.value)
+    assert "private-token" not in str(raised.value)
+
+
+@pytest.mark.parametrize(("body", "read_failure", "expected"), [
+    (b"{invalid json", False, "malformed error details"),
+    (b"x" * (MAX_ARM_ERROR_BYTES + 1), False, "exceeded the size limit"),
+    (b"", OSError, "details could not be read"),
+    (b"", http.client.IncompleteRead, "details could not be read"),
+])
+def test_http_failure_reports_unavailable_provider_details_explicitly(
+        monkeypatch, body, read_failure, expected):
+    from mizan import cloud_transport
+
+    class ErrorBody(BytesIO):
+        def read(self, size=-1):
+            if read_failure:
+                if read_failure is http.client.IncompleteRead:
+                    raise read_failure(b"partial-provider-body")
+                raise read_failure("raw provider body must not be surfaced")
+            self.requested = size
+            return super().read(size)
+
+    response_body = ErrorBody(body)
+
+    class Opener:
+        def open(self, request, timeout):
+            raise cloud_transport.urllib.error.HTTPError(
+                request.full_url, 400, "Bad Request",
+                {"x-ms-request-id": "request-400"}, response_body,
+            )
+
+    monkeypatch.setattr(cloud_transport, "token", lambda *args: "unused-token")
+    monkeypatch.setattr(cloud_transport.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(CloudTransportError) as raised:
+        CloudTransport(CONFIG)._open(
+            "https://management.azure.com/subscriptions/test/jobs/test/start",
+            scope="https://management.azure.com/.default", method="POST", data=b"{}")
+
+    assert "HTTP 400" in str(raised.value)
+    assert expected in str(raised.value)
+    assert "raw provider body" not in str(raised.value)
+    assert "partial-provider-body" not in str(raised.value)
+    if not read_failure:
+        assert response_body.requested == MAX_ARM_ERROR_BYTES + 1
+
+
+def test_http_404_remains_not_found_without_reading_provider_body(monkeypatch):
+    from mizan import cloud_transport
+
+    class ErrorBody(BytesIO):
+        def read(self, size=-1):
+            pytest.fail("A 404 response body should not be read.")
+
+    class Opener:
+        def open(self, request, timeout):
+            raise cloud_transport.urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", {}, ErrorBody(b"{}"),
+            )
+
+    monkeypatch.setattr(cloud_transport, "token", lambda *args: "unused-token")
+    monkeypatch.setattr(cloud_transport.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(FileNotFoundError, match="Azure resource not found"):
+        CloudTransport(CONFIG)._open(
+            "https://management.azure.com/subscriptions/test/jobs/test",
+            scope="https://management.azure.com/.default",
+        )
+
+
+@pytest.mark.parametrize("volumes", [
+    [],
+    [{"name": "cache", "storageType": "EmptyDir"}],
+])
 @pytest.mark.parametrize(("model", "resources"), [
     ("muscriptor-small", {"cpu": 2, "memory": "8Gi"}),
     ("muscriptor-medium", {"cpu": 4, "memory": "16Gi"}),
     ("muscriptor-large", {"cpu": 8, "memory": "32Gi"}),
 ])
 def test_job_uses_per_execution_model_budget_and_preserves_template(
-        monkeypatch, tmp_path, model, resources):
+        monkeypatch, tmp_path, model, resources, volumes):
     transport = CloudTransport(CONFIG)
     original = job_template()
     template = original["properties"]["template"]
-    template["initContainers"] = [{"name": "prepare", "image": "helper:latest", "args": ["keep"]}]
-    template["volumes"] = [{"name": "cache", "storageType": "EmptyDir"}]
+    template["containers"][0]["resources"]["ephemeralStorage"] = "20Gi"
+    template["initContainers"] = [{
+        "name": "prepare", "image": "helper:latest", "args": ["keep"],
+        "command": ["/prepare"], "env": [{"name": "PREPARE", "value": "yes"}],
+        "resources": {"cpu": 0.25, "memory": "1Gi", "ephemeralStorage": "2Gi"},
+        "volumeMounts": [{"name": "cache", "mountPath": "/cache"}],
+    }]
+    template["volumes"] = volumes
     template["scale"] = {"minExecutions": 0, "maxExecutions": 1, "rules": []}
+    template["jobOnlyField"] = "not-for-start"
+    template["containers"][0]["command"] = ["/worker"]
+    template["containers"][0]["volumeMounts"] = [{"name": "cache", "mountPath": "/cache"}]
+    template["containers"][0]["probes"] = [{"type": "Liveness"}]
     template["containers"].append({
         "name": "sidecar", "image": "sidecar:latest", "args": ["unchanged"],
-        "resources": {"cpu": 0.25, "memory": "1Gi"},
+        "resources": {"cpu": 0.25, "memory": "1Gi", "ephemeralStorage": "2Gi"},
         "env": [{"name": "SIDE", "value": "car"}],
+        "volumeMounts": [{"name": "cache", "mountPath": "/cache"}],
     })
     before = json.loads(json.dumps(original))
     calls = []
@@ -147,12 +292,39 @@ def test_job_uses_per_execution_model_budget_and_preserves_template(
     assert result == {"model": model}
     assert len(names) == 8 and names[0].endswith("/input.wav")
     started = next(call for call in calls if call[1] == "/start")
-    expected = json.loads(json.dumps(before["properties"]["template"]))
+
+    def start_container(container):
+        projected = {name: value for name, value in container.items()
+                     if name in ("args", "command", "env", "image", "name", "resources")}
+        if isinstance(projected.get("resources"), dict):
+            projected["resources"] = {name: projected["resources"][name]
+                                      for name in ("cpu", "memory")
+                                      if name in projected["resources"]}
+        return projected
+
+    expected = {
+        field: [start_container(container)
+                for container in before["properties"]["template"][field]]
+        for field in ("containers", "initContainers")
+        if field in before["properties"]["template"]
+    }
     expected["containers"][0]["args"] = [names[0], names[1], model]
     expected["containers"][0]["resources"] = resources
     assert started[2] == expected
+    assert set(started[2]) == {"containers", "initContainers"}
     assert started[2]["containers"][0]["args"] == [names[0], names[1], model]
     assert started[2]["containers"][0]["env"][0] == {"name": "HF_TOKEN", "secretRef": "hf-token"}
+    assert started[2]["containers"][0]["env"][1] == {
+        "name": "AZURE_CLIENT_ID", "value": "identity-client",
+    }
+    assert started[2]["containers"][0]["command"] == ["/worker"]
+    assert started[2]["containers"][1]["args"] == ["unchanged"]
+    assert started[2]["initContainers"][0]["command"] == ["/prepare"]
+    assert started[2]["initContainers"][0]["env"] == [{"name": "PREPARE", "value": "yes"}]
+    assert started[2]["initContainers"][0]["resources"] == {"cpu": 0.25, "memory": "1Gi"}
+    assert all("ephemeralStorage" not in container.get("resources", {})
+               for field in ("containers", "initContainers")
+               for container in started[2][field])
     assert original == before
     assert [message for stage, _, message in reports if stage == "detect"][:5] == [
         "Connecting to Azure GPU processing", "Uploading prepared audio",
@@ -169,7 +341,7 @@ def test_large_execution_budget_never_reduces_existing_resources(monkeypatch, tm
     original = json.loads(json.dumps(template))
     execution = _execution_template(template, "muscriptor-large", "input.wav", "result.json", CONFIG)
     worker = execution["containers"][0]
-    assert worker["resources"] == {"cpu": 12, "memory": "64Gi", "ephemeralStorage": "20Gi"}
+    assert worker["resources"] == {"cpu": 12, "memory": "64Gi"}
     assert template == original
 
 

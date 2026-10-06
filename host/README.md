@@ -151,9 +151,15 @@ in the app; Medium and Large may require more resources.
 Each Cloud execution uses a conservative per-model resource budget: Small 2 vCPU /
 8 GiB, Medium 4 vCPU / 16 GiB, and Large 8 vCPU / 32 GiB. These are policy
 allocations, not measured minimums or proof that a model completes successfully.
-The worker copies the saved Job template for each execution and raises only the
-worker container's resources to that budget when needed; it never reduces a
-larger existing request or patches the shared Job.
+Before starting a run, the host reads the saved Job and builds the request from
+the fields supported by the [2024-03-01 Start API](https://learn.microsoft.com/en-us/rest/api/resource-manager/containerapps/jobs/start?view=rest-resource-manager-containerapps-2024-03-01):
+top-level `containers` and `initContainers`, with container `name`, `image`,
+`args`, `command`, `env` and `resources`. Job-only fields such as `volumes` and
+`scale` are not copied into the start request; neither are unsupported
+`volumeMounts`, probes or read-only `resources.ephemeralStorage`. The existing
+Job and its volume definitions are not patched.
+The host raises only the worker container's resources to the selected budget
+when needed and never reduces a larger existing request.
 Customer preflight checks the deployed Job's CPU/memory against the saved
 requests; changing them requires registering the updated Job.
 Accepted 2/8 and successful Small/Large worker runs do not guarantee lower

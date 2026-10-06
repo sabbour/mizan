@@ -4,7 +4,7 @@ from threading import Event
 
 import pytest
 
-from mizan.api import Api, _stage_details
+from mizan.api import Api, _stage_details, queue_job
 from mizan.jobs import JobRunner, JobStore
 
 from test_jobs import URL, wait_for
@@ -89,6 +89,24 @@ def test_success_envelopes_and_completed_result(api):
     assert result["job"]["status"] == "done"
     assert bridge.list_jobs() == {"ok": True, "jobs": [result["job"]]}
     assert bridge.open_result(job["id"]) == result
+    json.dumps(result)
+
+
+def test_cloud_failure_hint_points_to_provider_error_details():
+    result = queue_job({
+        "id": "failed-cloud-job", "kind": "transcribe", "song_id": None,
+        "url": URL, "title": "", "thumbnail": None, "status": "failed",
+        "stage": "detect", "progress": 0, "details": {"processingMode": "cloud"},
+        "created_at": "2026-10-05T00:00:00Z", "updated_at": "2026-10-05T00:00:01Z",
+        "order_index": 0, "error_code": "cloud_failed",
+        "error_message": "Azure POST failed (HTTP 400): BadRequest: Unknown properties volumes.",
+        "instrument": "piano", "transcription_model": "muscriptor-large",
+    })
+
+    assert result["fix"] == (
+        "Review the Azure error details and correct the reported issue before retrying Cloud processing.")
+    assert "sign in" not in result["fix"].lower()
+    assert "connectivity" not in result["fix"].lower()
     json.dumps(result)
 
 

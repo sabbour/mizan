@@ -30,7 +30,7 @@ FIXES = {
     "unsupported_media": "Try a finished, public YouTube video with audio.",
     "insufficient_disk": "Free disk space, then retry the job.",
     "model_failed": "Retry the job. If it fails again, restart Mizan.",
-    "cloud_failed": "Check your Azure sign-in and connectivity, then retry Cloud processing.",
+    "cloud_failed": "Review the Azure error details and correct the reported issue before retrying Cloud processing.",
     "invalid_folder_name": "Use a unique name between 1 and 60 characters.",
     "folder_name_exists": "Choose a different folder name.",
     "folder_not_found": "Refresh the library and try again.",

@@ -1,6 +1,7 @@
 """Private Blob and per-execution Azure Container Apps Job transport."""
 
 import copy
+import http.client
 import json
 import logging
 import math
@@ -25,7 +26,9 @@ from .cloud_network import (ARM_GET_MAX_ATTEMPTS, ARM_GET_MAX_BACKOFF,
 API_VERSION = "2024-03-01"
 MAX_AUDIO_BYTES = 250 * 1024 * 1024
 MAX_WORKER_ERROR_BYTES = 64 * 1024
+MAX_ARM_ERROR_BYTES = 16 * 1024
 STEMS = ("drums", "bass", "other", "vocals", "guitar", "piano")
+START_CONTAINER_FIELDS = ("args", "command", "env", "image", "name", "resources")
 WORKER_ERROR_STAGES = {
     "startup", "credentials", "storage", "download", "separate",
     "transcribe", "upload_stems", "upload_result",
@@ -66,7 +69,7 @@ def _execution_resources(model: str, resources: dict) -> dict:
     memory_value = float(match.group(1)) if match else 0
     if not math.isfinite(memory_value) or memory_value <= 0:
         raise CloudTransportError("The Azure GPU Job has invalid container memory resources.")
-    result = copy.deepcopy(resources)
+    result = {"cpu": cpu, "memory": memory}
     if cpu_value < cpu_budget:
         result["cpu"] = cpu_budget
     if memory_value < memory_budget:
@@ -81,7 +84,33 @@ def _execution_template(job: dict, model: str, source: str, result: str,
     template = properties.get("template") if isinstance(properties, dict) else None
     if not isinstance(template, dict):
         raise CloudTransportError("The Azure GPU Job has an invalid execution template.")
-    execution = copy.deepcopy(template)
+    execution = {}
+    for field in ("containers", "initContainers"):
+        if field not in template:
+            if field == "containers":
+                raise CloudTransportError("The Azure GPU Job has an invalid container template.")
+            continue
+        source_containers = template[field]
+        if source_containers is None and field == "initContainers":
+            continue
+        if not isinstance(source_containers, list):
+            raise CloudTransportError(f"The Azure GPU Job has invalid {field}.")
+        containers = []
+        for source_container in source_containers:
+            if not isinstance(source_container, dict):
+                raise CloudTransportError(f"The Azure GPU Job has invalid {field}.")
+            container = {
+                name: copy.deepcopy(source_container[name])
+                for name in START_CONTAINER_FIELDS if name in source_container
+            }
+            resources = source_container.get("resources")
+            if isinstance(resources, dict):
+                container["resources"] = {
+                    name: copy.deepcopy(resources[name])
+                    for name in ("cpu", "memory") if name in resources
+                }
+            containers.append(container)
+        execution[field] = containers
     containers = execution.get("containers")
     if not isinstance(containers, list) or not containers:
         raise CloudTransportError("The Azure GPU Job has an invalid container template.")
@@ -232,7 +261,51 @@ class CloudTransport:
                     service, method, exc.code, request_id)
                 if exc.code == 404:
                     raise FileNotFoundError("Azure resource not found.") from None
-                raise CloudTransportError(f"Azure {method} failed (HTTP {exc.code}).") from None
+                try:
+                    body = exc.read(MAX_ARM_ERROR_BYTES + 1)
+                except (http.client.HTTPException, OSError, ValueError):
+                    provider_code, provider_message, detail_status = None, None, "unreadable"
+                else:
+                    if not isinstance(body, bytes):
+                        provider_code, provider_message, detail_status = None, None, "malformed"
+                    elif len(body) > MAX_ARM_ERROR_BYTES:
+                        provider_code, provider_message, detail_status = None, None, "oversized"
+                    else:
+                        try:
+                            envelope = json.loads(body)
+                        except (ValueError, RecursionError):
+                            provider_code, provider_message, detail_status = None, None, "malformed"
+                        else:
+                            azure_error = envelope.get("error") if isinstance(envelope, dict) else None
+                            if not isinstance(azure_error, dict):
+                                provider_code, provider_message, detail_status = None, None, "malformed"
+                            else:
+                                raw_code = azure_error.get("code")
+                                raw_message = azure_error.get("message")
+                                provider_code = (_safe_azure_text(raw_code)
+                                                 if isinstance(raw_code, str) else "")
+                                provider_message = (_safe_azure_text(raw_message)
+                                                    if isinstance(raw_message, str) else "")
+                                provider_code = provider_code or None
+                                provider_message = provider_message or None
+                                detail_status = ("available" if provider_code or provider_message
+                                                 else "malformed")
+                logger.warning(
+                    "Azure request error details service=%s method=%s status=%s request_id=%s "
+                    "detail_status=%s provider_code=%s provider_message=%s",
+                    service, method, exc.code, request_id, detail_status,
+                    provider_code, provider_message)
+                if provider_code or provider_message:
+                    detail = ": ".join(part for part in (provider_code, provider_message) if part)
+                    message = f"Azure {method} failed (HTTP {exc.code}): {detail}."
+                else:
+                    detail_message = {
+                        "unreadable": "Azure error details could not be read.",
+                        "oversized": "Azure error details exceeded the size limit.",
+                        "malformed": "Azure returned malformed error details.",
+                    }.get(detail_status, "Azure error details were unavailable.")
+                    message = f"Azure {method} failed (HTTP {exc.code}); {detail_message}"
+                raise CloudTransportError(message) from None
             except (urllib.error.URLError, OSError) as exc:
                 if cancelled and cancelled.is_set():
                     raise Cancelled() from None
