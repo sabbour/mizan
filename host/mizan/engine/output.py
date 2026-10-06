@@ -4,6 +4,7 @@ from xml.etree import ElementTree as ET
 
 import mido
 
+from ..meter import bar_index, song_bar_map
 from .accompaniment import generate_accompaniment
 from .drums import GM_DRUMS
 
@@ -48,6 +49,7 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
                vocals: list[dict] | None = None) -> dict:
     bpm, bars = harmony["bpm"], harmony["bars"]
     beats_per_bar = harmony["beatsPerBar"]
+    bar_map = song_bar_map(harmony)
     phase = harmony["timing"]["phaseSeconds"]
     piano_output = []
     for note in piano:
@@ -80,8 +82,8 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
     def confidence(events):
         values = [[] for _ in range(bars)]
         for event in events:
-            first = min(bars - 1, math.floor(event["startBeat"] / beats_per_bar))
-            last = min(bars - 1, math.floor((event["startBeat"] + event.get("beats", 0) - 1e-8) / beats_per_bar))
+            first = bar_index(bar_map, event["startBeat"])
+            last = bar_index(bar_map, event["startBeat"] + event.get("beats", 0) - 1e-8)
             for bar in range(first, max(first, last) + 1):
                 values[bar].append(event["confidence"])
         return ["high" if row and sum(row) / len(row) >= 0.8 else
@@ -92,6 +94,7 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
     return {
         "title": title, "source": source, "bpm": bpm, "beatsPerBar": beats_per_bar,
         "beatUnit": harmony.get("beatUnit", 4), "bars": bars,
+        **({"barMap": bar_map} if "barMap" in harmony else {}),
         "key": harmony["key"], "sections": harmony["sections"], "chords": chords,
         "piano": piano_output, "drums": drum_output, "vocals": vocal_output,
         "accompaniment": accompaniment, "tracks": tracks,
@@ -109,9 +112,18 @@ def export_midi(song: dict, path: Path) -> None:
     midi = mido.MidiFile(ticks_per_beat=480)
     tempo = mido.MidiTrack()
     tempo.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(song["bpm"])))
-    beat_unit = song.get("beatUnit", 4)
-    tempo.append(mido.MetaMessage("time_signature", numerator=round(song["beatsPerBar"] * beat_unit / 4),
-                                  denominator=beat_unit))
+    bar_map = song_bar_map(song)
+    end_tick = round((bar_map[-1]["startBeat"] + bar_map[-1]["beats"]) * midi.ticks_per_beat)
+    previous_signature, previous_tick, previous_bar = None, 0, None
+    for bar in bar_map:
+        signature = (bar["numerator"], bar["denominator"])
+        if signature != previous_signature or previous_bar is not None and previous_bar.get("partial"):
+            tick = round(bar["startBeat"] * midi.ticks_per_beat)
+            tempo.append(mido.MetaMessage("time_signature", numerator=signature[0],
+                                          denominator=signature[1], time=tick - previous_tick))
+            previous_signature, previous_tick = signature, tick
+        previous_bar = bar
+    tempo.append(mido.MetaMessage("end_of_track", time=end_tick - previous_tick))
     midi.tracks.append(tempo)
     fractional = any(
         note["midi"] != int(note["midi"])
@@ -146,8 +158,8 @@ def export_midi(song: dict, path: Path) -> None:
         active = {}
         owned = []
         for event in sorted(events, key=lambda item: item["startBeat"]):
-            start = max(0, round(event["startBeat"] * 480))
-            end = start + max(1, round(event.get("beats", 0.1) * 480))
+            start = max(0, round(event["startBeat"] * midi.ticks_per_beat))
+            end = max(start + 1, round((event["startBeat"] + event.get("beats", 0.1)) * midi.ticks_per_beat))
             pitch = GM_DRUMS[event["lane"]] if channel == 9 else event["midi"]
             if fractional and channel != 9:
                 channel = next((value for value in owned if active[value] <= start), None)
@@ -179,6 +191,7 @@ def export_midi(song: dict, path: Path) -> None:
             message.time = tick - previous
             output.append(message)
             previous = tick
+        output.append(mido.MetaMessage("end_of_track", time=max(0, end_tick - previous)))
         midi.tracks.append(output)
     midi.save(path)
 
@@ -204,7 +217,23 @@ def export_musicxml(song: dict, path: Path) -> None:
     root = ET.Element("score-partwise", version="4.0")
     part_list = ET.SubElement(root, "part-list")
     division = 480
-    bar_ticks = round(song["beatsPerBar"] * division)
+    bar_map = song_bar_map(song)
+    small_bars = [bar for bar in bar_map if bar["beats"] < 1 / division]
+    gaps = [bar["beats"] for bar in small_bars]
+    for track in song["tracks"]:
+        if not exportable_track(track):
+            continue
+        for event in _track_events(song, track):
+            onset = event["startBeat"]
+            end = onset + event.get("beats", 0.1)
+            for bar in small_bars:
+                first, last = bar["startBeat"], bar["startBeat"] + bar["beats"]
+                if onset < last and end > first:
+                    points = sorted({first, last, max(first, onset), min(last, end)})
+                    gaps.extend(right - left for left, right in zip(points, points[1:]))
+    if gaps:
+        while min(gaps) * division < 2:
+            division *= 2
     for track in song["tracks"]:
         if not exportable_track(track):
             continue
@@ -222,17 +251,26 @@ def export_musicxml(song: dict, path: Path) -> None:
         part = ET.SubElement(root, "part", id=part_id)
         drum = track["instrument"] == "drums"
         events = [(max(0, round(event["startBeat"] * division)),
-                   max(1, round(event.get("beats", 0.1) * division)), event)
+                   max(1, round((event["startBeat"] + event.get("beats", 0.1)) * division)
+                       - max(0, round(event["startBeat"] * division))), event)
                   for event in _track_events(song, track)]
-        for bar in range(song["bars"]):
-            measure = ET.SubElement(part, "measure", number=str(bar + 1))
-            if bar == 0:
+        for bar, span in enumerate(bar_map):
+            start_tick = round(span["startBeat"] * division)
+            end_tick = round((span["startBeat"] + span["beats"]) * division)
+            bar_ticks = end_tick - start_tick
+            measure = ET.SubElement(part, "measure", number=str(bar + 1),
+                                    **({"implicit": "yes"} if span.get("partial") else {}))
+            changed = bar == 0 or any(
+                span[key] != bar_map[bar - 1][key] for key in ("numerator", "denominator"))
+            if changed:
                 attrs = ET.SubElement(measure, "attributes")
+            if bar == 0:
                 ET.SubElement(attrs, "divisions").text = str(division)
+            if changed:
                 time = ET.SubElement(attrs, "time")
-                beat_unit = song.get("beatUnit", 4)
-                ET.SubElement(time, "beats").text = str(round(song["beatsPerBar"] * beat_unit / 4))
-                ET.SubElement(time, "beat-type").text = str(beat_unit)
+                ET.SubElement(time, "beats").text = str(span["numerator"])
+                ET.SubElement(time, "beat-type").text = str(span["denominator"])
+            if bar == 0:
                 clef = ET.SubElement(attrs, "clef")
                 ET.SubElement(clef, "sign").text = "percussion" if drum else "G"
                 if not drum:
@@ -242,11 +280,11 @@ def export_musicxml(song: dict, path: Path) -> None:
                 ET.SubElement(direction, "sound", tempo=str(song["bpm"]))
             cursor = 0
             for onset, length, event in sorted(events, key=lambda item: item[0]):
-                start = max(onset, bar * bar_ticks)
-                end = min(onset + length, (bar + 1) * bar_ticks)
+                start = max(onset, start_tick)
+                end = min(onset + length, end_tick)
                 if end <= start:
                     continue
-                position = start - bar * bar_ticks
+                position = start - start_tick
                 if position != cursor:
                     move = ET.SubElement(measure, "forward" if position > cursor else "backup")
                     ET.SubElement(move, "duration").text = str(abs(position - cursor))

@@ -3,6 +3,7 @@ import type { Engine } from './engine'
 import { useFrame } from './hooks'
 import type { Layout } from './Score'
 import { DRUM_LANES, displaySymbol, type Instrument, type MelodyNote, type Song } from './song'
+import { barAt, barStart, measures, songBeats } from './meter'
 
 const INK = '#111111'
 const RAIN = '#8a8f94'
@@ -22,7 +23,7 @@ type Props = {
 
 function envelope(song: Song): Float32Array {
   const perBeat = 8
-  const env = new Float32Array(song.bars * song.beatsPerBar * perBeat)
+  const env = new Float32Array(Math.ceil(songBeats(song) * perBeat))
   const add = (beat: number, v: number, decay: number) => {
     for (let i = 0; i < 12; i++) {
       const k = Math.floor(beat * perBeat) + i
@@ -67,19 +68,19 @@ export function Guide({ song, engine, layout, instrument, trackId, study, showWa
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
 
-    const bpb = song.beatsPerBar
-    const barIdx = Math.min(Math.floor(t.beat / bpb), layout.bars.length - 1)
+    const barIdx = Math.min(barAt(song, t.beat), layout.bars.length - 1)
     const system = layout.bars[barIdx]?.system ?? 0
     const boxes = layout.bars.filter((b) => b.system === system)
     if (!boxes.length) return
     const xAt = (beat: number) => {
-      const i = Math.floor(beat / bpb)
+      const i = barAt(song, beat)
       const box = boxes.find((b) => b.bar === i + 1)
       if (!box) return null
-      return box.x + box.inset + (beat / bpb - i) * (box.w - box.inset)
+      const span = measures(song)[i]
+      return box.x + box.inset + (beat - span.startBeat) / span.beats * (box.w - box.inset)
     }
-    const first = (boxes[0].bar - 1) * bpb
-    const last = boxes[boxes.length - 1].bar * bpb
+    const first = barStart(song, boxes[0].bar - 1)
+    const last = barStart(song, boxes[boxes.length - 1].bar)
 
     const chordH = 26
     const waveH = study && showWave ? 30 : 0
@@ -191,7 +192,10 @@ export function Guide({ song, engine, layout, instrument, trackId, study, showWa
       for (let px = Math.ceil(x0); px < boxes[boxes.length - 1].x + boxes[boxes.length - 1].w; px += 2) {
         let beat = -1
         for (const b of boxes) {
-          if (px >= b.x + b.inset && px < b.x + b.w) beat = (b.bar - 1) * bpb + ((px - b.x - b.inset) / (b.w - b.inset)) * bpb
+          if (px >= b.x + b.inset && px < b.x + b.w) {
+            const measure = measures(song)[b.bar - 1]
+            beat = measure.startBeat + ((px - b.x - b.inset) / (b.w - b.inset)) * measure.beats
+          }
         }
         if (beat < 0) continue
         const v = wave[Math.floor(beat * 8)] ?? 0

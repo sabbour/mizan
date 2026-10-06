@@ -35,7 +35,8 @@ def test_quarter_tone_musicxml_roundtrip_and_independent_midi_bends(tmp_path):
     _, _, _, _, roundtrip = parse_musicxml((tmp_path / "quarter.musicxml").read_bytes(), ".musicxml")
     assert sorted(note["midi"] for note in roundtrip[0]["notes"]) == [60.5, 63.5]
 
-    sustained = {**song, "bars": 2, "piano": [{**song["piano"][0], "beats": 5}]}
+    sustained = {**song, "bars": 2, "piano": [{**song["piano"][0], "beats": 5}],
+                 "barMap": [*song["barMap"], {**song["barMap"][0], "startBeat": 4}]}
     export_musicxml(sustained, tmp_path / "tied.musicxml")
     _, _, _, _, tied = parse_musicxml((tmp_path / "tied.musicxml").read_bytes(), ".musicxml")
     assert [(note["midi"], note["beats"]) for note in tied[0]["notes"]] == [(60.5, 5)]

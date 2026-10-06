@@ -3,6 +3,7 @@ import type { Engine } from './engine'
 import { Keys } from './Keys'
 import { useFrame, useReducedMotion } from './hooks'
 import { centred, chordAt, chordName, displaySymbol, type Confidence, type Song } from './song'
+import { barAt, measures } from './meter'
 
 type Props = {
   song: Song
@@ -33,7 +34,7 @@ export function ChordChart({ song, engine, bar, loop, confidence, onPick, previe
   const current = useRef<HTMLButtonElement>(null)
   const fill = useRef<HTMLSpanElement>(null)
   const reduced = useReducedMotion()
-  const bpb = song.beatsPerBar
+  const barMap = measures(song)
   const rows = rowsOf(song)
   const sustainedFrom = (i: number) => {
     let start = song.chords[i].startBeat
@@ -50,7 +51,8 @@ export function ChordChart({ song, engine, bar, loop, confidence, onPick, previe
   const [chordIdx, setChordIdx] = useState(0)
 
   useFrame(engine, (t) => {
-    if (fill.current) fill.current.style.transform = `scaleX(${Math.min(1, t.beat / bpb - Math.floor(t.beat / bpb))})`
+    const span = barMap[barAt(song, t.beat)]
+    if (fill.current) fill.current.style.transform = `scaleX(${Math.min(1, (t.beat - span.startBeat) / span.beats)})`
     const i = chordAt(song, t.beat)
     if (i !== chordIdx) setChordIdx(i)
   })
@@ -68,7 +70,7 @@ export function ChordChart({ song, engine, bar, loop, confidence, onPick, previe
             {row.section && <h2 className="chart-section">{row.section}</h2>}
             <div className="chart-row">
               {row.bars.map((n) => {
-                const start = (n - 1) * bpb
+                const { startBeat: start, beats: bpb } = barMap[n - 1]
                 const starting = song.chords.map((c, i) => ({ c, i })).filter(({ c }) => c.startBeat >= start && c.startBeat < start + bpb)
                 const held = starting.length ? null : song.chords.findIndex((c) => c.startBeat < start && c.startBeat + c.beats > start)
                 return (

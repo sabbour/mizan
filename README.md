@@ -76,7 +76,13 @@ Small and Medium can analyze the original mix while HT-Demucs makes listening tr
 
 ## Import and playback limits
 
-Imported MIDI and MusicXML keep their written meter, including 3/8 and 6/8. Audio analysis uses 4/4 or suggests 3/4 from repeated downbeats. Changing time signatures and audio-derived compound meters are outside the current score format.
+Imported MIDI and MusicXML keep their written time signatures, including odd and changing meters, pickups, partial measures, and tied notes. A shared bar timeline drives notation, navigation, loops, count-in, clicks, accompaniment, and exports.
+
+New audio analyses derive rational grouping candidates from measured pulse and accent recurrence rather than choosing from a 3/4-or-4/4 list or a half-quarter grid. Distinct repeated accent boundaries can support changes every measure, including recurring alternating patterns and longer groups that are multiples of shorter ones. Verified acoustic changes are not replaced by fixed model labels at the same tempo. Missing or ambiguous boundaries and weak local patterns remain unverified; insufficient evidence uses an explicitly unverified 4/4 fallback. Confidence describes evidence support, not a calibrated probability. Acoustic grouping cannot prove written spelling (for example, 3/4 versus 6/8) or tempo subdivision. Existing saved analyses and source-note seconds are not rewritten; legacy songs without a bar timeline keep their original fixed bar lengths.
+
+Very short positive partial measures keep their source coverage and notes. MusicXML exports use finer duration precision when needed. If a partial is below the score renderer's precision, its distinct note edges receive drawable spacing in the practice view only; navigation and highlighting still use the original bar positions and note timing.
+
+MIDI uses repeated standard time-signature events to restart a partial bar, even when its signature is unchanged, and end-of-track timing to retain trailing rests. Its 480-tick quarter-note resolution cannot represent sub-tick spans losslessly; use MusicXML for finer source coverage.
 
 Imports keep fractional-semitone pitches from MusicXML and static MIDI pitch bends. Playback and exports retain them within MIDI channel limits. Audio transcription uses twelve-tone piano and chord models.
 

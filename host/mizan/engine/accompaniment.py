@@ -1,6 +1,7 @@
 from itertools import product
 import math
 
+from ..meter import bar_index, song_bar_map
 
 def voice_chord(tones: list[int], previous: list[int] | None = None) -> list[int]:
     pcs = sorted({tone % 12 for tone in tones})
@@ -24,6 +25,7 @@ def voice_chord(tones: list[int], previous: list[int] | None = None) -> list[int
 def generate_accompaniment(harmony: dict) -> list[dict]:
     notes = []
     previous = None
+    bar_map = song_bar_map(harmony) if "bars" in harmony else None
     beats_per_bar = harmony.get("beatsPerBar", 4)
     for chord in harmony["chords"]:
         if chord["symbol"] in (None, "N.C.") or not chord["tones"]:
@@ -33,12 +35,19 @@ def generate_accompaniment(harmony: dict) -> list[dict]:
         root = 36 + chord["tones"][0] % 12
         position = chord["startBeat"]
         end = position + chord["beats"]
+        if bar_map:
+            map_end = bar_map[-1]["startBeat"] + bar_map[-1]["beats"]
+            if end <= map_end + 1e-6:
+                end = min(end, map_end)
         while position < end - 1e-8:
-            bar_end = (math.floor(position / beats_per_bar) + 1) * beats_per_bar
+            index = bar_index(bar_map, position) if bar_map else math.floor(position / beats_per_bar)
+            bar_end = (bar_map[index]["startBeat"] + bar_map[index]["beats"] if bar_map else
+                       (index + 1) * beats_per_bar)
             length = min(end, bar_end) - position
+            if length <= 1e-8:
+                raise ValueError("Generated accompaniment extends beyond the bar map.")
             section = next((i for i, section in enumerate(harmony["sections"])
-                            if (section["startBar"] - 1) * beats_per_bar <= position
-                            < (section["startBar"] - 1 + section["bars"]) * beats_per_bar), 0)
+                            if section["startBar"] - 1 <= index < section["startBar"] - 1 + section["bars"]), 0)
             energy = harmony["sectionEnergy"][section] if harmony["sectionEnergy"] else 0
             style = "block" if energy < 0.35 else "arpeggio" if energy < 0.7 else "pop"
 

@@ -5,6 +5,8 @@
 // Add --harmony for melody/chord harmony, unknown-sustain playback and controls.
 // Add --delete-score to check confirmation, saved score removal and recording stems in the mock workspace.
 // Add --timing for scheduled note onsets and active noteheads at normal and half speed.
+// Add --scroll-follow to check score follow visibility only.
+// Add --meter to check changing-meter engraving and workspace navigation.
 // MIZAN_TEST_OPENED optionally points to a live Api.open_song JSON response for the Cairokee benchmark.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
@@ -12,6 +14,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { analysisChecks, vocalChecks } from './vocal-analysis.mjs'
 import { instrumentChecks } from './instrument-workspace.mjs'
+import { browserMeterChecks } from './meter.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const testUrl = process.env.MIZAN_TEST_URL ?? 'http://localhost:5173'
@@ -69,9 +72,12 @@ try {
   const chartsOnly = process.argv.includes('--charts')
   const deleteOnly = process.argv.includes('--delete-score')
   const timingOnly = process.argv.includes('--timing')
+  const scrollOnly = process.argv.includes('--scroll-follow')
   const instrumentOnly = process.argv.includes('--instrument')
+  const meterOnly = process.argv.includes('--meter')
   const readabilityOnly = process.argv.includes('--cairokee-readability')
   if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
+  if (meterOnly) console.log(await evaluate(`(${browserMeterChecks.toString()})()`))
   if (readabilityOnly) {
     assert.ok(process.env.MIZAN_TEST_CAIROKEE_ANALYSIS, 'Set MIZAN_TEST_CAIROKEE_ANALYSIS to the read-only saved analysis JSON')
     const raw = JSON.parse(await readFile(process.env.MIZAN_TEST_CAIROKEE_ANALYSIS, 'utf8'))
@@ -86,7 +92,10 @@ try {
   if (timingOnly) {
     console.log(await evaluate(`(${timingChecks.toString()})()`))
     console.log(await evaluate(`(${activeHeadChecks.toString()})()`))
+    await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
+    console.log(await evaluate(`(${scrollFollowChecks.toString()})()`))
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    console.log(await evaluate(`(${scrollFollowChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
       for (const noteNames of [false, true]) {
@@ -100,11 +109,18 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
+  if (scrollOnly) {
+    await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
+    console.log(await evaluate(`(${scrollFollowChecks.toString()})()`))
+    await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    console.log(await evaluate(`(${scrollFollowChecks.toString()})()`))
+    await call('Emulation.setEmulatedMedia', { features: [] })
+  }
   if (deleteOnly) console.log(await evaluate(`(${deleteScoreChecks.toString()})()`))
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -118,10 +134,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -152,7 +168,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -290,6 +306,172 @@ async function timingChecks() {
     }
     return `Timing checks passed: old cursor miss ${Math.round(Math.abs(oldX - noteX))}px; C4/MIDI 60 mapping, independent chord-note ends, variable tempo, nonzero start, seek and loop at 1x and 0.5x.`
   } finally { host.remove() }
+}
+
+async function scrollFollowChecks() {
+  const { buildSong } = await import('/src/workspace/song.ts')
+  const { pianoXml } = await import('/src/workspace/musicxml.ts')
+  const { Score } = await import('/src/workspace/Score.tsx')
+  const React = (await import('/node_modules/.vite/deps/react.js')).default
+  const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
+  const check = (value, message) => { if (!value) throw new Error(message) }
+  const waitFor = async (test, message) => {
+    for (let i = 0; i < 120; i++) {
+      if (test()) return
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error(typeof message === 'function' ? message() : message)
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 400))
+  const visible = (target, score, inset = 0) => {
+    const bar = target.getBoundingClientRect()
+    const viewport = score.getBoundingClientRect()
+    if (bar.height > viewport.height) return bar.top >= viewport.top && bar.top < viewport.bottom
+    return bar.top >= viewport.top + inset && bar.bottom <= viewport.bottom - inset
+  }
+  const base = buildSong()
+  const bars = 32
+  const song = {
+    ...base,
+    bars,
+    chords: [],
+    drums: [],
+    vocals: [],
+    sections: [],
+    piano: Array.from({ length: bars }, (_, index) => ({
+      midi: index < 4 ? 96 : index < 8 ? 36 : 60 + index % 12,
+      startBeat: index * base.beatsPerBar, beats: 1, hand: index < 4 ? 'right' : 'left',
+    })),
+  }
+  const xml = pianoXml(song)
+  const beatsPerBar = song.beatsPerBar
+
+  for (const height of [200, 360, 820]) {
+    const mount = document.createElement('div')
+    mount.className = 'ws'
+    mount.style.cssText = `position:fixed;top:0;left:0;width:1100px;height:${height}px;grid-template-rows:56px minmax(0,1fr) 64px`
+    document.body.append(mount)
+    const root = createRoot(mount)
+    const engine = {
+      beat: 0,
+      playing: false,
+      read() { return { beat: this.beat, playing: this.playing, countingIn: false } },
+      seek(beat) { this.beat = beat },
+    }
+    const render = (bar, playing = false) => {
+      engine.seek((bar - 1) * beatsPerBar)
+      engine.playing = playing
+      root.render(React.createElement(React.Fragment, null,
+        React.createElement('header', { className: 'ws-head' }, 'Fixture header'),
+        React.createElement(Score, {
+          xml, song, engine, bar, loop: null, confidence: [], noteNames: false, instrument: 'piano',
+          playing, audioLoading: false, audioError: false, onPick: () => {}, previewId: 'scroll-fixture',
+        }),
+        React.createElement('footer', { className: 'ws-foot' }, 'Fixture transport')))
+    }
+    const score = () => mount.querySelector('.score')
+    const barButton = (bar) => mount.querySelector(`.score-bar[aria-label="Bar ${bar}"]`)
+    const describe = (bar) => {
+      const rect = barButton(bar).getBoundingClientRect()
+      const view = score().getBoundingClientRect()
+      return { bar: { top: rect.top, bottom: rect.bottom, height: rect.height },
+        view: { top: view.top, bottom: view.bottom, height: view.height },
+        scrollTop: score().scrollTop, scrollHeight: score().scrollHeight }
+    }
+
+    try {
+      render(1)
+      await waitFor(() => barButton(1) && visible(barButton(1), score()),
+        `The score renders with the start bar visible in the ${height}px fixture`)
+      const scrollport = score()
+      if (height === 200) {
+        check(barButton(1).getBoundingClientRect().height > scrollport.getBoundingClientRect().height,
+          'The compact fixture has a staff system taller than its score scrollport')
+      }
+      check(mount.querySelector('.ws-head').getBoundingClientRect().bottom <= scrollport.getBoundingClientRect().top + 1,
+        'The score scrollport begins below the header')
+      check(scrollport.getBoundingClientRect().bottom <= mount.querySelector('.ws-foot').getBoundingClientRect().top + 1,
+        'The score scrollport ends above the transport')
+
+      const targets = [...mount.querySelectorAll('.score-bar')]
+      const rowTops = [...new Set(targets.map((target) => Math.round(target.getBoundingClientRect().top)))].sort((a, b) => a - b)
+      const rowGaps = rowTops.slice(1).map((top, index) => top - rowTops[index])
+      check(new Set(rowGaps).size > 1, 'The fixture contains systems with different vertical spacing')
+      const pair = targets.slice(0, -1).map((target, index) => ({
+        first: Number(target.getAttribute('aria-label').slice(4)),
+        second: Number(targets[index + 1].getAttribute('aria-label').slice(4)),
+        top: Math.round(target.getBoundingClientRect().top),
+      })).find((candidate, index) =>
+        candidate.top === Math.round(targets[index + 1].getBoundingClientRect().top))
+      check(pair, 'The fixture contains two bars in one system')
+
+      render(pair.first, true)
+      await waitFor(() => visible(barButton(pair.first), scrollport, 1), 'The active bar is visible before manual scrolling')
+      if (height > 700) {
+        const activeTop = barButton(pair.first).getBoundingClientRect().top
+        const nextSystem = targets.find((target) => {
+          const rect = target.getBoundingClientRect()
+          const view = scrollport.getBoundingClientRect()
+          return rect.top > activeTop + 2 && rect.top >= view.top + 24 && rect.bottom <= view.bottom - 24
+        })
+        check(nextSystem, 'The large fixture keeps a later system visible without scrolling')
+        const nextBar = Number(nextSystem.getAttribute('aria-label').slice(4))
+        const before = scrollport.scrollTop
+        render(nextBar, true)
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        check(Math.abs(scrollport.scrollTop - before) < 1, 'A fully visible later system does not trigger an unnecessary jump')
+      }
+
+      render(pair.first, true)
+      await waitFor(() => visible(barButton(pair.first), scrollport, 1), 'The active bar is visible before the seek')
+      await settle()
+      scrollport.scrollTo({ top: scrollport.scrollHeight, behavior: 'instant' })
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      check(scrollport.scrollTop > 0 && !visible(barButton(pair.first), scrollport),
+        `Manual scrolling can move the active bar out of view at ${height}px (scrollTop ${scrollport.scrollTop}, max ${scrollport.scrollHeight - scrollport.clientHeight})`)
+      render(pair.second, true)
+      await waitFor(() => visible(barButton(pair.second), scrollport, 1),
+        () => `Advancing within one system restores the active bar at ${height}px (${JSON.stringify(describe(pair.second))})`)
+
+      scrollport.scrollTo({ top: 0, behavior: 'instant' })
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const seekBar = height === 200 ? 24 : bars
+      if (height === 200) {
+        check(barButton(seekBar).getBoundingClientRect().height > scrollport.getBoundingClientRect().height,
+          'The later seek target is taller than the compact score scrollport')
+        check(barButton(seekBar).getBoundingClientRect().top >= scrollport.getBoundingClientRect().bottom,
+          'The seek target system starts below the oversized-system fixture viewport')
+      }
+      render(seekBar)
+      await waitFor(() => visible(barButton(seekBar), scrollport, 1),
+        `Seeking to bar ${seekBar} reveals its current staff at ${height}px`)
+      if (height === 200) {
+        render(1)
+        await waitFor(() => visible(barButton(1), scrollport, 1), 'The compact fixture returns to the first bar')
+        await settle()
+        const targetTop = barButton(seekBar).getBoundingClientRect().top
+        const viewportBottom = scrollport.getBoundingClientRect().bottom
+        scrollport.scrollTop += targetTop - viewportBottom + 1
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        const nearBottom = barButton(seekBar).getBoundingClientRect()
+        const viewport = scrollport.getBoundingClientRect()
+        check(nearBottom.top >= viewport.bottom - 2 && nearBottom.top < viewport.bottom,
+          'Only one pixel of the oversized target starts inside the viewport')
+        render(seekBar)
+        await waitFor(() => {
+          const target = barButton(seekBar).getBoundingClientRect()
+          const view = scrollport.getBoundingClientRect()
+          return target.top >= view.top && target.top <= view.top + 13
+        }, 'An oversized target with one pixel visible is aligned near the viewport top')
+      }
+      render(1)
+      await waitFor(() => visible(barButton(1), scrollport, 1), `Seeking to the start keeps bar 1 visible at ${height}px`)
+    } finally {
+      root.unmount()
+      mount.remove()
+    }
+  }
+  return 'Playback-follow checks passed: nested header/transport boundaries, visible-system no-op, same-system follow after manual scrolling, and start/end seeks at compact and tall viewports.'
 }
 
 async function activeHeadChecks() {

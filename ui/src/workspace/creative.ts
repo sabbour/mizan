@@ -1,4 +1,5 @@
 import { alternatives, type Alternative } from './harmonize'
+import { barAt, measures, pulseBeats, songBeats } from './meter'
 import { chordAt, hasPitchedScore, invert, smoothInversions, sustainedChords, type Chord, type PianoNote, type Song, type Track } from './song'
 
 /** A generated part to play along with the song harmonically. Not a transcription: nothing here is what the recording plays. */
@@ -6,22 +7,14 @@ export type CreativeTrack = Track & { chords: Chord[]; piano: PianoNote[] }
 
 /** Preserve sparse source accents; dense bars fall back to two meter-aware attacks. */
 export function accompanimentRhythm(song: Song): number[] {
-  const unit = song.beatUnit ?? 4
-  const numerator = song.beatsPerBar * unit / 4
-  const pulse = unit === 8 && numerator >= 6 && numerator % 3 === 0 ? 1.5 : 4 / unit
-  const totalBeats = song.bars * song.beatsPerBar
-  if (!Number.isSafeInteger(unit) || unit <= 0 || 2 ** Math.round(Math.log2(unit)) !== unit ||
-      !Number.isSafeInteger(numerator) || numerator <= 0 ||
-      !Number.isSafeInteger(song.bars) || song.bars <= 0 ||
-      !Number.isFinite(totalBeats) || totalBeats + pulse <= totalBeats) {
-    throw new RangeError('The song has invalid meter or length data.')
-  }
+  const bars = measures(song)
+  const totalBeats = songBeats(song)
   const percussion = new Map<number, number[]>()
   const backbeat = new Map<number, number[]>()
   const pitched = new Map<number, number[]>()
   const add = (map: Map<number, number[]>, beat: number) => {
     if (!Number.isFinite(beat) || beat < 0 || beat >= totalBeats) return
-    const bar = Math.floor(beat / song.beatsPerBar)
+    const bar = barAt(song, beat)
     const beats = map.get(bar) ?? []
     beats.push(beat)
     map.set(bar, beats)
@@ -34,21 +27,22 @@ export function accompanimentRhythm(song: Song): number[] {
   for (const note of [...song.piano, ...song.vocals, ...Object.values(song.instrumentNotes ?? {}).flat()]) {
     if (note.beats > 0 && (note.velocity ?? 1) > 0) add(pitched, note.startBeat)
   }
-  const compound = unit === 8 && numerator >= 6 && numerator % 3 === 0
-  const second = compound
-    ? Math.round((song.beatsPerBar / 2) / pulse) * pulse
-    : unit === 4
-      ? Math.min(2, song.beatsPerBar - pulse)
-      : Math.min(song.beatsPerBar - pulse, Math.max(pulse, Math.round((song.beatsPerBar / 2) / pulse) * pulse))
-  const anchors = [...new Set([0, second].filter((beat) => beat >= 0 && beat < song.beatsPerBar))]
   const rhythm: number[] = []
-  for (let bar = 0; bar < song.bars; bar++) {
+  for (const [bar, measure] of bars.entries()) {
+    const pulse = pulseBeats(measure)
+    const compound = measure.denominator === 8 && measure.numerator >= 6 && measure.numerator % 3 === 0
+    const second = compound
+      ? Math.round((measure.beats / 2) / pulse) * pulse
+      : measure.denominator === 4
+        ? Math.min(2, measure.beats - pulse)
+        : Math.min(measure.beats - pulse, Math.max(pulse, Math.round((measure.beats / 2) / pulse) * pulse))
+    const anchors = [...new Set([0, second].filter((beat) => beat >= 0 && beat < measure.beats))]
     const local = backbeat.get(bar) ?? percussion.get(bar) ?? pitched.get(bar)
     const unique = local ? [...new Set(local)].sort((a, b) => a - b) : []
     if (unique.length > 0 && unique.length <= 2) rhythm.push(...unique)
-    else if (!unique.length) rhythm.push(...anchors.map((beat) => bar * song.beatsPerBar + beat))
+    else if (!unique.length) rhythm.push(...anchors.map((beat) => measure.startBeat + beat))
     else {
-      const barStart = bar * song.beatsPerBar
+      const barStart = measure.startBeat
       const selected = new Set<number>()
       for (const anchor of anchors) {
         const candidate = unique.filter((beat) => !selected.has(beat))
@@ -123,7 +117,7 @@ function movingChords(song: Song, rhythm: readonly number[], slots: readonly num
         melodyFit(notes, start, end, previous.tones) >= melodyFit(notes, start, end, source.tones) - 0.25) {
       chosen = { ...source, symbol: previous.symbol, numeral: previous.numeral,
         tones: [...previous.tones], flats: previous.flats }
-    } else if (slotSet.has(start) && (changes.get(Math.floor(start / song.beatsPerBar)) ?? 0) < 2) {
+    } else if (slotSet.has(start) && (changes.get(barAt(song, start)) ?? 0) < 2) {
       let options: Alternative[] = []
       try {
         options = alternatives(song, index, 8)
@@ -141,8 +135,8 @@ function movingChords(song: Song, rhythm: readonly number[], slots: readonly num
       if (option) {
         chosen = { ...sourceCopy, symbol: option.symbol, numeral: option.numeral,
           tones: [...option.tones], flats: option.flats }
-        changes.set(Math.floor(start / song.beatsPerBar),
-          (changes.get(Math.floor(start / song.beatsPerBar)) ?? 0) + 1)
+        const bar = barAt(song, start)
+        changes.set(bar, (changes.get(bar) ?? 0) + 1)
       }
     }
     previous = chosen
@@ -221,8 +215,9 @@ function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOpt
   } else {
     const selected = new Map<number, PianoNote>()
     for (const beat of slots) {
-      const barStart = Math.floor(beat / song.beatsPerBar) * song.beatsPerBar
-      const barEnd = barStart + song.beatsPerBar
+      const measure = measures(song)[barAt(song, beat)]
+      const barStart = measure.startBeat
+      const barEnd = barStart + measure.beats
       const candidates = melody.filter((note) => note.startBeat >= barStart && note.startBeat < barEnd &&
         (!sparse || (Math.abs(note.startBeat - Math.round(note.startBeat)) < 0.12 && note.beats >= 1)))
       const candidate = candidates.sort((a, b) =>

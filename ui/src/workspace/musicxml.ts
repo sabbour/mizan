@@ -1,7 +1,114 @@
 import type { DrumLane, Song, Track } from './song'
+import { barAt as measureIndex, barStart, measures as meterMeasures } from './meter'
 
 const DIV = 16 // divisions per quarter note
-const timeXml = (song: Song) => `<time><beats>${Math.round(song.beatsPerBar * (song.beatUnit ?? 4) / 4)}</beats><beat-type>${song.beatUnit ?? 4}</beat-type></time>`
+const notationEvents = (song: Song) => [...song.piano, ...song.vocals, ...song.chords, ...song.drums,
+  ...Object.values(song.instrumentNotes ?? {}).flat()]
+function notationPrecision(song: Song): number {
+  const small = meterMeasures(song).filter((bar) => bar.beats < 1 / DIV)
+  if (!small.length) return DIV
+  let minimum = Math.min(...small.map((bar) => bar.beats))
+  const events = notationEvents(song)
+  for (const event of events) {
+    const onset = event.startBeat
+    const end = onset + ('beats' in event ? event.beats : 0)
+    for (const bar of small) {
+      const first = bar.startBeat
+      const last = first + bar.beats
+      if (onset < last && end >= first) {
+        const points = [...new Set([first, last, Math.max(first, onset), Math.min(last, end)])]
+          .filter((beat) => beat >= first && beat <= last).sort((a, b) => a - b)
+        for (let i = 1; i < points.length; i++) minimum = Math.min(minimum, points[i] - points[i - 1])
+      }
+    }
+  }
+  // OSMD rounds fractions above denominator 46340 and cannot draw ghost gaps below 1e-4 whole notes.
+  const division = Math.min(2048, DIV * 2 ** Math.max(0, Math.ceil(Math.log2(2 / (minimum * DIV)))))
+  const last = meterMeasures(song).at(-1)!
+  if (!Number.isSafeInteger(division) || (last.startBeat + last.beats) * division > Number.MAX_SAFE_INTEGER)
+    throw new RangeError('The bar map exceeds safe engraving precision.')
+  return division
+}
+type NotationBar = { startDiv: number; endDiv: number; points: { beat: number; div: number }[] }
+type NotationGrid = {
+  division: number
+  bars: NotationBar[]
+  toDiv: (beat: number) => number
+  toBeat: (div: number) => number
+}
+const gridCache = new WeakMap<Song, { inputs: unknown[]; grid: NotationGrid }>()
+export function notationGrid(song: Song): NotationGrid {
+  const inputs = [song.barMap, song.bars, song.beatsPerBar, song.beatUnit, song.piano,
+    song.vocals, song.chords, song.drums, song.instrumentNotes]
+  const previous = gridCache.get(song)
+  if (previous && inputs.every((input, index) => input === previous.inputs[index])) return previous.grid
+  const division = notationPrecision(song)
+  const spans = meterMeasures(song)
+  const events = notationEvents(song)
+  let cursor = 0
+  const bars = spans.map((span) => {
+    const end = span.startBeat + span.beats
+    const startDiv = cursor
+    const edges = new Set([span.startBeat, end])
+    if (span.beats < 1 / DIV) {
+      for (const event of events) {
+        for (const beat of [event.startBeat, event.startBeat + ('beats' in event ? event.beats : 0)])
+          if (beat > span.startBeat && beat < end) edges.add(beat)
+      }
+    }
+    const beats = [...edges].sort((a, b) => a - b)
+    const projected = beats.some((beat, index) => index > 0 &&
+      Math.round(beat * division) <= Math.round(beats[index - 1] * division))
+    const duration = Math.max(beats.length - 1, Math.round(end * division) - Math.round(span.startBeat * division))
+    cursor += duration
+    // Preserve distinct partial-bar source edges when the renderer cannot resolve their spacing.
+    let last = startDiv - 1
+    const points = projected ? beats.map((beat, index) => {
+      const desired = startDiv + Math.round((beat - span.startBeat) / span.beats * duration)
+      const div = Math.max(last + 1, Math.min(cursor - (beats.length - 1 - index), desired))
+      last = div
+      return { beat, div }
+    }) : []
+    return { startDiv, endDiv: cursor, points }
+  })
+  const interpolate = (value: number, points: NotationBar['points'], input: 'beat' | 'div', output: 'beat' | 'div') => {
+    const right = Math.max(1, points.findIndex((point) => point[input] >= value))
+    const first = points[right - 1]
+    const last = points[right]
+    return first[output] + (value - first[input]) / (last[input] - first[input]) * (last[output] - first[output])
+  }
+  const toDiv = (beat: number) => {
+    const index = measureIndex(song, beat)
+    const span = spans[index]
+    const bar = bars[index]
+    if (beat >= span.startBeat + span.beats)
+      return bar.endDiv + Math.round((beat - span.startBeat - span.beats) * division)
+    if (bar.points.length) return Math.round(interpolate(beat, bar.points, 'beat', 'div'))
+    return bar.startDiv + Math.round(beat * division) - Math.round(span.startBeat * division)
+  }
+  const toBeat = (div: number) => {
+    let first = 0
+    let last = bars.length
+    while (first < last) {
+      const middle = Math.floor((first + last) / 2)
+      if (bars[middle].startDiv <= div) first = middle + 1
+      else last = middle
+    }
+    const index = Math.max(0, first - 1)
+    const span = spans[index]
+    const bar = bars[index]
+    if (div >= bar.endDiv) return span.startBeat + span.beats + (div - bar.endDiv) / division
+    if (bar.points.length) return interpolate(div, bar.points, 'div', 'beat')
+    return span.startBeat + (div - bar.startDiv) / division
+  }
+  const grid = { division, bars, toDiv, toBeat }
+  gridCache.set(song, { inputs, grid })
+  return grid
+}
+const timeXml = (song: Song, index = 0) => {
+  const bar = meterMeasures(song)[index]
+  return `<time><beats>${bar.numerator}</beats><beat-type>${bar.denominator}</beat-type></time>`
+}
 type TimedNote = { midi: number; startBeat: number; beats: number; confidence?: number; generated?: boolean; trackId?: string; hand?: string }
 export type NotationNote<T extends TimedNote = TimedNote> = {
   sourceId: string
@@ -24,9 +131,17 @@ const ATTACK_CONTEXT_TOLERANCE = 0.125
 export function notationNotes<T extends TimedNote>(
   notes: readonly T[],
   partId: string,
-  beatsPerBar: number,
+  meter: number | Song,
 ): NotationNote<T>[] {
+  const grid = typeof meter === 'number' ? undefined : notationGrid(meter)
+  const toDiv = grid?.toDiv ?? ((beat: number) => Math.round(beat * DIV))
+  const toBeat = grid?.toBeat ?? ((div: number) => div / DIV)
+  const beatsPerBar = typeof meter === 'number' ? meter : meter.beatsPerBar
   const barAt = (beat: number, end: boolean) => {
+    if (typeof meter !== 'number') {
+      const index = measureIndex(meter, beat)
+      return end && Math.abs(beat - barStart(meter, index)) < 1e-9 ? Math.max(0, index - 1) : index
+    }
     const nearest = Math.round(beat / beatsPerBar) * beatsPerBar
     return Math.floor((end && Math.abs(beat - nearest) < 1e-9 ? beat - 1e-9 : beat) / beatsPerBar)
   }
@@ -86,7 +201,7 @@ export function notationNotes<T extends TimedNote>(
   for (const [voice, attacks] of projectedAttacks) {
     for (const [beat, projectedBeat] of attacks) {
       const group = simultaneousAttacks.get(beat) ?? []
-      group.push({ voice, div: Math.round(projectedBeat * DIV) })
+      group.push({ voice, div: toDiv(projectedBeat) })
       simultaneousAttacks.set(beat, group)
     }
   }
@@ -128,10 +243,10 @@ export function notationNotes<T extends TimedNote>(
         }
       }
     }
-    const sourceStartDiv = Math.round(sourceStartBeat * DIV)
-    const sourceEndDiv = Math.max(sourceStartDiv + 1, Math.round(sourceEndBeat * DIV))
-    const startDiv = Math.round(startBeat * DIV)
-    const endDiv = Math.max(startDiv + 1, Math.round(endBeat * DIV))
+    const sourceStartDiv = toDiv(sourceStartBeat)
+    const sourceEndDiv = Math.max(sourceStartDiv + 1, toDiv(sourceEndBeat))
+    const startDiv = toDiv(startBeat)
+    const endDiv = Math.max(startDiv + 1, toDiv(endBeat))
     return {
       sourceId: `${source.trackId ?? partId}:note:${index}`,
       source,
@@ -212,8 +327,8 @@ export function notationNotes<T extends TimedNote>(
       ...notation,
       startDiv,
       endDiv,
-      startBeat: startDiv / DIV,
-      endBeat: endDiv / DIV,
+      startBeat: toBeat(startDiv),
+      endBeat: toBeat(endDiv),
       staccato: !blocked.has(index) && note.staccato,
     }
   })
@@ -225,19 +340,25 @@ const TYPES: [number, string, boolean][] = [
   [4, '16th', false], [3, '32nd', true], [2, '32nd', false], [1, '64th', false],
 ]
 
-function pieces(duration: number): number[] {
+function pieces(duration: number, division = DIV): number[] {
   const out: number[] = []
   let left = duration
   while (left > 0) {
-    const [d] = TYPES.find(([d]) => d <= left)!
+    const d = TYPES.map(([value]) => value * division / DIV).find((value) => value <= left) ?? left
     out.push(d)
     left -= d
   }
   return out
 }
 
-function typeOf(duration: number): string {
-  const [, type, dot] = TYPES.find(([d]) => d === duration)!
+function typeOf(duration: number, division = DIV): string {
+  const match = TYPES.find(([d]) => d * division / DIV === duration)
+  if (!match) {
+    const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a
+    const divisor = gcd(division / DIV, duration)
+    return `<type>64th</type><time-modification><actual-notes>${division / DIV / divisor}</actual-notes><normal-notes>${duration / divisor}</normal-notes></time-modification>`
+  }
+  const [, type, dot] = match
   return `<type>${type}</type>${dot ? '<dot/>' : ''}`
 }
 
@@ -254,21 +375,21 @@ function pitch(midi: number, flats: boolean): string {
 type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean }
 type Event = { pos: number; dur: number; heads: Head[] }
 
-function voice(events: Event[], voiceNo: number, staff: number, stem: string | null, barDivs: number): string {
+function voice(events: Event[], voiceNo: number, staff: number, stem: string | null, barDivs: number, division = DIV): string {
   if (events.length === 0) {
     return `<note><rest measure="yes"/><duration>${barDivs}</duration><voice>${voiceNo}</voice><staff>${staff}</staff></note>`
   }
   let xml = ''
   let cursor = 0
   const rest = (d: number) => {
-    for (const p of pieces(d)) xml += `<note><rest/><duration>${p}</duration><voice>${voiceNo}</voice>${typeOf(p)}<staff>${staff}</staff></note>`
+    for (const p of pieces(d, division)) xml += `<note><rest/><duration>${p}</duration><voice>${voiceNo}</voice>${typeOf(p, division)}<staff>${staff}</staff></note>`
   }
   events.sort((a, b) => a.pos - b.pos)
   for (const e of events) {
     if (e.pos >= barDivs) continue
     if (e.pos > cursor) rest(e.pos - cursor)
     const duration = Math.max(1, Math.min(e.dur, barDivs - e.pos))
-    const lengths = pieces(duration)
+    const lengths = pieces(duration, division)
     for (const [index, length] of lengths.entries()) {
       if (index && e.heads.every((head) => head.xml.startsWith('<unpitched>'))) {
         rest(length)
@@ -282,7 +403,7 @@ function voice(events: Event[], voiceNo: number, staff: number, stem: string | n
         const notation = stop || start || articulation
           ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}${articulation}</notations>`
           : ''
-        xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length)}${stem ? `<stem>${stem}</stem>` : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : ''}</note>`
+        xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length, division)}${stem ? `<stem>${stem}</stem>` : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : ''}</note>`
       })
     }
     cursor = e.pos + duration
@@ -318,9 +439,13 @@ function wrap(partName: string, measures: string[], gmProgram?: number): string 
 <score-partwise version="4.0"><part-list><score-part id="P1"><part-name>${partName}</part-name>${instrument}</score-part></part-list><part id="P1">${measures.join('')}</part></score-partwise>`
 }
 
-function measureOpen(n: number, attributes: string): string {
+function measureOpen(n: number, attributes: string, song: Song): string {
   const print = n > 1 && (n - 1) % 4 === 0 ? '<print new-system="yes"/>' : ''
-  return `<measure number="${n}">${print}${n === 1 ? attributes : ''}`
+  const bars = meterMeasures(song)
+  const bar = bars[n - 1]
+  const changed = n > 1 && (bar.numerator !== bars[n - 2].numerator || bar.denominator !== bars[n - 2].denominator)
+  return `<measure number="${n}"${bar.partial ? ' implicit="yes"' : ''}>${print}${n === 1
+    ? attributes : changed ? `<attributes>${timeXml(song, n - 1)}</attributes>` : ''}`
 }
 
 const KIND: Record<string, string> = {
@@ -344,15 +469,16 @@ function harmony(symbol: string): string {
 
 /** Chord symbols and (bar 1) tempo, written before the notes; mid-bar chords are placed with forward/backup. Section names are drawn by the score overlay. */
 function annotations(song: Song, bar: number, chords: boolean): string {
-  const start = (bar - 1) * song.beatsPerBar
+  const grid = notationGrid(song)
+  const span = grid.bars[bar - 1]
   let xml = ''
   if (bar === 1) {
     xml += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${Math.round(song.bpm)}</per-minute></metronome></direction-type><sound tempo="${song.bpm}"/></direction>`
   }
   let cursor = 0
   for (const c of song.chords) {
-    const pos = Math.round((c.startBeat - start) * DIV)
-    if (!chords || pos < 0 || pos >= song.beatsPerBar * DIV || c.symbol === null) continue
+    const pos = grid.toDiv(c.startBeat) - span.startDiv
+    if (!chords || pos < 0 || pos >= span.endDiv - span.startDiv || c.symbol === null) continue
     const h = harmony(c.symbol)
     if (!h) continue
     if (pos > cursor) xml += `<forward><duration>${pos - cursor}</duration></forward>`
@@ -365,8 +491,9 @@ function annotations(song: Song, bar: number, chords: boolean): string {
 
 /** `chords: false` leaves chord symbols out, for when the overlay draws them as keyboards. */
 export function pianoXml(song: Song, chords = true): string {
-  const barDivs = song.beatsPerBar * DIV
-  const notes = notationNotes(song.piano, 'piano', song.beatsPerBar).map((note) => ({
+  const grid = notationGrid(song)
+  const DIV = grid.division
+  const notes = notationNotes(song.piano, 'piano', song).map((note) => ({
     ...note,
     flats: song.chords.find((chord) =>
       chord.startBeat <= note.startBeat && chord.startBeat + chord.beats > note.startBeat)?.flats ?? false,
@@ -374,9 +501,8 @@ export function pianoXml(song: Song, chords = true): string {
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>`
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const start = (bar - 1) * song.beatsPerBar
-    const startDiv = Math.round(start * DIV)
-    const endDiv = startDiv + barDivs
+    const { startDiv, endDiv } = grid.bars[bar - 1]
+    const barDivs = endDiv - startDiv
     const hand = (h: 'right' | 'left') =>
       group(
         notes
@@ -393,11 +519,11 @@ export function pianoXml(song: Song, chords = true): string {
           }),
       )
     measures.push(
-      measureOpen(bar, attrs) +
+      measureOpen(bar, attrs, song) +
         annotations(song, bar, chords) +
-        voice(hand('right'), 1, 1, null, barDivs) +
+        voice(hand('right'), 1, 1, null, barDivs, DIV) +
         `<backup><duration>${barDivs}</duration></backup>` +
-        voice(hand('left'), 5, 2, null, barDivs) +
+        voice(hand('left'), 5, 2, null, barDivs, DIV) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )
@@ -407,8 +533,9 @@ export function pianoXml(song: Song, chords = true): string {
 
 /** One vocal staff, with tied durations across beats and bar lines; no hand assignment. */
 export function vocalXml(song: Song): string {
-  const barDivs = song.beatsPerBar * DIV
-  const notes = notationNotes(song.vocals, 'vocals', song.beatsPerBar)
+  const grid = notationGrid(song)
+  const DIV = grid.division
+  const notes = notationNotes(song.vocals, 'vocals', song)
   const pitches = notes.map((n) => n.midi).sort((a, b) => a - b)
   const bass = pitches.length > 0 && pitches[Math.floor(pitches.length / 2)] < 60
   const clef = bass ? '<sign>F</sign><line>4</line>' : '<sign>G</sign><line>2</line>'
@@ -416,11 +543,13 @@ export function vocalXml(song: Song): string {
   const written = notes.map((note) => ({ ...note, from: note.startDiv, to: note.endDiv }))
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const start = (bar - 1) * barDivs
+    const span = grid.bars[bar - 1]
+    const start = span.startDiv
+    const barDivs = span.endDiv - start
     let cursor = start
-    let xml = measureOpen(bar, attrs) + annotations(song, bar, true)
+    let xml = measureOpen(bar, attrs, song) + annotations(song, bar, true)
     const rest = (duration: number) => {
-      for (const d of pieces(duration)) xml += `<note><rest/><duration>${d}</duration>${typeOf(d)}</note>`
+      for (const d of pieces(duration, DIV)) xml += `<note><rest/><duration>${d}</duration>${typeOf(d, DIV)}</note>`
     }
     for (const n of written) {
       const from = Math.max(start, n.from, cursor)
@@ -428,7 +557,7 @@ export function vocalXml(song: Song): string {
       if (to <= from) continue
       rest(from - cursor)
       cursor = from
-      for (const d of pieces(to - from)) {
+      for (const d of pieces(to - from, DIV)) {
         const stop = cursor > n.from
         const begin = cursor + d < n.to
         const ties = `${stop ? '<tie type="stop"/>' : ''}${begin ? '<tie type="start"/>' : ''}`
@@ -436,7 +565,7 @@ export function vocalXml(song: Song): string {
         const notation = stop || begin || articulation
           ? `<notations>${stop ? '<tied type="stop"/>' : ''}${begin ? '<tied type="start"/>' : ''}${articulation}</notations>`
           : ''
-        xml += `<note>${pitch(n.midi, false)}<duration>${d}</duration>${ties}${typeOf(d)}${notation}</note>`
+        xml += `<note>${pitch(n.midi, false)}<duration>${d}</duration>${ties}${typeOf(d, DIV)}${notation}</note>`
         cursor += d
       }
     }
@@ -448,8 +577,9 @@ export function vocalXml(song: Song): string {
 
 /** Transcribed pitched notes; mixed registers use treble and bass staves without inventing hands or fingering. */
 export function instrumentXml(song: Song, track: Track): string {
-  const barDivs = song.beatsPerBar * DIV
-  const notes = notationNotes(song.instrumentNotes?.[track.id] ?? [], track.id, song.beatsPerBar)
+  const grid = notationGrid(song)
+  const DIV = grid.division
+  const notes = notationNotes(song.instrumentNotes?.[track.id] ?? [], track.id, song)
   const low = notes.some((n) => n.midi < 60)
   const high = notes.some((n) => n.midi >= 60)
   const split = low && high
@@ -490,9 +620,8 @@ export function instrumentXml(song: Song, track: Track): string {
   }
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const start = (bar - 1) * song.beatsPerBar
-    const startDiv = Math.round(start * DIV)
-    const endDiv = startDiv + barDivs
+    const { startDiv, endDiv } = grid.bars[bar - 1]
+    const barDivs = endDiv - startDiv
     const parts: string[] = []
     for (const staff of (split ? [1, 2] : [1])) {
       const lines = (voiceLines.get(staff) ?? [])
@@ -513,10 +642,10 @@ export function instrumentXml(song: Song, track: Track): string {
         .filter((line) => line.events.length)
       for (const line of (lines.length ? lines : [{ voiceNo: staff === 1 ? 1 : 5, events: [] as Event[] }])) {
         if (parts.length) parts.push(`<backup><duration>${barDivs}</duration></backup>`)
-        parts.push(voice(line.events, line.voiceNo, staff, null, barDivs))
+        parts.push(voice(line.events, line.voiceNo, staff, null, barDivs, DIV))
       }
     }
-    measures.push(measureOpen(bar, attrs) + annotations(song, bar, true) + parts.join('') +
+    measures.push(measureOpen(bar, attrs, song) + annotations(song, bar, true) + parts.join('') +
       (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') + '</measure>')
   }
   return wrap(track.name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!), measures, track.gmProgram)
@@ -524,28 +653,32 @@ export function instrumentXml(song: Song, track: Track): string {
 
 /** The accompaniment as a grand staff: each chord's voicing held in the right hand, its bass note in the left. Plays what the engine plays. */
 export function chordsXml(song: Song, chords = true): string {
-  const barDivs = song.beatsPerBar * DIV
+  const grid = notationGrid(song)
+  const DIV = grid.division
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>`
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const start = (bar - 1) * song.beatsPerBar
-    const end = start + song.beatsPerBar
+    const span = meterMeasures(song)[bar - 1]
+    const start = span.startBeat
+    const end = start + span.beats
+    const { startDiv, endDiv } = grid.bars[bar - 1]
+    const barDivs = endDiv - startDiv
     const inBar = song.chords.filter((c) => c.tones.length && c.startBeat < end && c.startBeat + c.beats > start)
     const events = (pick: (tones: number[]) => number[]): Event[] =>
       inBar.map((c) => {
         const from = Math.max(c.startBeat, start)
         return {
-          pos: Math.round((from - start) * DIV),
-          dur: Math.round((Math.min(c.startBeat + c.beats, end) - from) * DIV),
+          pos: grid.toDiv(from) - startDiv,
+          dur: grid.toDiv(Math.min(c.startBeat + c.beats, end)) - grid.toDiv(from),
           heads: pick(c.tones).map((m) => ({ xml: pitch(m, c.flats) })),
         }
       })
     measures.push(
-      measureOpen(bar, attrs) +
+      measureOpen(bar, attrs, song) +
         annotations(song, bar, chords) +
-        voice(events((t) => t), 1, 1, null, barDivs) +
+        voice(events((t) => t), 1, 1, null, barDivs, DIV) +
         `<backup><duration>${barDivs}</duration></backup>` +
-        voice(events((t) => [t[0] - 24]), 5, 2, null, barDivs) +
+        voice(events((t) => [t[0] - 24]), 5, 2, null, barDivs, DIV) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )
@@ -570,23 +703,27 @@ function drumHead(lane: DrumLane): string {
 }
 
 export function drumXml(song: Song, chords = true): string {
-  const barDivs = song.beatsPerBar * DIV
+  const grid = notationGrid(song)
+  const DIV = grid.division
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<clef><sign>percussion</sign></clef></attributes>`
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const start = (bar - 1) * song.beatsPerBar
-    const hits = song.drums.filter((h) => h.startBeat >= start && h.startBeat < start + song.beatsPerBar)
+    const span = meterMeasures(song)[bar - 1]
+    const start = span.startBeat
+    const { startDiv, endDiv } = grid.bars[bar - 1]
+    const barDivs = endDiv - startDiv
+    const hits = song.drums.filter((h) => h.startBeat >= start && h.startBeat < start + span.beats)
     const events = (feet: boolean) =>
       toGaps(
-        group(hits.filter((h) => (h.lane === 'kick') === feet).map((h) => ({ pos: Math.round((h.startBeat - start) * DIV), dur: 0, head: { xml: drumHead(h.lane) } }))),
+        group(hits.filter((h) => (h.lane === 'kick') === feet).map((h) => ({ pos: grid.toDiv(h.startBeat) - startDiv, dur: 0, head: { xml: drumHead(h.lane) } }))),
         barDivs,
       )
     measures.push(
-      measureOpen(bar, attrs) +
+      measureOpen(bar, attrs, song) +
         annotations(song, bar, chords) +
-        voice(events(false), 1, 1, 'up', barDivs) +
+        voice(events(false), 1, 1, 'up', barDivs, DIV) +
         `<backup><duration>${barDivs}</duration></backup>` +
-        voice(events(true), 2, 1, 'down', barDivs) +
+        voice(events(true), 2, 1, 'down', barDivs, DIV) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )

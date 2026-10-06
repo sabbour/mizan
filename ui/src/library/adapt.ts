@@ -1,4 +1,5 @@
 import { hasPitchedScore, type Confidence, type Song, type Track } from '../workspace/song'
+import { measures } from '../workspace/meter'
 
 type HostTrack = Track & { sourceInstrument?: string }
 
@@ -9,6 +10,7 @@ type HostTrack = Track & { sourceInstrument?: string }
 export function fromHost(raw: Omit<Song, 'tracks'> & { accompaniment?: unknown; tracks: HostTrack[] }): Song {
   const bpb = raw.beatsPerBar || 4
   const bars = raw.bars
+  const barMap = measures({ ...raw, beatsPerBar: bpb })
   const tracks: Track[] = raw.tracks
     .filter((t) => t.id !== 'accompaniment' && t.instrument !== 'chords')
     .map((track) => track.gmProgram != null || track.sourceInstrument !== 'clean_electric_guitar'
@@ -19,7 +21,8 @@ export function fromHost(raw: Omit<Song, 'tracks'> & { accompaniment?: unknown; 
   }
   const filled = (list: Confidence[] | undefined): Confidence[] => Array.from({ length: bars }, (_, i) => list?.[i] ?? 'high')
   const chordConfidence = Array.from({ length: bars }, (_, i): Confidence => {
-    const inBar = raw.chords.filter((c) => c.startBeat < (i + 1) * bpb && c.startBeat + c.beats > i * bpb)
+    const span = barMap[i]
+    const inBar = raw.chords.filter((c) => c.startBeat < span.startBeat + span.beats && c.startBeat + c.beats > span.startBeat)
     const worst = Math.min(1, ...inBar.map((c) => c.confidence))
     return worst < 0.4 ? 'low' : worst < 0.7 ? 'medium' : 'high'
   })

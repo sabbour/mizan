@@ -1,5 +1,6 @@
 import type { Stem } from '../library/bridge'
 import { sustainedChords, type DrumHit, type DrumLane, type MelodyNote, type PianoNote, type Song } from './song'
+import { barAt, barStart, measures, pulseBeats, songBeats } from './meter'
 import { accompanimentRhythm, chordRhythm } from './creative'
 import { Recording } from './recording'
 
@@ -118,6 +119,7 @@ export class Engine {
           (index > 0 && (point.beat <= map[index - 1].beat || point.time <= map[index - 1].time)))) {
       throw new Error('The song has invalid tempo or recording alignment data.')
     }
+    measures(song)
     this.song = song
     this.stems = stems
   }
@@ -139,7 +141,7 @@ export class Engine {
   }
 
   private get totalBeats(): number {
-    return this.song.bars * this.song.beatsPerBar
+    return songBeats(this.song)
   }
 
   private ensure(): AudioContext {
@@ -387,19 +389,20 @@ export class Engine {
 
   private schedule(): void {
     const ctx = this.ctx!
-    const bpb = this.song.beatsPerBar
     while (this.cursorTime < ctx.currentTime + LOOKAHEAD) {
+      const span = measures(this.song)[barAt(this.song, this.cursorBeat)]
+      const pulse = pulseBeats(span)
       let spb = this.spbAt(this.cursorBeat)
       if (this.counting) {
         this.tick(this.cursorTime, this.counting === 1, 1)
-        this.cursorTime += Math.min(1, bpb - (this.counting - 1)) * spb
-        this.counting = this.counting >= bpb ? 0 : this.counting + 1
+        this.cursorTime += Math.min(pulse, span.beats - (this.counting - 1) * pulse) * spb
+        this.counting = this.counting >= Math.ceil(span.beats / pulse) ? 0 : this.counting + 1
         this.anchors.push({ time: this.cursorTime, beat: this.cursorBeat, spb, count: this.counting })
         if (!this.counting) this.scheduleMedia(this.cursorBeat, this.cursorTime, true)
         continue
       }
-      const loopStart = this.loop ? (this.loop.startBar - 1) * bpb : 0
-      const loopEnd = this.loop ? this.loop.endBar * bpb : this.totalBeats
+      const loopStart = this.loop ? barStart(this.song, this.loop.startBar - 1) : 0
+      const loopEnd = this.loop ? barStart(this.song, this.loop.endBar) : this.totalBeats
       if (this.cursorBeat >= loopEnd) {
         this.cursorBeat = loopStart
         this.anchors.push({ time: this.cursorTime, beat: loopStart, spb, count: 0 })
@@ -449,7 +452,7 @@ export class Engine {
     const at = (beat: number) => t0 + (beat - from) * spb
     const inRange = (b: number) => b >= from && b < to
     const song = this.song
-    const rhythmInputs = [song.drums, song.piano, song.vocals, song.instrumentNotes, song.beatsPerBar, song.beatUnit, song.bars]
+    const rhythmInputs = [song.drums, song.piano, song.vocals, song.instrumentNotes, song.beatsPerBar, song.beatUnit, song.bars, song.barMap]
     if (song !== this.rhythmSource || rhythmInputs.some((input, index) => input !== this.rhythmInputs[index])) {
       this.rhythmSource = song
       this.rhythmInputs = rhythmInputs
@@ -503,13 +506,16 @@ export class Engine {
     }
     for (const h of song.drums) if (inRange(h.startBeat)) this.drum(at(h.startBeat), h, h.trackId ?? song.tracks.find((track) => track.instrument === 'drums')?.id ?? 'drums')
     if (this.click) {
-      const boundaries = new Set<number>()
-      for (let b = Math.ceil(from); b < to; b++) boundaries.add(b)
-      for (let bar = Math.ceil(from / song.beatsPerBar); bar * song.beatsPerBar < to; bar++) {
-        boundaries.add(bar * song.beatsPerBar)
-      }
-      for (const beat of [...boundaries].sort((a, b) => a - b)) {
-        if (beat >= from) this.tick(at(beat), beat % song.beatsPerBar === 0, 0.6)
+      const bars = measures(song)
+      for (let index = barAt(song, from); index < bars.length && bars[index].startBeat < to; index++) {
+        const span = bars[index]
+        const pulse = pulseBeats(span)
+        const end = Math.min(to, span.startBeat + span.beats)
+        for (let number = Math.max(0, Math.ceil((from - span.startBeat) / pulse)); ; number++) {
+          const beat = span.startBeat + number * pulse
+          if (beat >= end) break
+          this.tick(at(beat), number === 0, 0.6)
+        }
       }
     }
   }

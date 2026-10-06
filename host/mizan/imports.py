@@ -17,6 +17,7 @@ from .engine.output import export_midi
 from .errors import InvalidFile
 from .jobs import PIPELINE_VERSION
 from .library import LibraryStore
+from .meter import build_bar_map, signature_beats, validate_bar_map
 from .paths import app_dir
 
 DRUM_PITCHES = {
@@ -49,15 +50,17 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
     except (OSError, EOFError, ValueError) as exc:
         raise InvalidFile("The MIDI file is damaged or unsupported.") from exc
     bpm, beats_per_bar, beat_unit = 120.0, 4.0, 4
-    signature = None
+    meter_changes = []
     names = [None] * len(midi.tracks)
     notes_by_track = [[] for _ in midi.tracks]
     events = []
+    end_tick = 0
     for track_index, track in enumerate(midi.tracks):
         tick = 0
         for index, message in enumerate(track):
             tick += message.time
             events.append((tick, track_index, index, message))
+        end_tick = max(end_tick, tick)
     programs, bends, active = {}, {}, {}
     rpn, bend_range = {}, {}
     for tick, track_index, _, message in sorted(events, key=lambda event: event[:3]):
@@ -68,11 +71,17 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
             bpm = round(mido.tempo2bpm(message.tempo), 3)
         elif message.type == "time_signature":
             current = (message.numerator, message.denominator)
-            if message.numerator < 1 or (signature is not None and current != signature):
-                raise InvalidFile("Changing time signatures are not supported.")
-            signature = current
-            beat_unit = message.denominator
-            beats_per_bar = message.numerator * 4 / beat_unit
+            try:
+                signature_beats(*current)
+            except ValueError as exc:
+                raise InvalidFile(str(exc)) from exc
+            position = tick / midi.ticks_per_beat
+            change = {"startBeat": position, "numerator": current[0], "denominator": current[1]}
+            if meter_changes and meter_changes[-1]["startBeat"] == position:
+                if meter_changes[-1] != change:
+                    raise InvalidFile("Conflicting time signatures occur at the same MIDI position.")
+            else:
+                meter_changes.append(change)
         elif message.type == "program_change":
             programs[channel] = message.program
         elif message.type == "control_change" and message.control in (101, 100):
@@ -135,6 +144,14 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
                           "notes": instrument_notes, "gmProgram": gm_program})
     if not parts:
         raise InvalidFile("The MIDI file contains no notes.")
+    if meter_changes:
+        if meter_changes[0]["startBeat"] > 0:
+            meter_changes.insert(0, {"startBeat": 0, "numerator": 4, "denominator": 4})
+        first = meter_changes[0]
+        beat_unit = first["denominator"]
+        beats_per_bar = signature_beats(first["numerator"], beat_unit)
+        parts[0]["meterChanges"] = meter_changes
+    parts[0]["endBeat"] = end_tick / midi.ticks_per_beat
     return None, bpm, beats_per_bar, beat_unit, parts
 
 
@@ -186,15 +203,19 @@ def parse_musicxml(data: bytes, suffix: str) -> tuple[str | None, float, float, 
                 if program in SOUNDFONT_PROGRAMS:
                     programs[score_part.attrib.get("id")] = program
     bpm, beats_per_bar, beat_unit, parts = 120.0, 4.0, 4, []
-    signature = None
+    score_bars = None
     steps = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
     for index, part in enumerate(item for item in root if item.tag.endswith("part")):
         divisions, cursor, last_start, notes = 1, 0.0, 0.0, []
+        measure_start = 0.0
+        local_numerator, local_unit = 4, 4
+        part_bars = []
         ties = {}
         part_name = names.get(part.attrib.get("id"), f"Part {index + 1}")
         percussion = "drum" in part_name.lower() or "percussion" in part_name.lower()
         for measure_index, measure in enumerate(part):
-            cursor = measure_index * beats_per_bar
+            cursor = measure_start
+            measure_end = cursor
             for item in measure:
                 tag = item.tag.rsplit("}", 1)[-1]
                 if tag == "attributes":
@@ -202,13 +223,12 @@ def parse_musicxml(data: bytes, suffix: str) -> tuple[str | None, float, float, 
                     beats = _text(item, ["time", "beats"])
                     beat_type = _text(item, ["time", "beat-type"])
                     if beats and beat_type:
-                        current = (int(beats), int(beat_type))
-                        if (current[0] < 1 or current[1] < 1 or current[1] & (current[1] - 1)
-                                or signature is not None and current != signature):
-                            raise InvalidFile("Changing or invalid time signatures are not supported.")
-                        signature = current
-                        beat_unit = current[1]
-                        beats_per_bar = current[0] * 4 / beat_unit
+                        try:
+                            current = (sum(int(value) for value in beats.split("+")), int(beat_type))
+                            signature_beats(*current)
+                        except (TypeError, ValueError) as exc:
+                            raise InvalidFile("The MusicXML time signature is invalid.") from exc
+                        local_numerator, local_unit = current
                 elif tag == "direction":
                     sound = next((node for node in item.iter() if node.tag.endswith("sound")), None)
                     if sound is not None and sound.attrib.get("tempo"):
@@ -219,6 +239,7 @@ def parse_musicxml(data: bytes, suffix: str) -> tuple[str | None, float, float, 
                 elif tag in ("backup", "forward"):
                     duration = float(_text(item, ["duration"], 0)) / divisions
                     cursor += duration if tag == "forward" else -duration
+                    measure_end = max(measure_end, cursor)
                 elif tag == "note":
                     duration = float(_text(item, ["duration"], 0)) / divisions
                     chord = _child(item, "chord") is not None
@@ -255,22 +276,46 @@ def parse_musicxml(data: bytes, suffix: str) -> tuple[str | None, float, float, 
                         percussion = percussion or unpitched is not None
                     if not chord:
                         cursor += duration
+                    measure_end = max(measure_end, start + duration)
+            nominal = signature_beats(local_numerator, local_unit)
+            length = (measure_end - measure_start
+                      if measure.attrib.get("implicit") == "yes" and measure_end > measure_start else nominal)
+            part_bars.append({
+                "startBeat": round(measure_start, 6), "beats": round(length, 6),
+                "numerator": local_numerator, "denominator": local_unit, "status": "explicit",
+                **({"partial": True} if length < nominal - 1e-6 else {}),
+            })
+            measure_start += length
         if ties:
             raise InvalidFile("The MusicXML score contains a tie without an ending note.")
         if notes:
+            try:
+                validate_bar_map(part_bars)
+            except ValueError as exc:
+                raise InvalidFile(str(exc)) from exc
+            if score_bars is None:
+                score_bars = part_bars
+            elif score_bars != part_bars:
+                raise InvalidFile("MusicXML parts have conflicting measure lengths or time signatures.")
             part_value = {"name": part_name, "drums": percussion, "notes": notes}
             if not percussion and part.attrib.get("id") in programs:
                 part_value["gmProgram"] = programs[part.attrib.get("id")]
             parts.append(part_value)
     if not parts:
         raise InvalidFile("The MusicXML file contains no notes.")
+    parts[0]["barMap"] = score_bars
+    beats_per_bar = signature_beats(score_bars[0]["numerator"], score_bars[0]["denominator"])
+    beat_unit = score_bars[0]["denominator"]
     return title, bpm, beats_per_bar, beat_unit, parts
 
 
 def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
                   beat_unit: int, parts: list[dict]) -> dict:
     piano, drums, tracks, pitched, instrument_notes = [], [], [], [], {}
-    max_beat = 0.0
+    extent = parts[0].get("endBeat", 0)
+    if type(extent) not in (int, float) or not math.isfinite(extent) or extent < 0:
+        raise InvalidFile("The imported score has an invalid end position.")
+    max_beat = float(extent)
     for index, part in enumerate(parts):
         track_id = _track_id(part["name"], index)
         suffix = 2
@@ -302,7 +347,17 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
                     piano.append(event)
                 pitched.append(event)
                 max_beat = max(max_beat, note["startBeat"] + note["beats"])
-    bars = max(1, math.ceil(max_beat / beats_per_bar))
+    bar_map = parts[0].get("barMap")
+    if bar_map is not None:
+        validate_bar_map(bar_map)
+        if max_beat > bar_map[-1]["startBeat"] + bar_map[-1]["beats"] + 1e-6:
+            raise InvalidFile("The imported notes extend beyond their measure timeline.")
+    else:
+        changes = parts[0].get("meterChanges") or [
+            {"startBeat": 0, "numerator": round(beats_per_bar * beat_unit / 4), "denominator": beat_unit}
+        ]
+        bar_map = build_bar_map(max(1e-6, max_beat), changes)
+    bars = len(bar_map)
     beat_chroma = np.zeros((max(1, math.ceil(max_beat)), 12))
     for note in pitched:
         first, last = int(note["startBeat"]), max(int(note["startBeat"]), math.ceil(note["startBeat"] + note["beats"]) - 1)
@@ -325,6 +380,7 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
     confidence = ["high"] * bars
     return {
         "title": title, "source": source, "bpm": bpm, "beatsPerBar": beats_per_bar, "beatUnit": beat_unit,
+        "barMap": bar_map,
         "bars": bars, "key": key, "sections": sections, "chords": chords,
         "piano": sorted(piano, key=lambda note: (note["startBeat"], note["midi"])),
         **({"instrumentNotes": instrument_notes} if instrument_notes else {}),
@@ -353,7 +409,8 @@ def import_score(name: str, data_base64: str, library: LibraryStore,
     hands = {"up": "right", "down": "left", "right hand": "right", "left hand": "left"}
     if (len(parts) == 2 and not any(part["drums"] for part in parts)
             and {hands.get(part["name"].strip().lower()) for part in parts} == {"left", "right"}):
-        parts = [{"name": "Piano", "drums": False, "notes": [
+        parts = [{**{key: parts[0][key] for key in ("barMap", "meterChanges", "endBeat") if key in parts[0]},
+                  "name": "Piano", "drums": False, "notes": [
             {**note, "hand": hands[part["name"].strip().lower()]}
             for part in parts for note in part["notes"]
         ]}]

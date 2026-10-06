@@ -45,6 +45,15 @@ export type DecodingErrors = {
   detailsTruncated: boolean
 }
 
+export type BarMeter = {
+  startBeat: number
+  beats: number
+  numerator: number
+  denominator: number
+  status?: 'explicit' | 'supported' | 'unverified'
+  partial?: boolean
+}
+
 export type Song = {
   title: string
   tracks: Track[]
@@ -54,6 +63,8 @@ export type Song = {
   beatsPerBar: number
   /** Written meter denominator (4 for legacy songs). */
   beatUnit?: number
+  /** Authoritative contiguous measure spans in quarter-note beats; absent on legacy fixed-meter songs. */
+  barMap?: BarMeter[]
   bars: number
   key: { tonic: string; mode: 'major' | 'minor' } | null
   sections: Section[]

@@ -3,6 +3,7 @@ import { Engine } from './engine'
 import { useFrame } from './hooks'
 import { chordsXml, drumXml, instrumentXml, pianoXml, vocalXml } from './musicxml'
 import { Score } from './Score'
+import { barAt, barStart, measures } from './meter'
 import { buildSong, chordAt, hasPitchedScore, invert, sectionAt, slash, smoothInversions, type Instrument, type Song, type Track } from './song'
 import type { Position, Stem } from '../library/bridge'
 import { ArrowLeft } from 'lucide-react'
@@ -179,8 +180,6 @@ export function Workspace({
   const [audioLoading, setAudioLoading] = useState(false)
   const typedRef = useRef('')
 
-  const bpb = song.beatsPerBar
-
   useEffect(() => {
     // Chords whose voicing differs from the detected one (smooth voicing) play as shown.
     const swaps = new Map<number, number[]>()
@@ -203,7 +202,7 @@ export function Workspace({
       setAudioLoading(loading)
       if (loading) setAudioError(null)
     }
-    if (start) engine.seek((Math.min(song.bars, start.bar) - 1) * song.beatsPerBar)
+    if (start) engine.seek(barStart(song, Math.min(song.bars, start.bar) - 1))
     return () => {
       engine.onLoading = null
       engine.onError = null
@@ -226,7 +225,7 @@ export function Workspace({
   }, [storageKey, muted, volumes, soloId, beforeSolo, visibleStems])
 
   useFrame(engine, (t) => {
-    const bar = Math.min(song.bars, Math.floor(t.beat / bpb) + 1)
+    const bar = barAt(song, t.beat) + 1
     const chordIdx = chordAt(song, t.beat)
     if (bar !== pos.bar || chordIdx !== pos.chordIdx || t.playing !== pos.playing || t.countBeat !== pos.countBeat) {
       setPos({ bar, chordIdx, playing: t.playing, countBeat: t.countBeat })
@@ -243,7 +242,7 @@ export function Workspace({
     else void engine.play()
   }, [engine])
 
-  const jump = useCallback((bar: number) => engine.seek((Math.max(1, Math.min(song.bars, bar)) - 1) * bpb), [engine, song.bars, bpb])
+  const jump = useCallback((bar: number) => engine.seek(barStart(song, Math.max(1, Math.min(song.bars, bar)) - 1)), [engine, song])
 
   const section = song.sections[sectionAt(song, pos.bar)]
   const confidence = song.confidence[track?.chordal ? 'chords' : instrument] ?? []
@@ -398,6 +397,11 @@ export function Workspace({
               <span className="num">
                 <strong>{effectiveBpm}</strong> bpm{rate < 1 && <span className="dim"> · {Math.round(rate * 100)}%</span>}
               </span>
+              {song.barMap && <span className="num" title={measures(song)[pos.bar - 1].status === 'explicit'
+                ? 'Imported time signature' : 'Estimated grouping; written signature is unverified'}>
+                {measures(song)[pos.bar - 1].numerator}/{measures(song)[pos.bar - 1].denominator}
+                {measures(song)[pos.bar - 1].status !== 'explicit' && <span className="dim"> · unverified</span>}
+              </span>}
             </>
           )}
         </p>

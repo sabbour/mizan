@@ -13,11 +13,12 @@ from .engine.media import decode, download_video, inspect_video
 from .engine.providers import check_cancel
 from .errors import InvalidTiming
 from .library import LibraryStore
+from .meter import total_beats
 from .paths import app_dir
 
 
 def note_chroma(song: dict) -> np.ndarray:
-    beats = max(1, math.ceil(song["bars"] * song["beatsPerBar"]))
+    beats = max(1, math.ceil(total_beats(song)))
     chroma = np.zeros((beats, 12), dtype=np.float32)
     for note in song.get("piano", []):
         first = max(0, int(note["startBeat"]))
@@ -108,7 +109,7 @@ def linear_tempo_map(song: dict, offset: float, tempo_scale: float) -> list[dict
         raise InvalidTiming()
     seconds = 60 / (song["bpm"] * tempo_scale)
     return [{"beat": float(beat), "time": round(offset + beat * seconds, 6)}
-            for beat in range(song["bars"] * song["beatsPerBar"] + 1)]
+            for beat in sorted(set([*range(math.ceil(total_beats(song))), total_beats(song)]))]
 
 
 def align_recording(job: dict, report, cancelled: Event, library: LibraryStore) -> dict:
