@@ -277,7 +277,9 @@ parts. MuScriptor maps GM drum tokens to kick, snare, closed/open hat, floor
 tom, high tom, ride, and crash lanes. Its other detected instrument labels
 become individual tentative pitched-note tracks, not piano-only results.
 These are original-mix detections rather than validated instrument-isolated
-scores.
+scores. Only the exact `clean_electric_guitar` label gets GM program 28 and is
+included in MIDI and MusicXML exports; other unverified detected labels are
+omitted from exports.
 
 MuScriptor's gated, noncommercial checkpoints are required for audio transcription and unbundled.
 Accept each size's terms at its Hugging Face model page and save a read-access

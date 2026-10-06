@@ -2,6 +2,223 @@ import type { DrumLane, Song, Track } from './song'
 
 const DIV = 16 // divisions per quarter note
 const timeXml = (song: Song) => `<time><beats>${Math.round(song.beatsPerBar * (song.beatUnit ?? 4) / 4)}</beats><beat-type>${song.beatUnit ?? 4}</beat-type></time>`
+type TimedNote = { midi: number; startBeat: number; beats: number; confidence?: number; generated?: boolean; trackId?: string; hand?: string }
+export type NotationNote<T extends TimedNote = TimedNote> = {
+  sourceId: string
+  source: T
+  midi: number
+  sourceStartBeat: number
+  sourceEndBeat: number
+  startBeat: number
+  endBeat: number
+  startDiv: number
+  endDiv: number
+  staccato: boolean
+}
+
+const NOTATION_GRID = 0.25
+const NOTATION_TOLERANCE = 0.1
+const ATTACK_CONTEXT_TOLERANCE = 0.125
+
+/** Simplify uncertain automatic engraving from nearby attacks; source timing remains unchanged. */
+export function notationNotes<T extends TimedNote>(
+  notes: readonly T[],
+  partId: string,
+  beatsPerBar: number,
+): NotationNote<T>[] {
+  const barAt = (beat: number, end: boolean) => {
+    const nearest = Math.round(beat / beatsPerBar) * beatsPerBar
+    return Math.floor((end && Math.abs(beat - nearest) < 1e-9 ? beat - 1e-9 : beat) / beatsPerBar)
+  }
+  const automatic = (note: T) => note.generated === false && Number.isFinite(note.confidence) && note.confidence! <= 0.5
+  const voiceKey = (note: T) =>
+    partId === 'piano' ? note.hand === 'right' ? 'right' : 'left' : note.hand ?? 'part'
+  const attackGroups = new Map<string, Map<number, T[]>>()
+  for (const note of notes) {
+    if (!Number.isFinite(note.startBeat)) continue
+    const voice = voiceKey(note)
+    const beats = attackGroups.get(voice) ?? new Map<number, T[]>()
+    const group = beats.get(note.startBeat) ?? []
+    group.push(note)
+    beats.set(note.startBeat, group)
+    attackGroups.set(voice, beats)
+  }
+  const voiceAttacks = new Map<string, number[]>()
+  const attackIndices = new Map<string, Map<number, number>>()
+  const attackByMicrobeat = new Map<string, Map<number, number>>()
+  for (const [voice, groups] of attackGroups) {
+    const beats = [...groups.keys()].sort((a, b) => a - b)
+    voiceAttacks.set(voice, beats)
+    attackIndices.set(voice, new Map(beats.map((beat, index) => [beat, index])))
+    attackByMicrobeat.set(voice, new Map(beats.map((beat) => [Math.round(beat * 1e6), beat])))
+  }
+  const hasFastNeighbor = (voice: string, beat: number) => {
+    const beats = voiceAttacks.get(voice) ?? []
+    const index = attackIndices.get(voice)?.get(beat)
+    return index !== undefined &&
+      ((index > 0 && beat - beats[index - 1] < 0.5) ||
+        (index + 1 < beats.length && beats[index + 1] - beat < 0.5))
+  }
+  const supportedByAttackSpacing = (voice: string, beat: number) => {
+    const index = attackIndices.get(voice)?.get(beat)
+    if (index === undefined) return false
+    const attacks = voiceAttacks.get(voice) ?? []
+    const gaps = [attacks[index - 1] === undefined ? undefined : beat - attacks[index - 1],
+      attacks[index + 1] === undefined ? undefined : attacks[index + 1] - beat].filter((gap): gap is number => gap !== undefined)
+    return gaps.length > 0 && gaps.every((gap) => gap >= 0.5 &&
+      Math.abs(gap - Math.round(gap / NOTATION_GRID) * NOTATION_GRID) <= NOTATION_TOLERANCE)
+  }
+  const projectedAttacks = new Map<string, Map<number, number>>()
+  for (const [voice, groups] of attackGroups) {
+    const projected = new Map<number, number>()
+    for (const [beat, simultaneous] of groups) {
+      const snapped = Math.round(beat / NOTATION_GRID) * NOTATION_GRID
+      const distance = Math.abs(snapped - beat)
+      const contextual = distance > NOTATION_TOLERANCE && distance <= ATTACK_CONTEXT_TOLERANCE &&
+        supportedByAttackSpacing(voice, beat)
+      projected.set(beat, simultaneous.every(automatic) && !hasFastNeighbor(voice, beat) &&
+        (distance <= NOTATION_TOLERANCE || contextual) &&
+        barAt(beat, false) === barAt(snapped, false) ? snapped : beat)
+    }
+    projectedAttacks.set(voice, projected)
+  }
+  const simultaneousAttacks = new Map<number, { voice: string; div: number }[]>()
+  for (const [voice, attacks] of projectedAttacks) {
+    for (const [beat, projectedBeat] of attacks) {
+      const group = simultaneousAttacks.get(beat) ?? []
+      group.push({ voice, div: Math.round(projectedBeat * DIV) })
+      simultaneousAttacks.set(beat, group)
+    }
+  }
+  for (const [beat, group] of simultaneousAttacks) {
+    if (new Set(group.map(({ div }) => div)).size < 2) continue
+    for (const { voice } of group) projectedAttacks.get(voice)?.set(beat, beat)
+  }
+  const projected = notes.map((source, index) => {
+    const sourceStartBeat = source.startBeat
+    const sourceEndBeat = sourceStartBeat + source.beats
+    const voice = voiceKey(source)
+    let startBeat = sourceStartBeat
+    let endBeat = sourceEndBeat
+    let staccato = false
+    if (automatic(source) && Number.isFinite(beatsPerBar) && beatsPerBar > 0 &&
+        !hasFastNeighbor(voice, sourceStartBeat)) {
+      startBeat = projectedAttacks.get(voice)?.get(sourceStartBeat) ?? sourceStartBeat
+      const matchingAttack = attackByMicrobeat.get(voice)?.get(Math.round(sourceEndBeat * 1e6))
+      if (matchingAttack !== undefined && Math.abs(matchingAttack - sourceEndBeat) < 1e-6) {
+        endBeat = projectedAttacks.get(voice)?.get(matchingAttack) ?? matchingAttack
+      } else {
+        const snappedEnd = Math.round(sourceEndBeat / NOTATION_GRID) * NOTATION_GRID
+        if (Math.abs(snappedEnd - sourceEndBeat) <= NOTATION_TOLERANCE &&
+            barAt(sourceEndBeat, true) === barAt(snappedEnd, true)) endBeat = snappedEnd
+      }
+      const nextAttack = voiceAttacks.get(voice)?.find((beat) => beat > sourceStartBeat)
+      if (nextAttack !== undefined && startBeat === projectedAttacks.get(voice)?.get(sourceStartBeat) &&
+          nextAttack - sourceStartBeat <= 2 && source.beats <= 1.5 &&
+          sourceEndBeat <= nextAttack + 1e-6) {
+        const logicalEnd = projectedAttacks.get(voice)?.get(nextAttack) ?? nextAttack
+        if (logicalEnd > startBeat &&
+            (sourceEndBeat >= nextAttack - 1e-6 ||
+              barAt(sourceStartBeat, false) === barAt(nextAttack, false))) {
+          const gate = sourceEndBeat - sourceStartBeat
+          const gap = nextAttack - sourceStartBeat
+          staccato = sourceEndBeat < nextAttack - 0.125 && gate <= gap * 0.85 &&
+            barAt(sourceStartBeat, false) === barAt(nextAttack, false)
+          endBeat = logicalEnd
+        }
+      }
+    }
+    const sourceStartDiv = Math.round(sourceStartBeat * DIV)
+    const sourceEndDiv = Math.max(sourceStartDiv + 1, Math.round(sourceEndBeat * DIV))
+    const startDiv = Math.round(startBeat * DIV)
+    const endDiv = Math.max(startDiv + 1, Math.round(endBeat * DIV))
+    return {
+      sourceId: `${source.trackId ?? partId}:note:${index}`,
+      source,
+      midi: source.midi,
+      sourceStartBeat,
+      sourceEndBeat,
+      sourceStartDiv,
+      sourceEndDiv,
+      startDiv,
+      endDiv,
+      staccato,
+    }
+  })
+  const sharedStartGroups = new Map<number, number[]>()
+  projected.forEach((note, index) => {
+    const group = sharedStartGroups.get(note.sourceStartBeat) ?? []
+    group.push(index)
+    sharedStartGroups.set(note.sourceStartBeat, group)
+  })
+  const overlapPairs = (intervals: { index: number; startDiv: number; endDiv: number }[]) => {
+    const pairs = new Map<string, [number, number]>()
+    const staves = new Map<string, typeof intervals>()
+    for (const interval of intervals) {
+      const staff = partId === 'piano' ? voiceKey(projected[interval.index].source) : 'part'
+      const group = staves.get(staff) ?? []
+      group.push(interval)
+      staves.set(staff, group)
+    }
+    for (const staff of staves.values()) {
+      const ordered = staff.sort((a, b) => a.startDiv - b.startDiv || a.index - b.index)
+      for (let i = 0; i < ordered.length; i++) {
+        const left = ordered[i]
+        for (let j = i + 1; j < ordered.length && ordered[j].startDiv < left.endDiv; j++) {
+          const right = ordered[j]
+          if (right.endDiv <= right.startDiv) continue
+          const first = Math.min(left.index, right.index)
+          const second = Math.max(left.index, right.index)
+          pairs.set(`${first}:${second}`, [first, second])
+        }
+      }
+    }
+    return pairs
+  }
+  const sourcePairs = overlapPairs(projected.map((note, index) => ({
+    index,
+    startDiv: note.sourceStartDiv,
+    endDiv: note.sourceEndDiv,
+  })))
+  const blocked = new Set<number>()
+  let changed = true
+  while (changed) {
+    changed = false
+    const writtenPairs = overlapPairs(projected.map((note, index) => ({
+      index,
+      startDiv: blocked.has(index) ? note.sourceStartDiv : note.startDiv,
+      endDiv: blocked.has(index) ? note.sourceEndDiv : note.endDiv,
+    })))
+    const fallbackChanged = (index: number) => {
+      const note = projected[index]
+      if (!blocked.has(index) &&
+          (note.startDiv !== note.sourceStartDiv || note.endDiv !== note.sourceEndDiv)) {
+        blocked.add(index)
+        changed = true
+      }
+    }
+    for (const [pair, participants] of sourcePairs)
+      if (!writtenPairs.has(pair)) participants.forEach(fallbackChanged)
+    for (const [pair, participants] of writtenPairs)
+      if (!sourcePairs.has(pair)) participants.forEach(fallbackChanged)
+    for (const participants of sharedStartGroups.values())
+      if (participants.some((index) => blocked.has(index))) participants.forEach(fallbackChanged)
+  }
+  return projected.map((note, index) => {
+    const { sourceStartDiv, sourceEndDiv, ...notation } = note
+    const startDiv = blocked.has(index) ? sourceStartDiv : note.startDiv
+    const endDiv = blocked.has(index) ? sourceEndDiv : note.endDiv
+    return {
+      ...notation,
+      startDiv,
+      endDiv,
+      startBeat: startDiv / DIV,
+      endBeat: endDiv / DIV,
+      staccato: !blocked.has(index) && note.staccato,
+    }
+  })
+}
+
 const TYPES: [number, string, boolean][] = [
   [64, 'whole', false], [48, 'half', true], [32, 'half', false], [24, 'quarter', true],
   [16, 'quarter', false], [12, 'eighth', true], [8, 'eighth', false], [6, '16th', true],
@@ -34,7 +251,7 @@ function pitch(midi: number, flats: boolean): string {
   return `<pitch><step>${name[0]}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${Math.floor(base / 12) - 1}</octave></pitch>`
 }
 
-type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string }
+type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean }
 type Event = { pos: number; dur: number; heads: Head[] }
 
 function voice(events: Event[], voiceNo: number, staff: number, stem: string | null, barDivs: number): string {
@@ -61,7 +278,10 @@ function voice(events: Event[], voiceNo: number, staff: number, stem: string | n
         const stop = head.stop || index > 0
         const start = head.start || index < lengths.length - 1
         const ties = `${stop ? '<tie type="stop"/>' : ''}${start ? '<tie type="start"/>' : ''}`
-        const notation = stop || start ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}</notations>` : ''
+        const articulation = head.staccato && !stop && !index ? '<articulations><staccato/></articulations>' : ''
+        const notation = stop || start || articulation
+          ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}${articulation}</notations>`
+          : ''
         xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length)}${stem ? `<stem>${stem}</stem>` : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : ''}</note>`
       })
     }
@@ -146,21 +366,31 @@ function annotations(song: Song, bar: number, chords: boolean): string {
 /** `chords: false` leaves chord symbols out, for when the overlay draws them as keyboards. */
 export function pianoXml(song: Song, chords = true): string {
   const barDivs = song.beatsPerBar * DIV
+  const notes = notationNotes(song.piano, 'piano', song.beatsPerBar).map((note) => ({
+    ...note,
+    flats: song.chords.find((chord) =>
+      chord.startBeat <= note.startBeat && chord.startBeat + chord.beats > note.startBeat)?.flats ?? false,
+  }))
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>`
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
     const start = (bar - 1) * song.beatsPerBar
-    const chord = song.chords.find((c) => c.startBeat <= start && c.startBeat + c.beats > start)
-    const flats = chord?.flats ?? false
+    const startDiv = Math.round(start * DIV)
+    const endDiv = startDiv + barDivs
     const hand = (h: 'right' | 'left') =>
       group(
-        song.piano
-          .filter((n) => n.hand === h && n.startBeat < start + song.beatsPerBar && n.startBeat + n.beats > start)
-          .map((n) => ({
-            pos: Math.round((Math.max(n.startBeat, start) - start) * DIV),
-            dur: Math.round((Math.min(n.startBeat + n.beats, start + song.beatsPerBar) - Math.max(n.startBeat, start)) * DIV),
-            head: { xml: pitch(n.midi, flats), stop: n.startBeat < start, start: n.startBeat + n.beats > start + song.beatsPerBar },
-          })),
+        notes
+          .filter((note) => note.source.hand === h && note.startDiv < endDiv && note.endDiv > startDiv)
+          .map((note) => {
+            const from = Math.max(note.startDiv, startDiv)
+            const to = Math.min(note.endDiv, endDiv)
+            return {
+              pos: from - startDiv,
+              dur: to - from,
+              head: { xml: pitch(note.midi, note.flats), stop: note.startDiv < startDiv, start: note.endDiv > endDiv,
+                staccato: note.staccato },
+            }
+          }),
       )
     measures.push(
       measureOpen(bar, attrs) +
@@ -178,13 +408,12 @@ export function pianoXml(song: Song, chords = true): string {
 /** One vocal staff, with tied durations across beats and bar lines; no hand assignment. */
 export function vocalXml(song: Song): string {
   const barDivs = song.beatsPerBar * DIV
-  const pitches = song.vocals.map((n) => n.midi).sort((a, b) => a - b)
+  const notes = notationNotes(song.vocals, 'vocals', song.beatsPerBar)
+  const pitches = notes.map((n) => n.midi).sort((a, b) => a - b)
   const bass = pitches.length > 0 && pitches[Math.floor(pitches.length / 2)] < 60
   const clef = bass ? '<sign>F</sign><line>4</line>' : '<sign>G</sign><line>2</line>'
   const attrs = `<attributes><divisions>${DIV}</divisions>${timeXml(song)}<clef>${clef}</clef></attributes>`
-  const notes = song.vocals.map((n) => ({
-    ...n, from: Math.round(n.startBeat * DIV), to: Math.max(Math.round(n.startBeat * DIV) + 1, Math.round((n.startBeat + n.beats) * DIV)),
-  }))
+  const written = notes.map((note) => ({ ...note, from: note.startDiv, to: note.endDiv }))
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
     const start = (bar - 1) * barDivs
@@ -193,7 +422,7 @@ export function vocalXml(song: Song): string {
     const rest = (duration: number) => {
       for (const d of pieces(duration)) xml += `<note><rest/><duration>${d}</duration>${typeOf(d)}</note>`
     }
-    for (const n of notes) {
+    for (const n of written) {
       const from = Math.max(start, n.from, cursor)
       const to = Math.min(start + barDivs, n.to)
       if (to <= from) continue
@@ -203,7 +432,10 @@ export function vocalXml(song: Song): string {
         const stop = cursor > n.from
         const begin = cursor + d < n.to
         const ties = `${stop ? '<tie type="stop"/>' : ''}${begin ? '<tie type="start"/>' : ''}`
-        const notation = stop || begin ? `<notations>${stop ? '<tied type="stop"/>' : ''}${begin ? '<tied type="start"/>' : ''}</notations>` : ''
+        const articulation = n.staccato && cursor === n.from ? '<articulations><staccato/></articulations>' : ''
+        const notation = stop || begin || articulation
+          ? `<notations>${stop ? '<tied type="stop"/>' : ''}${begin ? '<tied type="start"/>' : ''}${articulation}</notations>`
+          : ''
         xml += `<note>${pitch(n.midi, false)}<duration>${d}</duration>${ties}${typeOf(d)}${notation}</note>`
         cursor += d
       }
@@ -217,52 +449,71 @@ export function vocalXml(song: Song): string {
 /** Transcribed pitched notes; mixed registers use treble and bass staves without inventing hands or fingering. */
 export function instrumentXml(song: Song, track: Track): string {
   const barDivs = song.beatsPerBar * DIV
-  const notes = song.instrumentNotes?.[track.id] ?? []
+  const notes = notationNotes(song.instrumentNotes?.[track.id] ?? [], track.id, song.beatsPerBar)
   const low = notes.some((n) => n.midi < 60)
   const high = notes.some((n) => n.midi >= 60)
   const split = low && high
   const attrs = `<attributes><divisions>${DIV}</divisions>${timeXml(song)}${split
     ? '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef>'
     : `<clef><sign>${low ? 'F' : 'G'}</sign><line>${low ? 4 : 2}</line></clef>`}</attributes>`
+  type InstrumentEvent = { startDiv: number; endDiv: number; staff: number; heads: Head[] }
+  type VoiceLine = { endDiv: number; events: InstrumentEvent[] }
+  const grouped = new Map<string, InstrumentEvent>()
+  for (const note of notes) {
+    if (!(note.source.beats > 0)) continue
+    const staff = split && note.midi < 60 ? 2 : 1
+    const key = `${staff}:${note.startDiv}:${note.endDiv}`
+    const base = Math.ceil(note.midi - 0.5)
+    const cents = Math.round((note.midi - base) * 100)
+    const head: Head = {
+      xml: pitch(base, false),
+      cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined,
+      staccato: note.staccato,
+    }
+    const event = grouped.get(key)
+    if (event) event.heads.push(head)
+    else grouped.set(key, { startDiv: note.startDiv, endDiv: note.endDiv, staff, heads: [head] })
+  }
+  const voiceLines = new Map<number, VoiceLine[]>()
+  const events = [...grouped.values()].sort((a, b) =>
+    a.staff - b.staff || a.startDiv - b.startDiv || b.endDiv - a.endDiv)
+  for (const event of events) {
+    const lines = voiceLines.get(event.staff) ?? []
+    let line = lines.find((candidate) => candidate.endDiv <= event.startDiv)
+    if (!line) {
+      line = { endDiv: 0, events: [] }
+      lines.push(line)
+      voiceLines.set(event.staff, lines)
+    }
+    line.events.push(event)
+    line.endDiv = event.endDiv
+  }
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
     const start = (bar - 1) * song.beatsPerBar
-    const end = start + song.beatsPerBar
-    const events = notes.filter((n) => n.beats > 0 && n.startBeat < end && n.startBeat + n.beats > start)
-      .map((n) => {
-        const from = Math.max(start, n.startBeat)
-        const to = Math.min(end, n.startBeat + n.beats)
-        const base = Math.ceil(n.midi - 0.5)
-        const cents = Math.round((n.midi - base) * 100)
-        return {
-          pos: Math.round((from - start) * DIV),
-          dur: Math.max(1, Math.round((to - start) * DIV) - Math.round((from - start) * DIV)),
-          staff: split && n.midi < 60 ? 2 : 1,
-          head: { xml: pitch(base, false), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined,
-            stop: n.startBeat < start, start: n.startBeat + n.beats > end },
-        }
-      })
-      .sort((a, b) => a.pos - b.pos || b.dur - a.dur)
+    const startDiv = Math.round(start * DIV)
+    const endDiv = startDiv + barDivs
     const parts: string[] = []
     for (const staff of (split ? [1, 2] : [1])) {
-      const voices: { end: number; events: Event[] }[] = []
-      for (const event of events.filter((e) => e.staff === staff)) {
-        const same = voices.find((v) => v.events.some((e) => e.pos === event.pos && e.dur === event.dur))
-        if (same) {
-          same.events.find((e) => e.pos === event.pos && e.dur === event.dur)!.heads.push(event.head)
-          continue
-        }
-        let line = voices.find((v) => v.end <= event.pos)
-        if (!line) {
-          line = { end: 0, events: [] }
-          voices.push(line)
-        }
-        line.events.push({ pos: event.pos, dur: event.dur, heads: [event.head] })
-        line.end = event.pos + event.dur
-      }
-      for (const [i, line] of (voices.length ? voices : [{ end: 0, events: [] }]).entries()) {
+      const lines = (voiceLines.get(staff) ?? [])
+        .map((line, index) => ({
+          voiceNo: staff === 1 ? index + 1 : index + 5,
+          events: line.events
+            .filter((event) => event.startDiv < endDiv && event.endDiv > startDiv)
+            .map((event) => ({
+              pos: Math.max(startDiv, event.startDiv) - startDiv,
+              dur: Math.min(endDiv, event.endDiv) - Math.max(startDiv, event.startDiv),
+              heads: event.heads.map((head) => ({
+                ...head,
+                stop: event.startDiv < startDiv,
+                start: event.endDiv > endDiv,
+              })),
+            })),
+        }))
+        .filter((line) => line.events.length)
+      for (const line of (lines.length ? lines : [{ voiceNo: staff === 1 ? 1 : 5, events: [] as Event[] }])) {
         if (parts.length) parts.push(`<backup><duration>${barDivs}</duration></backup>`)
-        parts.push(voice(line.events, staff === 1 ? i + 1 : i + 5, staff, null, barDivs))
+        parts.push(voice(line.events, line.voiceNo, staff, null, barDivs))
       }
     }
     measures.push(measureOpen(bar, attrs) + annotations(song, bar, true) + parts.join('') +

@@ -4,7 +4,7 @@ import { chordAt, hasPitchedScore, invert, smoothInversions, sustainedChords, ty
 /** A generated part to play along with the song harmonically. Not a transcription: nothing here is what the recording plays. */
 export type CreativeTrack = Track & { chords: Chord[]; piano: PianoNote[] }
 
-/** Keep the local groove in score beats; empty bars use the written meter. */
+/** Preserve sparse source accents; dense bars fall back to two meter-aware attacks. */
 export function accompanimentRhythm(song: Song): number[] {
   const unit = song.beatUnit ?? 4
   const numerator = song.beatsPerBar * unit / 4
@@ -34,12 +34,33 @@ export function accompanimentRhythm(song: Song): number[] {
   for (const note of [...song.piano, ...song.vocals, ...Object.values(song.instrumentNotes ?? {}).flat()]) {
     if (note.beats > 0 && (note.velocity ?? 1) > 0) add(pitched, note.startBeat)
   }
+  const compound = unit === 8 && numerator >= 6 && numerator % 3 === 0
+  const second = compound
+    ? Math.round((song.beatsPerBar / 2) / pulse) * pulse
+    : unit === 4
+      ? Math.min(2, song.beatsPerBar - pulse)
+      : Math.min(song.beatsPerBar - pulse, Math.max(pulse, Math.round((song.beatsPerBar / 2) / pulse) * pulse))
+  const anchors = [...new Set([0, second].filter((beat) => beat >= 0 && beat < song.beatsPerBar))]
   const rhythm: number[] = []
   for (let bar = 0; bar < song.bars; bar++) {
     const local = backbeat.get(bar) ?? percussion.get(bar) ?? pitched.get(bar)
-    if (local) rhythm.push(...local)
-    else for (let index = 0; index < Math.ceil(song.beatsPerBar / pulse); index++) {
-      rhythm.push(bar * song.beatsPerBar + index * pulse)
+    const unique = local ? [...new Set(local)].sort((a, b) => a - b) : []
+    if (unique.length > 0 && unique.length <= 2) rhythm.push(...unique)
+    else if (!unique.length) rhythm.push(...anchors.map((beat) => bar * song.beatsPerBar + beat))
+    else {
+      const barStart = bar * song.beatsPerBar
+      const selected = new Set<number>()
+      for (const anchor of anchors) {
+        const candidate = unique.filter((beat) => !selected.has(beat))
+          .sort((a, b) => {
+            const localA = a - barStart
+            const localB = b - barStart
+            return Math.abs(localA - anchor) - Math.abs(localB - anchor) ||
+              Number(localA < anchor) - Number(localB < anchor) || a - b
+          })[0]
+        if (candidate !== undefined) selected.add(candidate)
+      }
+      rhythm.push(...selected)
     }
   }
   return [...new Set(rhythm)].sort((a, b) => a - b)
@@ -52,43 +73,94 @@ export function chordRhythm(chord: Pick<Chord, 'startBeat' | 'beats'>, rhythm: r
   return attacks.map((startBeat, i) => ({ startBeat, beats: (attacks[i + 1] ?? end) - startBeat }))
 }
 
-/**
- * A livelier progression to play along with: each chord in its colour (seventh, add9), long chords
- * turn to a substitute halfway, and most changes are approached by a passing chord (the dominant of
- * the next chord, or one borrowed from the minor key) on beat 3, or on beat 4 for variety.
- */
-function movingChords(song: Song, rhythm: readonly number[]): CreativeTrack {
-  const chords: Chord[] = []
-  const take = (c: Chord, a: Alternative | undefined, startBeat: number, beats: number): Chord =>
-    a ? { ...c, startBeat, beats, symbol: a.symbol, numeral: a.numeral, tones: a.tones, flats: a.flats } : { ...c, startBeat, beats }
-  song.chords.forEach((c, i) => {
-    let options: Alternative[] = []
-    try {
-      options = alternatives(song, i, 8)
-    } catch {
-      // Symbols the theory helpers do not know stay as detected.
+function melodyNotes(song: Song): PianoNote[] {
+  if (song.vocals.length) return song.vocals.map((note) => ({ ...note, hand: 'right' }))
+  const right = song.piano.filter((note) => note.hand === 'right')
+  if (right.length) return right
+  return Object.values(song.instrumentNotes ?? {}).flat().map((note) => ({ ...note, hand: 'right' }))
+}
+
+function harmonicSlots(song: Song): number[] {
+  return accompanimentRhythm({ ...song, piano: [], vocals: [], drums: [], instrumentNotes: undefined })
+}
+
+function melodyFit(notes: readonly PianoNote[], start: number, end: number, tones: readonly number[]): number {
+  const pitchClasses = new Set(tones.map((tone) => ((tone % 12) + 12) % 12))
+  return notes.reduce((score, note) => {
+    const overlap = Math.min(note.startBeat + note.beats, end) - Math.max(note.startBeat, start)
+    if (!(overlap > 0) || !Number.isFinite(note.midi)) return score
+    const attacked = note.startBeat >= start && note.startBeat < end ? 0.05 : 0
+    const velocity = Math.min(1.25, Math.max(0.5, (note.velocity ?? 0.7) / 0.7))
+    const weight = (Math.min(1, overlap / Math.max(0.5, end - start)) + attacked) * velocity
+    const pitch = ((Math.round(note.midi) % 12) + 12) % 12
+    return score + (pitchClasses.has(pitch) ? weight : -weight)
+  }, 0)
+}
+
+function sharedTones(left: readonly number[], right: readonly number[]): number {
+  const pcs = new Set(left.map((tone) => ((tone % 12) + 12) % 12))
+  return new Set(right.map((tone) => ((tone % 12) + 12) % 12).filter((tone) => pcs.has(tone))).size
+}
+
+/** Choose melody-supported variants at strong meter slots, keeping compatible chords steady. */
+function movingChords(song: Song, rhythm: readonly number[], slots: readonly number[]): CreativeTrack {
+  const notes = melodyNotes(song)
+  const slotSet = new Set(slots)
+  const changes = new Map<number, number>()
+  let previous: Chord | undefined
+  const chords = song.chords.map((source, index) => {
+    if (source.symbol === 'N.C.') {
+      previous = undefined
+      return { ...source, tones: [...source.tones] }
     }
-    const colour = options.find((x) => x.kind === 'color')
-    const next = song.chords[i + 1]
-    const approach = next?.symbol && next.symbol !== c.symbol && c.beats >= 2
-      ? options.find((x) => (x.kind === 'secondary' || x.kind === 'borrowed') && x.symbol !== next.symbol)
-      : undefined
-    const substitute = c.beats >= 8 ? options.find((x) => x.kind === 'substitute') : undefined
-    if (!c.tones.length || (!approach && !substitute)) {
-      chords.push(colour ? take(c, colour, c.startBeat, c.beats) : c)
-      return
+    if (!source.symbol || !source.tones.length) return { ...source, tones: [...source.tones] }
+    const start = source.startBeat
+    const end = start + source.beats
+    const sourceCopy = { ...source, tones: [...source.tones] }
+    let chosen: Chord = sourceCopy
+    const hasMelody = notes.some((note) => note.startBeat < end && note.startBeat + note.beats > start)
+    if (previous && hasMelody && sharedTones(previous.tones, source.tones) >= 2 &&
+        melodyFit(notes, start, end, previous.tones) >= melodyFit(notes, start, end, source.tones) - 0.25) {
+      chosen = { ...source, symbol: previous.symbol, numeral: previous.numeral,
+        tones: [...previous.tones], flats: previous.flats }
+    } else if (slotSet.has(start) && (changes.get(Math.floor(start / song.beatsPerBar)) ?? 0) < 2) {
+      let options: Alternative[] = []
+      try {
+        options = alternatives(song, index, 8)
+      } catch {
+        previous = chosen
+        return chosen
+      }
+      const sourceFit = melodyFit(notes, start, end, source.tones)
+      const option = options
+        .filter((candidate) => (candidate.kind === 'color' || candidate.kind === 'substitute') &&
+          sharedTones(candidate.tones, source.tones) >= 2)
+        .map((candidate, order) => ({ candidate, order, gain: melodyFit(notes, start, end, candidate.tones) - sourceFit }))
+        .filter(({ gain }) => gain >= 0.65)
+        .sort((a, b) => b.gain - a.gain || a.order - b.order)[0]?.candidate
+      if (option) {
+        chosen = { ...sourceCopy, symbol: option.symbol, numeral: option.numeral,
+          tones: [...option.tones], flats: option.flats }
+        changes.set(Math.floor(start / song.beatsPerBar),
+          (changes.get(Math.floor(start / song.beatsPerBar)) ?? 0) + 1)
+      }
     }
-    const lead = approach ? (c.beats >= 4 && i % 3 !== 2 ? 2 : 1) : 0
-    const end = c.startBeat + c.beats
-    const half = substitute ? c.startBeat + Math.floor(c.beats / 2) : end - lead
-    chords.push(take(c, colour, c.startBeat, half - c.startBeat))
-    if (substitute) chords.push(take(c, substitute, half, end - lead - half))
-    if (approach) chords.push(take(c, approach, end - lead, lead))
+    previous = chosen
+    return chosen
   })
+  const merged: Chord[] = []
+  for (const chord of chords) {
+    const prior = merged.at(-1)
+    if (prior && chord.symbol && prior.symbol === chord.symbol &&
+        prior.startBeat + prior.beats === chord.startBeat &&
+        prior.tones.length === chord.tones.length &&
+        prior.tones.every((tone, index) => tone === chord.tones[index])) prior.beats += chord.beats
+    else merged.push(chord)
+  }
   return {
     id: 'colour', instrument: 'piano', group: 'creative', chordal: true, name: 'Colour chords',
-    detail: 'Richer chords, with passing chords leading into each change',
-    chords, piano: sustainedPattern(sustainedChords(chords), rhythm),
+    detail: 'Meter-aware chord choices supported by the melody',
+    chords: merged, piano: sustainedPattern(sustainedChords(merged), rhythm),
   }
 }
 
@@ -117,38 +189,49 @@ const SCALE = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] }
  * Melody mode shadows the lead in the detected key, even when a chord is uncertain.
  * Chord mode follows only identified chord tones; neither mode relabels an unknown chord.
  */
-function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOptions, rhythm: readonly number[]): CreativeTrack {
+function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOptions, slots: readonly number[]): CreativeTrack {
   const top = new Map<number, PianoNote>()
-  const pitched = Object.values(song.instrumentNotes ?? {}).flat()
-  const lead = song.vocals.length ? song.vocals.map((n) => ({ ...n, hand: 'right' as const })) : song.piano.length
-    ? song.piano.filter((n) => n.hand === 'right') : pitched.map((n) => ({ ...n, hand: 'right' as const }))
+  const lead = melodyNotes(song)
   for (const n of lead) if ((top.get(n.startBeat)?.midi ?? -1) < n.midi) top.set(n.startBeat, n)
   const melody = [...top.values()].sort((a, b) => a.startBeat - b.startBeat)
   const tonic = song.key && (NAMES.includes(song.key.tonic) ? NAMES.indexOf(song.key.tonic) : SHARPS.indexOf(song.key.tonic))
   const scale = tonic !== null && tonic >= 0 ? SCALE[song.key!.mode].map((pc) => (pc + tonic) % 12) : null
   const direction = above ? 1 : -1
   const target = (midi: number) => midi + direction * DISTANCE[interval]
-  const nearest = (midi: number, pcs: number[], avoid?: number) => {
+  const nearest = (midi: number, pcs: number[], avoid?: number, previous?: number) => {
     const candidates = Array.from({ length: 84 }, (_, i) => i + 24)
       .filter((note) => pcs.includes(note % 12) && note !== avoid && Math.abs(note - midi) <= 4)
-    return candidates.sort((a, b) => Math.abs(a - midi) - Math.abs(b - midi))[0]
+    return candidates.sort((a, b) =>
+      Math.abs(a - midi) + (previous === undefined ? 0 : Math.abs(a - previous) * 0.35) -
+      Math.abs(b - midi) - (previous === undefined ? 0 : Math.abs(b - previous) * 0.35))[0]
   }
   const piano: PianoNote[] = []
   if (source === 'chords') {
+    let previousPitch: number | undefined
     for (const chord of sustainedChords(song.chords)) {
       const lead = [...melody].reverse().find((m) => m.startBeat <= chord.startBeat)?.midi ?? 67
       const pcs = chord.tones.map((tone) => tone % 12)
-      const pitch = nearest(target(lead), pcs, lead) ?? nearest(lead + direction * 7, pcs, lead)
+      const pitch = nearest(target(lead), pcs, lead, previousPitch) ??
+        nearest(lead + direction * 7, pcs, lead, previousPitch)
       if (pitch === undefined) continue
-      for (const { startBeat, beats } of chordRhythm(chord, rhythm)) {
-        piano.push({ midi: pitch, startBeat, beats,
-          hand: !above && interval === 10 ? 'left' : 'right', velocity: 0.8 })
-      }
+      piano.push({ midi: pitch, startBeat: chord.startBeat, beats: chord.beats,
+        hand: !above && interval === 10 ? 'left' : 'right', velocity: 0.8 })
+      previousPitch = pitch
     }
   } else {
-    for (let i = 0; i < melody.length; i++) {
-      const m = melody[i]
-      if (sparse && !(Math.abs(m.startBeat - Math.round(m.startBeat)) < 0.12 && m.beats >= 1)) continue
+    const selected = new Map<number, PianoNote>()
+    for (const beat of slots) {
+      const barStart = Math.floor(beat / song.beatsPerBar) * song.beatsPerBar
+      const barEnd = barStart + song.beatsPerBar
+      const candidates = melody.filter((note) => note.startBeat >= barStart && note.startBeat < barEnd &&
+        (!sparse || (Math.abs(note.startBeat - Math.round(note.startBeat)) < 0.12 && note.beats >= 1)))
+      const candidate = candidates.sort((a, b) =>
+        Math.abs(a.startBeat - beat) - Math.abs(b.startBeat - beat) || a.startBeat - b.startBeat)[0]
+      if (candidate) selected.set(candidate.startBeat, candidate)
+    }
+    const chosen = [...selected.values()].sort((a, b) => a.startBeat - b.startBeat)
+    for (const m of chosen) {
+      const next = melody.find((note) => note.startBeat > m.startBeat)
       const chord = song.chords[chordAt(song, m.startBeat)]
       const chordPcs = chord?.symbol && chord.symbol !== 'N.C.' ? chord.tones.map((tone) => tone % 12) : []
       const aimed = target(m.midi)
@@ -156,7 +239,7 @@ function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOpt
       const pitch = (chordPitch !== undefined && Math.abs(chordPitch - aimed) <= 1 ? chordPitch : undefined)
         ?? (scale ? nearest(aimed, scale) : aimed)
       if (pitch === m.midi) continue
-      const beats = Math.min(m.beats, (melody[i + 1]?.startBeat ?? Infinity) - m.startBeat)
+      const beats = Math.min(m.beats, (next?.startBeat ?? Infinity) - m.startBeat)
       if (beats > 0) piano.push({ ...m, midi: pitch, beats, hand: !above && interval === 10 ? 'left' : 'right', velocity: 0.8 })
     }
   }
@@ -192,5 +275,8 @@ export function creativeTracks(song: Song, harmony: HarmonyOptions = HARMONY_DEF
   if (!hasPitchedScore(song)) return []
   const namedChords = song.chords.some((chord) => chord.symbol && chord.symbol !== 'N.C.' && chord.tones.length)
   const rhythm = accompanimentRhythm(song)
-  return [...(namedChords ? [movingChords(song, rhythm), smoothComping(song, rhythm)] : []), harmonyLine(song, harmony, rhythm)]
+  const slots = harmonicSlots(song)
+  const colour = namedChords ? movingChords(song, rhythm, slots) : undefined
+  const harmonySong = harmony.source === 'chords' && colour ? { ...song, chords: colour.chords } : song
+  return [...(colour ? [colour, smoothComping(song, rhythm)] : []), harmonyLine(harmonySong, harmony, slots)]
 }

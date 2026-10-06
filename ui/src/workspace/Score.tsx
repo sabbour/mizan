@@ -4,6 +4,7 @@ import type { Engine } from './engine'
 import { displaySymbol, sustainedChords, type Confidence, type Instrument, type Song } from './song'
 import { useFrame, useReducedMotion, useSize } from './hooks'
 import { Guide } from './Guide'
+import { notationNotes } from './musicxml'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
 /** `sky` is how far (px, ≤ 0) the highest note or mark rises above the system's top staff line. */
@@ -43,26 +44,50 @@ function labelHeads(osmd: OpenSheetMusicDisplay) {
 }
 
 /** A drawn notehead and the source-note interval sounding on this score segment. */
-type Hit = { el: HTMLElement; start: number; end: number }
+type Hit = { sourceId?: string; el: HTMLElement; start: number; end: number }
 
-type SourceNote = { midi: number; startBeat: number; endBeat: number; staff: number }
+type SourceNote = {
+  sourceId: string
+  midi: number
+  startDiv: number
+  startBeat: number
+  endBeat: number
+  sourceStartBeat: number
+  sourceEndBeat: number
+  staff: number
+}
 
 function sourceNotes(song: Song, instrument: Instrument, trackId: string): SourceNote[] {
-  const note = (midi: number, startBeat: number, beats: number, staff: number): SourceNote =>
-    ({ midi, startBeat, endBeat: startBeat + beats, staff })
+  const projected = (notes: Parameters<typeof notationNotes>[0], partId: string, staff: (note: { source: { hand?: string; midi: number } }) => number) =>
+    notationNotes(notes, partId, song.beatsPerBar).map((note) => ({
+      sourceId: note.sourceId,
+      midi: note.midi,
+      startDiv: note.startDiv,
+      startBeat: note.startBeat,
+      endBeat: note.endBeat,
+      sourceStartBeat: note.sourceStartBeat,
+      sourceEndBeat: note.sourceEndBeat,
+      staff: staff(note),
+    }))
+  const chordNote = (midi: number, startBeat: number, beats: number, staff: number, sourceId: string): SourceNote => {
+    const startDiv = Math.round(startBeat * 16)
+    const endDiv = Math.max(startDiv + 1, Math.round((startBeat + beats) * 16))
+    return { sourceId, midi, startDiv, startBeat: startDiv / 16, endBeat: endDiv / 16,
+      sourceStartBeat: startBeat, sourceEndBeat: startBeat + beats, staff }
+  }
   if (instrument === 'piano')
-    return song.piano.map((n) => note(n.midi, n.startBeat, n.beats, n.hand === 'right' ? 0 : 1))
+    return projected(song.piano, 'piano', (n) => n.source.hand === 'right' ? 0 : 1)
   if (instrument === 'vocals')
-    return song.vocals.map((n) => note(n.midi, n.startBeat, n.beats, 0))
+    return projected(song.vocals, 'vocals', () => 0)
   if (instrument === 'other') {
     const events = song.instrumentNotes?.[trackId] ?? []
     const split = events.some((n) => n.midi < 60) && events.some((n) => n.midi >= 60)
-    return events.map((n) => note(n.midi, n.startBeat, n.beats, split && n.midi < 60 ? 1 : 0))
+    return projected(events, trackId, (n) => split && n.source.midi < 60 ? 1 : 0)
   }
   if (instrument === 'chords')
-    return sustainedChords(song.chords).flatMap((chord) => [
-      ...chord.tones.map((midi) => note(midi, chord.startBeat, chord.beats, 0)),
-      note(chord.tones[0] - 24, chord.startBeat, chord.beats, 1),
+    return sustainedChords(song.chords).flatMap((item) => [
+      ...item.tones.map((midi, index) => chordNote(midi, item.startBeat, item.beats, 0, `chord:${item.startBeat}:${index}`)),
+      chordNote(item.tones[0] - 24, item.startBeat, item.beats, 1, `chord-bass:${item.startBeat}`),
     ])
   return []
 }
@@ -73,16 +98,16 @@ function hits(osmd: OpenSheetMusicDisplay, song: Song, instrument: Instrument, t
   for (const staves of osmd.GraphicSheet.MeasureList)
     for (const [staffIndex, staff] of staves.entries())
       for (const entry of staff?.staffEntries ?? []) {
-        const start = entry.getAbsoluteTimestamp().RealValue * 4
+        const writtenStart = entry.getAbsoluteTimestamp().RealValue * 4
         for (const ve of entry.graphicalVoiceEntries)
           for (const note of ve.notes) {
             if (!(note instanceof VexFlowGraphicalNote) || note.sourceNote.isRest()) continue
             const el = note.getNoteheadSVGs()[note.vfnoteIndex]
             if (!el) continue
             el.classList.toggle('score-head-hollow', note.sourceNote.Length.RealValue >= 0.5)
-            const end = start + note.graphicalNoteLength.RealValue * 4
+            const writtenEnd = writtenStart + note.graphicalNoteLength.RealValue * 4
             if (instrument === 'drums') {
-              if (end > start) out.push({ el, start, end })
+              if (writtenEnd > writtenStart) out.push({ el, start: writtenStart, end: writtenEnd })
               continue
             }
             // OSMD's half-tone index is one octave below MIDI (C4 is 48 here, MIDI 60).
@@ -92,11 +117,14 @@ function hits(osmd: OpenSheetMusicDisplay, song: Song, instrument: Instrument, t
             for (const event of events) {
               if (event.staff !== staffIndex ||
                 Math.abs(event.midi - pitch) > 0.01 ||
-                Math.round(event.startBeat * 16) !== onset ||
-                event.startBeat >= end || event.endBeat <= start) continue
-              const activeStart = Math.max(start, event.startBeat)
-              const activeEnd = Math.min(end, event.endBeat)
-              if (activeEnd > activeStart) out.push({ el, start: activeStart, end: activeEnd })
+                event.startDiv !== onset ||
+                event.startBeat >= writtenEnd || event.endBeat <= writtenStart) continue
+              const transportStart = Math.abs(writtenStart - event.startBeat) < 1e-6
+                ? event.sourceStartBeat : Math.max(writtenStart, event.sourceStartBeat)
+              const transportEnd = Math.abs(writtenEnd - event.endBeat) < 1e-6
+                ? event.sourceEndBeat : Math.min(writtenEnd, event.sourceEndBeat)
+              if (transportEnd > transportStart)
+                out.push({ sourceId: event.sourceId, el, start: transportStart, end: transportEnd })
             }
           }
       }

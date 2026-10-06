@@ -19,6 +19,64 @@ export async function instrumentChecks() {
     'A drum-only transcription does not offer chord or harmony tracks')
   check(!new DOMParser().parseFromString(drumXml(drumOnly, false), 'application/xml').querySelector('harmony'),
     'Drum-only score does not claim chord symbols')
+  const hydrated = fromHost({
+    ...buildSong(),
+    bars: 1,
+    piano: [],
+    vocals: [],
+    drums: [],
+    chords: [],
+    tracks: [
+      { id: 'instrument-clean-electric-guitar', instrument: 'other', name: 'Clean Electric Guitar',
+        detail: 'Draft notes', group: 'detected', sourceInstrument: 'clean_electric_guitar' },
+      { id: 'instrument-electric-guitar', instrument: 'other', name: 'Electric Guitar',
+        detail: 'Draft notes', sourceInstrument: 'electric_guitar' },
+    ],
+    instrumentNotes: {
+      'instrument-clean-electric-guitar': [{ midi: 64, startBeat: 0, beats: 1 }],
+    },
+  })
+  check(hydrated.tracks[0].gmProgram === 27 && hydrated.tracks[1].gmProgram === undefined,
+    'Legacy guitar hydration assigns only the exact clean-electric-guitar GM program')
+  const legacyEngine = new Engine(hydrated)
+  const legacySources = []
+  const fakeGain = () => ({
+    gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {},
+      setTargetAtTime(value) { this.value = value } },
+    connect(destination) { this.destination = destination; return destination },
+  })
+  const legacyContext = {
+    currentTime: 0,
+    decodeAudioData: async (data) => ({ duration: 1, data }),
+    createGain: fakeGain,
+    createBufferSource: () => {
+      const source = {
+        playbackRate: { value: 1 },
+        connect(destination) { this.destination = destination; return destination },
+        start() {},
+        stop() {},
+      }
+      legacySources.push(source)
+      return source
+    },
+  }
+  legacyEngine.ctx = legacyContext
+  legacyEngine.master = {}
+  await legacyEngine.loadGmSamples(legacyContext)
+  legacyEngine.muted = new Set(hydrated.tracks
+    .filter((track) => track.id !== 'instrument-clean-electric-guitar')
+    .map((track) => track.id))
+  legacyEngine.events(0, 1, 0, 0.5, false)
+  check(legacyEngine.gmSamples.has(27), 'Legacy detected guitar loads GM27 samples')
+  check(legacySources.length === 1, 'Legacy detected guitar schedules its instrument note')
+  check(legacySources[0].destination.destination === legacyEngine.buses.get('instrument-clean-electric-guitar'),
+    'Legacy detected guitar routes to its mixer bus')
+  check(legacyEngine.buses.get('instrument-clean-electric-guitar').gain.value === 1,
+    'Legacy detected guitar remains audible when soloed')
+  legacyEngine.muted.add('instrument-clean-electric-guitar')
+  legacyEngine.refreshMix()
+  check(legacyEngine.buses.get('instrument-clean-electric-guitar').gain.value === 0,
+    'The legacy guitar route responds to mixer mute')
   const guitar = { id: 'instrument-guitar', instrument: 'other', name: 'Guitar', detail: 'Draft notes' }
   const bass = { id: 'instrument-bass', instrument: 'other', name: 'Bass', detail: 'Draft notes' }
   const song = {

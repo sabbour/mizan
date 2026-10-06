@@ -8,6 +8,34 @@ from .accompaniment import generate_accompaniment
 from .drums import GM_DRUMS
 
 
+DETECTED_GM_PROGRAMS = {"clean_electric_guitar": 27}
+
+
+def detected_gm_program(instrument: str) -> int | None:
+    return DETECTED_GM_PROGRAMS.get(instrument)
+
+
+def _valid_gm_program(track: dict) -> int | None:
+    program = track.get("gmProgram")
+    return program if type(program) is int and 0 <= program <= 127 else None
+
+
+def _resolved_gm_program(track: dict) -> int | None:
+    program = _valid_gm_program(track)
+    if program is not None:
+        return program
+    source_instrument = track.get("sourceInstrument")
+    return detected_gm_program(source_instrument) if type(source_instrument) is str else None
+
+
+def exportable_track(track: dict) -> bool:
+    if track.get("group") != "detected":
+        return True
+    source_instrument = track.get("sourceInstrument")
+    return (track.get("instrument") == "other" and type(source_instrument) is str and
+            detected_gm_program(source_instrument) is not None and _resolved_gm_program(track) is not None)
+
+
 def quantize(seconds: float, bpm: float, phase: float = 0) -> float:
     beat = seconds * bpm / 60
     phase_beat = phase * bpm / 60
@@ -87,12 +115,12 @@ def export_midi(song: dict, path: Path) -> None:
     midi.tracks.append(tempo)
     fractional = any(
         note["midi"] != int(note["midi"])
-        for track in song["tracks"] if track["instrument"] != "drums" and track.get("group") != "detected"
+        for track in song["tracks"] if track["instrument"] != "drums" and exportable_track(track)
         for note in _track_events(song, track)
     )
     available = [channel for channel in range(3, 16) if channel != 9]
     for track in song["tracks"]:
-        if track.get("group") == "detected":
+        if not exportable_track(track):
             continue
         events = _track_events(song, track)
         output = mido.MidiTrack()
@@ -103,13 +131,15 @@ def export_midi(song: dict, path: Path) -> None:
             channel = 2
         elif track["id"] == "accompaniment":
             channel = 1
-        elif track.get("gmProgram") in range(128):
+        elif _resolved_gm_program(track) is not None:
             if not available:
                 raise ValueError("MIDI export requires more than 12 independent instrument channels.")
             channel = available.pop(0)
         else:
             channel = 0
-        program = track.get("gmProgram", 53 if channel == 2 else 0)
+        program = _resolved_gm_program(track)
+        if program is None:
+            program = 53 if channel == 2 else 0
         if channel != 9 and not fractional:
             output.append(mido.Message("program_change", channel=channel, program=program))
         messages = []
@@ -176,13 +206,13 @@ def export_musicxml(song: dict, path: Path) -> None:
     division = 480
     bar_ticks = round(song["beatsPerBar"] * division)
     for track in song["tracks"]:
-        if track.get("group") == "detected":
+        if not exportable_track(track):
             continue
         part_id = track["id"]
         score_part = ET.SubElement(part_list, "score-part", id=part_id)
         ET.SubElement(score_part, "part-name").text = track["name"]
-        program = track.get("gmProgram")
-        if track["instrument"] == "other" and isinstance(program, int) and 0 <= program <= 127:
+        program = _resolved_gm_program(track)
+        if track["instrument"] == "other" and program is not None:
             instrument_id = f"{part_id}-I1"
             ET.SubElement(ET.SubElement(score_part, "score-instrument", id=instrument_id),
                           "instrument-name").text = track["name"]

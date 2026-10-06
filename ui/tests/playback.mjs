@@ -70,7 +70,19 @@ try {
   const deleteOnly = process.argv.includes('--delete-score')
   const timingOnly = process.argv.includes('--timing')
   const instrumentOnly = process.argv.includes('--instrument')
+  const readabilityOnly = process.argv.includes('--cairokee-readability')
   if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
+  if (readabilityOnly) {
+    assert.ok(process.env.MIZAN_TEST_CAIROKEE_ANALYSIS, 'Set MIZAN_TEST_CAIROKEE_ANALYSIS to the read-only saved analysis JSON')
+    const raw = JSON.parse(await readFile(process.env.MIZAN_TEST_CAIROKEE_ANALYSIS, 'utf8'))
+    await call('Emulation.setDeviceMetricsOverride', { width: 1900, height: 1700, deviceScaleFactor: 1, mobile: false })
+    console.log(await evaluate(`(${cairokeeReadabilityChecks.toString()})(${JSON.stringify(raw)})`))
+    if (process.env.MIZAN_TEST_ARTIFACTS) {
+      const shot = await call('Page.captureScreenshot', { format: 'png' })
+      await writeFile(join(process.env.MIZAN_TEST_ARTIFACTS, 'cairokee-readability-comparison.png'),
+        Buffer.from(shot.data, 'base64'))
+    }
+  }
   if (timingOnly) {
     console.log(await evaluate(`(${timingChecks.toString()})()`))
     console.log(await evaluate(`(${activeHeadChecks.toString()})()`))
@@ -92,7 +104,7 @@ try {
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -106,10 +118,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -140,7 +152,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!instrumentOnly && !timingOnly && !deleteOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!instrumentOnly && !timingOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -284,6 +296,7 @@ async function activeHeadChecks() {
   const { buildSong } = await import('/src/workspace/song.ts')
   const { pianoXml, instrumentXml } = await import('/src/workspace/musicxml.ts')
   const { Score } = await import('/src/workspace/Score.tsx')
+  const { Engine } = await import('/src/workspace/engine.ts')
   const React = (await import('/node_modules/.vite/deps/react.js')).default
   const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
   const check = (value, message) => { if (!value) throw new Error(message) }
@@ -436,6 +449,80 @@ async function activeHeadChecks() {
     await waitReady()
     check(seeks.length === 2, 'Focus, text selection and resize do not seek')
 
+    const projectedSong = {
+      ...base, bars: 2, chords: [], drums: [], vocals: [], tracks: [],
+      piano: [
+        { midi: 72, startBeat: 0.46, beats: 0.52, hand: 'right', confidence: 0.4, generated: false },
+        { midi: 76, startBeat: 3.96, beats: 0.3, hand: 'right', confidence: 0.4, generated: false },
+        { midi: 79, startBeat: 4.25, beats: 0.125, hand: 'right' },
+      ],
+    }
+    const projectedOriginal = structuredClone(projectedSong.piano)
+    const projectedAudio = new Engine(projectedSong)
+    const scheduled = []
+    projectedAudio.piano = (time, note) => scheduled.push({ time, note })
+    projectedAudio.events(0, 8, 0, 0.5, false)
+    check(JSON.stringify(scheduled.map(({ time }) => time)) === JSON.stringify([0.23, 1.98, 2.125]),
+      'the engine still schedules the unprojected source onset times')
+    check(JSON.stringify(scheduled.map(({ note }) => note.startBeat)) === JSON.stringify([0.46, 3.96, 4.25]),
+      'the engine receives the original source onset beats')
+    check(JSON.stringify(projectedSong.piano) === JSON.stringify(projectedOriginal),
+      'score rendering never rewrites source notes')
+    beat = 0.45
+    render({ xml: pianoXml(projectedSong), song: projectedSong, instrument: 'piano', bar: 1, previewId: 'piano' })
+    await wait(() => !!ready() && mount.querySelectorAll('.score-osmd .head-letter').length === 4,
+      'Projected notation did not finish rendering')
+    await frame()
+    check(active().length === 0, `Projected notation does not light before its source note is played (${letters()})`)
+    await move(0.47)
+    check(letters() === 'C', 'The projected notehead lights at its original source onset')
+    await move(0.99)
+    check(letters() === '', 'The projected notehead stops at its original source offset')
+    await move(3.95)
+    check(letters() === '', 'A note near the barline does not light before its source onset')
+    await move(3.97)
+    check(letters() === 'E', 'The barline note lights at the original source onset')
+    await move(4.05)
+    check(letters() === 'E', 'The tied continuation remains active after the barline')
+    await move(4.13)
+    check(letters() === 'E', 'The tied note follows its original source duration')
+    await move(4.255)
+    check(letters() === 'EG', 'The imported fine note retains its independent onset')
+    await move(4.38)
+    check(letters() === '', 'Both barline and imported notes stop at their source offsets')
+    const beforeProjectedClick = seeks.length
+    const projectedBar = mount.querySelector('.score-bar[aria-label="Bar 2"]')
+    check(projectedBar, 'The projected score keeps its second-bar hit target')
+    clickAt(projectedBar)
+    check(seeks.length === beforeProjectedClick + 1 && seeks.at(-1) === 2,
+      'Clicking the rounded note’s bar seeks to the real bar boundary, not its printed onset')
+
+    const gateSong = {
+      ...base, bars: 1, chords: [], drums: [], vocals: [], tracks: [],
+      piano: [
+        { midi: 60, startBeat: 0.02, beats: 0.125, hand: 'right', confidence: 0.4, generated: false },
+        { midi: 62, startBeat: 1.02, beats: 0.95, hand: 'right', confidence: 0.4, generated: false },
+      ],
+    }
+    const gateEngine = new Engine(gateSong)
+    const gateEvents = []
+    gateEngine.piano = (time, note) => gateEvents.push({ startBeat: note.startBeat, beats: note.beats })
+    gateEngine.events(0, 4, 0, 0.5, false)
+    check(gateEvents.map(({ startBeat, beats }) => [startBeat, beats]).every(([start, duration], index) =>
+      start === gateSong.piano[index].startBeat && duration === gateSong.piano[index].beats),
+    'Logical score spacing does not change the source attacks or sounding gates')
+    beat = 0
+    render({ xml: pianoXml(gateSong), song: gateSong, instrument: 'piano', bar: 1, previewId: 'piano' })
+    await wait(() => !!ready() && mount.querySelectorAll('.score-osmd .head-letter').length === 2,
+      'Staccato practice notation did not finish rendering')
+    await move(0.05)
+    check(letters() === 'C', 'A short gate highlights at its source attack')
+    await move(0.15)
+    check(letters() === '', 'A short gate highlight stops at its original release, before the logical note end')
+    await move(1.05)
+    check(letters() === 'D', 'The next logical note highlights at its original source attack')
+
+    beat = 17.75
     const oldHeads = active()
     const track = { id: 'guitar', instrument: 'other', name: 'Guitar', detail: '' }
     const firstGuitar = { ...song, piano: [], instrumentNotes: { guitar: [{ midi: 69, startBeat: 17.5, beats: 1 }] } }
@@ -460,6 +547,53 @@ async function activeHeadChecks() {
     root.unmount()
     mount.remove()
   }
+}
+
+async function cairokeeReadabilityChecks(raw) {
+  const { fromHost } = await import('/src/library/adapt.ts')
+  const { pianoXml } = await import('/src/workspace/musicxml.ts')
+  const { OpenSheetMusicDisplay: NamedOSMD } =
+    await import('/node_modules/.vite/deps/opensheetmusicdisplay.js')
+  const check = (condition, message) => { if (!condition) throw new Error(message) }
+  const full = fromHost(raw)
+  const song = {
+    ...full, bars: 4, chords: full.chords.filter((chord) => chord.startBeat < 16),
+    piano: full.piano.filter((note) => note.startBeat < 16),
+  }
+  const before = { ...song, piano: song.piano.map((note) => ({ ...note, generated: true })) }
+  const OSMD = NamedOSMD ?? (await import('/node_modules/.vite/deps/opensheetmusicdisplay.js')).default?.OpenSheetMusicDisplay
+  check(OSMD, 'OpenSheetMusicDisplay is available for the saved-song comparison')
+  const panel = document.createElement('main')
+  panel.style.cssText = 'position:fixed;inset:0;width:1800px;min-height:1600px;overflow:auto;background:#fff;color:#171717;padding:24px 48px;box-sizing:border-box;z-index:999999;font:16px Arial,sans-serif'
+  const heading = document.createElement('h1')
+  heading.textContent = `${raw.title} — first four piano measures`
+  heading.style.cssText = 'font-size:28px;margin:0 0 16px'
+  panel.append(heading)
+  document.body.append(panel)
+  const summary = (xml) => {
+    const notes = [...xml.matchAll(/<note>([\s\S]*?)<\/note>/g)].map(([, note]) => note)
+    const count = (type) => notes.filter((note) => note.includes(`<type>${type}</type>`)).length
+    return `32nd ${count('32nd')} · 64th ${count('64th')} · rests ${notes.filter((note) => note.includes('<rest')).length}`
+  }
+  for (const [label, current] of [['Before', before], ['After', song]]) {
+    const section = document.createElement('section')
+    section.style.cssText = 'margin:0 0 28px;padding:0 0 18px;border-bottom:1px solid #aaa'
+    const caption = document.createElement('h2')
+    const xml = pianoXml(current, false)
+    caption.textContent = `${label} — ${summary(xml)}`
+    caption.style.cssText = 'font-size:20px;margin:0 0 10px'
+    const host = document.createElement('div')
+    host.style.width = '1650px'
+    section.append(caption, host)
+    panel.append(section)
+    const osmd = new OSMD(host, {
+      autoResize: false, backend: 'svg', drawTitle: false, drawPartNames: false, pageFormat: 'Endless',
+    })
+    await osmd.load(xml)
+    osmd.render()
+    check(host.querySelector('svg'), `${label} four-measure score rendered`)
+  }
+  return `Rendered before/after SVG scores for ${raw.title}; ${song.piano.length} source events, source timing unchanged.`
 }
 
 async function scoreVisualChecks(width, noteNames) {

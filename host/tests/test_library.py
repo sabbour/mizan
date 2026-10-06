@@ -16,7 +16,7 @@ import pytest
 from mizan.alignment import dtw_tempo_map
 from mizan.api import Api
 from mizan.engine.audio import Audio
-from mizan.engine.output import export_midi, export_musicxml
+from mizan.engine.output import detected_gm_program, export_midi, export_musicxml
 from mizan.engine.detect import detect_instruments, selected_instruments
 from mizan.errors import ModelFailed
 from mizan.imports import notes_to_song, parse_midi, parse_musicxml
@@ -167,6 +167,125 @@ def test_guitar_program_survives_midi_and_musicxml_import_export(tmp_path):
     export_musicxml(xml_song, xml_path)
     root = ET.parse(xml_path)
     assert root.findtext(".//midi-program") == "26"
+
+
+@pytest.mark.parametrize("legacy_program", ["missing", None, 27])
+def test_known_detected_guitar_program_exports_without_unknown_detected_parts(tmp_path, legacy_program):
+    assert detected_gm_program("clean_electric_guitar") == 27
+    assert detected_gm_program("electric_guitar") is None
+    guitar = {
+        "id": "instrument-clean-electric-guitar", "instrument": "other", "name": "Clean Electric Guitar",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "clean_electric_guitar",
+    }
+    if legacy_program != "missing":
+        guitar["gmProgram"] = legacy_program
+    original_track = guitar.copy()
+    unknown = {
+        "id": "instrument-violin", "instrument": "other", "name": "Violin",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "violin",
+    }
+    song = {
+        "bpm": 120, "beatsPerBar": 4, "bars": 1, "tracks": [guitar, unknown],
+        "instrumentNotes": {
+            guitar["id"]: [{"midi": 64.5, "startBeat": 0.25, "beats": 0.5, "velocity": 0.7}],
+            unknown["id"]: [{"midi": 67, "startBeat": 1, "beats": 1, "velocity": 0.7}],
+        },
+    }
+
+    midi_path = tmp_path / "detected-guitar.mid"
+    export_midi(song, midi_path)
+    midi = mido.MidiFile(midi_path)
+    instrument_tracks = [track for track in midi.tracks if track.name]
+    assert [track.name for track in instrument_tracks] == ["Clean Electric Guitar"]
+    program = next(message for message in instrument_tracks[0] if message.type == "program_change")
+    note_on = next(message for message in instrument_tracks[0] if message.type == "note_on")
+    pitch_bend = next(message for message in instrument_tracks[0] if message.type == "pitchwheel")
+    assert program.program == 27
+    assert note_on.note == 64 and note_on.channel == program.channel
+    assert pitch_bend.channel == program.channel
+
+    musicxml_path = tmp_path / "detected-guitar.musicxml"
+    export_musicxml(song, musicxml_path)
+    root = ET.parse(musicxml_path)
+    assert [part.get("id") for part in root.findall("./part")] == [guitar["id"]]
+    assert root.findtext(".//midi-program") == "28"
+    assert guitar == original_track, "Legacy export resolves the program without rewriting source metadata."
+
+
+@pytest.mark.parametrize("legacy_program", ["missing", None])
+def test_deleting_scores_keeps_legacy_guitar_exports_and_recording_in_temporary_library(tmp_path, legacy_program):
+    store = LibraryStore(tmp_path / "library.sqlite")
+    original = tmp_path / "original.wav"
+    original_bytes = b"temporary recording fixture"
+    original.write_bytes(original_bytes)
+    analysis = tmp_path / "analysis.json"
+    piano = {"id": "piano", "instrument": "piano", "name": "Piano", "detail": "Draft notes"}
+    guitar = {
+        "id": "instrument-clean-electric-guitar", "instrument": "other", "name": "Clean Electric Guitar",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "clean_electric_guitar",
+    }
+    if legacy_program != "missing":
+        guitar["gmProgram"] = legacy_program
+    original_track = guitar.copy()
+    unknown = {
+        "id": "instrument-violin", "instrument": "other", "name": "Violin",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "violin",
+    }
+    drums = {"id": "drums", "instrument": "drums", "name": "Drum kit", "detail": "Draft hits"}
+    song = {
+        "title": "Temporary guitar export fixture", "source": "temporary", "bpm": 120,
+        "beatsPerBar": 4, "bars": 1, "chords": [], "piano": [
+            {"midi": 60, "startBeat": 0, "beats": 1, "hand": "right", "velocity": 0.7},
+        ], "vocals": [], "drums": [
+            {"lane": "kick", "startBeat": 0, "velocity": 0.8},
+        ], "tracks": [piano, guitar, unknown, drums], "durationSeconds": 2,
+        "confidence": {"piano": ["high"], "drums": ["high"], "vocals": ["low"]},
+        "instrumentNotes": {
+            guitar["id"]: [{"trackId": guitar["id"], "midi": 64.5, "startBeat": 0.25, "beats": 0.5,
+                            "velocity": 0.7}],
+            unknown["id"]: [{"trackId": unknown["id"], "midi": 67, "startBeat": 1, "beats": 1,
+                              "velocity": 0.7}],
+        },
+        "detectedInstrumentTracks": [
+            {"id": guitar["id"], "name": guitar["name"]},
+            {"id": unknown["id"], "name": unknown["name"]},
+        ],
+    }
+    artifacts = {
+        "analysis": str(analysis), "midi": str(tmp_path / "initial.mid"),
+        "musicxml": str(tmp_path / "initial.musicxml"), "original": str(original),
+    }
+    analysis.write_text(json.dumps(song, allow_nan=False), encoding="utf-8")
+    entry = store.create_import("Temporary guitar export fixture", "youtube", song, artifacts, "test")
+    store.update_recording(entry["id"], artifacts, song, [])
+
+    piano_deleted = store.delete_score_track(entry["id"], piano["id"])
+    exported_midi = mido.MidiFile(piano_deleted["artifacts"]["midi"])
+    assert [track.name for track in exported_midi.tracks if track.name] == ["Clean Electric Guitar", "Drum kit"]
+    assert any(message.type == "program_change" and message.program == 27
+               for track in exported_midi.tracks for message in track)
+    exported_xml = ET.parse(piano_deleted["artifacts"]["musicxml"])
+    assert [part.get("id") for part in exported_xml.findall("./part")] == [guitar["id"], drums["id"]]
+    assert exported_xml.findtext(".//midi-program") == "28"
+    with open(piano_deleted["song_path"], encoding="utf-8") as source:
+        piano_deleted_song = json.load(source)
+    exported_guitar = next(track for track in piano_deleted_song["tracks"] if track["id"] == guitar["id"])
+    assert exported_guitar == original_track, "Score deletion preserves legacy program metadata."
+    assert unknown["id"] in piano_deleted_song["instrumentNotes"]
+    assert original.read_bytes() == original_bytes
+
+    guitar_deleted = store.delete_score_track(entry["id"], guitar["id"])
+    remaining_midi = mido.MidiFile(guitar_deleted["artifacts"]["midi"])
+    assert [track.name for track in remaining_midi.tracks if track.name] == ["Drum kit"]
+    remaining_xml = ET.parse(guitar_deleted["artifacts"]["musicxml"])
+    assert [part.get("id") for part in remaining_xml.findall("./part")] == [drums["id"]]
+    with open(guitar_deleted["song_path"], encoding="utf-8") as source:
+        guitar_deleted_song = json.load(source)
+    assert piano["id"] not in {track["id"] for track in guitar_deleted_song["tracks"]}
+    assert guitar["id"] not in {track["id"] for track in guitar_deleted_song["tracks"]}
+    assert drums["id"] in {track["id"] for track in guitar_deleted_song["tracks"]}
+    assert unknown["id"] in guitar_deleted_song["instrumentNotes"]
+    assert original.read_bytes() == original_bytes
 
 
 def test_delete_saved_score_track_preserves_recording_and_updates_exports():

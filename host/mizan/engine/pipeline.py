@@ -23,7 +23,7 @@ from .detect import (detect_instruments, insufficient_score_evidence, selected_i
 from .harmony import analyze_harmony
 from .media import copy_decoded, decode, download_video, ffmpeg_path, inspect_video, preflight
 from .models import HTDEMUCS_6S
-from .output import build_song, export_midi, export_musicxml, quantize
+from .output import build_song, detected_gm_program, export_midi, export_musicxml, quantize
 from .providers import check_cancel
 from .separation import SOURCES, _demucs
 from .vocals import clean_melody
@@ -483,10 +483,12 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
             continue
         song["instrumentNotes"][track_id] = notes
         transcribed.append(name)
+        gm_program = detected_gm_program(name)
         song["tracks"].append({
             "id": track_id, "instrument": "other", "name": name.replace("_", " ").title(),
             "group": "detected", "sourceInstrument": name, "scoreStatus": "draft",
             "detail": "Draft notes from original mix; unverified instrument label",
+            **({"gmProgram": gm_program} if gm_program is not None else {}),
         })
     if song["instrumentNotes"]:
         song["warnings"].append(

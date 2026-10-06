@@ -301,7 +301,7 @@ class LibraryStore:
         return self.get(song_id)
 
     def delete_score_track(self, song_id: str, track_id: str) -> dict:
-        from .engine.output import export_midi, export_musicxml
+        from .engine.output import export_midi, export_musicxml, exportable_track
 
         entry = self.get(song_id)
         if not isinstance(track_id, str):
@@ -349,6 +349,8 @@ class LibraryStore:
         export_song = {**song}
         for item in remaining:
             if item.get("group") == "detected":
+                if exportable_track(item):
+                    export_song[item["id"]] = song.get("instrumentNotes", {}).get(item["id"], [])
                 continue
             if item.get("group") == "creative":
                 if item["id"] in song:

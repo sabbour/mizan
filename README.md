@@ -36,7 +36,7 @@ The Cloud setup screenshots use an illustrative subscription; no Azure resources
 - **Practice tools:** A score cursor, piano roll, chord shapes, tempo control, loops, sampled playback, and a generated Harmony line.
 - **Files:** Saved analysis, separated WAV files, MIDI, and MusicXML score exports.
 
-The track picker separates notated scores, generated practice parts, and audio recordings. Guitar and bass listening tracks let you hear those sounds. MuScriptor may also add separate, draft instrument-labelled notes from the mix. HT-Demucs cannot isolate every detected instrument: its Other stem can contain several instruments.
+The track picker separates notated scores, generated practice parts, and audio recordings. Guitar and bass listening tracks let you hear those sounds. MuScriptor may also add separate, draft instrument-labelled notes from the mix. HT-Demucs cannot isolate every detected instrument: its Other stem can contain several instruments. The exact `clean_electric_guitar` label uses the matching General MIDI guitar sample and is included in MIDI and MusicXML exports; other unverified instrument labels remain piano previews and are omitted from those exports.
 
 ## Architecture
 
@@ -81,6 +81,8 @@ Imported MIDI and MusicXML keep their written meter, including 3/8 and 6/8. Audi
 Imports keep fractional-semitone pitches from MusicXML and static MIDI pitch bends. Playback and exports retain them within MIDI channel limits. Audio transcription uses twelve-tone piano and chord models.
 
 The vocal score follows melody pitches and plays through a vowel synth. Organ-labelled notes use a synthesized organ sound. Imported MIDI and MusicXML retain non-piano General MIDI programs and play them from the bundled FluidR3 bank, which covers all 128 programs and loads only the programs and nearest usable sample roots used by a song. Native piano and drum playback keep their existing bundled samples. The app does not download instrument samples at startup.
+
+For readability, low-confidence automatic notes can use a nearby sixteenth-note attack grid when neighboring attacks support it. A short sounding gate may be engraved with the logical span to the next attack and a staccato mark. This is a practice-notation approximation only: saved notes, audio timing and highlighting, MIDI, and MusicXML exports keep their source timing. Confident or imported notes and tightly spaced rapid attacks are not simplified.
 
 To restore the bank from its pinned upstream source or verify the local files, run these commands from the repository root:
 
