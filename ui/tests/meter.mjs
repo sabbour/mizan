@@ -33,7 +33,9 @@ try {
       const xml = exportXml(song)
       assert.match(xml, new RegExp(`<time><beats>${numerator}</beats><beat-type>${beatUnit}</beat-type></time>`))
       assert.equal((xml.match(/<measure number=/g) ?? []).length, 2)
-      assert.match(xml, /<backup><duration>48<\/duration><\/backup>|<duration>48<\/duration>/)
+      const divisions = Number(xml.match(/<divisions>(\d+)<\/divisions>/)[1])
+      assert.match(xml, new RegExp(`<duration>${divisions * beatsPerBar}</duration>`),
+        'a whole bar is written as three quarter beats at the part\'s own division')
     }
     const chart = renderToStaticMarkup(React.createElement(ChordChart, {
       song, engine: {}, bar: 1, loop: null, confidence: song.confidence.chords, onPick: () => {},

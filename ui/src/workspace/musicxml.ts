@@ -412,19 +412,6 @@ function voice(events: Event[], voiceNo: number, staff: number, stem: string | n
   return xml
 }
 
-function group(items: { pos: number; dur: number; head: Head }[]): Event[] {
-  const map = new Map<number, Event>()
-  for (const it of items) {
-    const e = map.get(it.pos)
-    if (e) {
-      e.dur = Math.max(e.dur, it.dur)
-      e.heads.push(it.head)
-    } else map.set(it.pos, { pos: it.pos, dur: it.dur, heads: [it.head] })
-  }
-  return [...map.values()]
-}
-
-
 function wrap(partName: string, measures: string[], gmProgram?: number): string {
   const instrument = gmProgram != null && gmProgram >= 0 && gmProgram <= 127
     ? `<score-instrument id="P1-I1"><instrument-name>${partName}</instrument-name></score-instrument><midi-instrument id="P1-I1"><midi-channel>1</midi-channel><midi-program>${gmProgram + 1}</midi-program></midi-instrument>`
@@ -501,36 +488,89 @@ export function pianoXml(song: Song, chords = true): string {
       chord.startBeat <= note.startBeat && chord.startBeat + chord.beats > note.startBeat)?.flats ?? false,
   }))
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>`
+  const lines = voiceLines(notes.map((note) => ({
+    startDiv: note.startDiv,
+    endDiv: note.endDiv,
+    staff: note.source.hand === 'left' ? 2 : 1,
+    head: { xml: pitch(note.midi, note.flats), staccato: note.staccato },
+  })), true)
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const { startDiv, endDiv } = grid.bars[bar - 1]
-    const barDivs = endDiv - startDiv
-    const hand = (h: 'right' | 'left') =>
-      group(
-        notes
-          .filter((note) => note.source.hand === h && note.startDiv < endDiv && note.endDiv > startDiv)
-          .map((note) => {
-            const from = Math.max(note.startDiv, startDiv)
-            const to = Math.min(note.endDiv, endDiv)
-            return {
-              pos: from - startDiv,
-              dur: to - from,
-              head: { xml: pitch(note.midi, note.flats), stop: note.startDiv < startDiv, start: note.endDiv > endDiv,
-                staccato: note.staccato },
-            }
-          }),
-      )
     measures.push(
       measureOpen(bar, attrs, song) +
         annotations(song, bar, chords) +
-        voice(hand('right'), 1, 1, null, barDivs, DIV) +
-        `<backup><duration>${barDivs}</duration></backup>` +
-        voice(hand('left'), 5, 2, null, barDivs, DIV) +
+        voiceLinesXml(lines, [1, 2], grid.bars[bar - 1], DIV) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )
   }
   return wrap('Piano', measures)
+}
+
+type StaffEvent = { startDiv: number; endDiv: number; staff: number; heads: Head[] }
+type VoiceLines = Map<number, { endDiv: number; events: StaffEvent[] }[]>
+
+/**
+ * Splits each staff into voices that never overlap themselves, so no voice outlasts its bar.
+ * Notes sharing an onset form one chord (held to the longest when `mergeOnsets`, as the piano is
+ * engraved); a note starting under a held one gets its own voice.
+ */
+function voiceLines(notes: { startDiv: number; endDiv: number; staff: number; head: Head }[], mergeOnsets = false): VoiceLines {
+  const grouped = new Map<string, StaffEvent>()
+  for (const note of notes) {
+    const key = mergeOnsets ? `${note.staff}:${note.startDiv}` : `${note.staff}:${note.startDiv}:${note.endDiv}`
+    const event = grouped.get(key)
+    if (event) {
+      event.heads.push(note.head)
+      event.endDiv = Math.max(event.endDiv, note.endDiv)
+    } else grouped.set(key, { startDiv: note.startDiv, endDiv: note.endDiv, staff: note.staff, heads: [note.head] })
+  }
+  const lines: VoiceLines = new Map()
+  const events = [...grouped.values()].sort((a, b) =>
+    a.staff - b.staff || a.startDiv - b.startDiv || b.endDiv - a.endDiv)
+  for (const event of events) {
+    const staffLines = lines.get(event.staff) ?? []
+    let line = staffLines.find((candidate) => candidate.endDiv <= event.startDiv)
+    if (!line) {
+      line = { endDiv: 0, events: [] }
+      staffLines.push(line)
+      lines.set(event.staff, staffLines)
+    }
+    line.events.push(event)
+    line.endDiv = event.endDiv
+  }
+  return lines
+}
+
+/** One bar of every staff's voices; voice numbers stay fixed for the whole song so ties keep their voice. */
+function voiceLinesXml(lines: VoiceLines, staves: number[], bar: { startDiv: number; endDiv: number }, division: number): string {
+  const { startDiv, endDiv } = bar
+  const barDivs = endDiv - startDiv
+  const parts: string[] = []
+  let firstVoice = 1
+  for (const staff of staves) {
+    const staffLines = lines.get(staff) ?? []
+    // Second-staff voices conventionally start at 5, but never reuse a first-staff number.
+    if (staff !== staves[0]) firstVoice = Math.max(firstVoice, 5)
+    const written = staffLines
+      .map((line, index) => ({
+        voiceNo: firstVoice + index,
+        events: line.events
+          .filter((event) => event.startDiv < endDiv && event.endDiv > startDiv)
+          .map((event) => ({
+            pos: Math.max(startDiv, event.startDiv) - startDiv,
+            dur: Math.min(endDiv, event.endDiv) - Math.max(startDiv, event.startDiv),
+            heads: event.heads.map((head) => ({ ...head, stop: event.startDiv < startDiv, start: event.endDiv > endDiv })),
+          })),
+      }))
+      .filter((line) => line.events.length)
+    for (const line of (written.length ? written : [{ voiceNo: firstVoice, events: [] as Event[] }])) {
+      if (parts.length) parts.push(`<backup><duration>${barDivs}</duration></backup>`)
+      parts.push(voice(line.events, line.voiceNo, staff, null, barDivs, division))
+    }
+    firstVoice += Math.max(1, staffLines.length)
+  }
+  return parts.join('')
 }
 
 /** One vocal staff, with tied durations across beats and bar lines; no hand assignment. */
@@ -588,66 +628,20 @@ export function instrumentXml(song: Song, track: Track): string {
   const attrs = `<attributes><divisions>${DIV}</divisions>${timeXml(song)}${split
     ? '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef>'
     : `<clef><sign>${low ? 'F' : 'G'}</sign><line>${low ? 4 : 2}</line></clef>`}</attributes>`
-  type InstrumentEvent = { startDiv: number; endDiv: number; staff: number; heads: Head[] }
-  type VoiceLine = { endDiv: number; events: InstrumentEvent[] }
-  const grouped = new Map<string, InstrumentEvent>()
-  for (const note of notes) {
-    if (!(note.source.beats > 0)) continue
-    const staff = split && note.midi < 60 ? 2 : 1
-    const key = `${staff}:${note.startDiv}:${note.endDiv}`
+  const lines = voiceLines(notes.filter((note) => note.source.beats > 0).map((note) => {
     const base = Math.ceil(note.midi - 0.5)
     const cents = Math.round((note.midi - base) * 100)
-    const head: Head = {
-      xml: pitch(base, false),
-      cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined,
-      staccato: note.staccato,
+    return {
+      startDiv: note.startDiv,
+      endDiv: note.endDiv,
+      staff: split && note.midi < 60 ? 2 : 1,
+      head: { xml: pitch(base, false), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
     }
-    const event = grouped.get(key)
-    if (event) event.heads.push(head)
-    else grouped.set(key, { startDiv: note.startDiv, endDiv: note.endDiv, staff, heads: [head] })
-  }
-  const voiceLines = new Map<number, VoiceLine[]>()
-  const events = [...grouped.values()].sort((a, b) =>
-    a.staff - b.staff || a.startDiv - b.startDiv || b.endDiv - a.endDiv)
-  for (const event of events) {
-    const lines = voiceLines.get(event.staff) ?? []
-    let line = lines.find((candidate) => candidate.endDiv <= event.startDiv)
-    if (!line) {
-      line = { endDiv: 0, events: [] }
-      lines.push(line)
-      voiceLines.set(event.staff, lines)
-    }
-    line.events.push(event)
-    line.endDiv = event.endDiv
-  }
+  }))
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    const { startDiv, endDiv } = grid.bars[bar - 1]
-    const barDivs = endDiv - startDiv
-    const parts: string[] = []
-    for (const staff of (split ? [1, 2] : [1])) {
-      const lines = (voiceLines.get(staff) ?? [])
-        .map((line, index) => ({
-          voiceNo: staff === 1 ? index + 1 : index + 5,
-          events: line.events
-            .filter((event) => event.startDiv < endDiv && event.endDiv > startDiv)
-            .map((event) => ({
-              pos: Math.max(startDiv, event.startDiv) - startDiv,
-              dur: Math.min(endDiv, event.endDiv) - Math.max(startDiv, event.startDiv),
-              heads: event.heads.map((head) => ({
-                ...head,
-                stop: event.startDiv < startDiv,
-                start: event.endDiv > endDiv,
-              })),
-            })),
-        }))
-        .filter((line) => line.events.length)
-      for (const line of (lines.length ? lines : [{ voiceNo: staff === 1 ? 1 : 5, events: [] as Event[] }])) {
-        if (parts.length) parts.push(`<backup><duration>${barDivs}</duration></backup>`)
-        parts.push(voice(line.events, line.voiceNo, staff, null, barDivs, DIV))
-      }
-    }
-    measures.push(measureOpen(bar, attrs, song) + annotations(song, bar, true) + parts.join('') +
+    measures.push(measureOpen(bar, attrs, song) + annotations(song, bar, true) +
+      voiceLinesXml(lines, split ? [1, 2] : [1], grid.bars[bar - 1], DIV) +
       (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') + '</measure>')
   }
   return wrap(track.name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!), measures, track.gmProgram)

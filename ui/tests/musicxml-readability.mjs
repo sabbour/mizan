@@ -294,6 +294,38 @@ try {
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 350, bottom: 450 }), 0, 'a centred line does not scroll')
   assert.equal(centerDelta({ top: 100, bottom: 500 }, { top: 300, bottom: 1000 }), 188,
     'a line taller than the viewport is aligned near its top')
+
+  // A held right-hand chord under moving eighths (Fel Khetam bar 2) must not overflow its voice:
+  // an overfull voice stretches the engraved bar and every later playhead/highlight timestamp drifts.
+  const held = {
+    ...buildSong(), bars: 3, beatsPerBar: 3, chords: [], vocals: [], drums: [],
+    piano: [
+      ...[0, 0.5, 1].map((offset, index) => ({ midi: [72, 76, 72][index], startBeat: offset, beats: 0.5, hand: 'right' })),
+      { midi: 69, startBeat: 1.5, beats: 1.5, hand: 'right' }, { midi: 72, startBeat: 1.5, beats: 1.5, hand: 'right' },
+      { midi: 76, startBeat: 2, beats: 0.5, hand: 'right' }, { midi: 72, startBeat: 2.5, beats: 0.5, hand: 'right' },
+      { midi: 45, startBeat: 0, beats: 4, hand: 'left' }, { midi: 74, startBeat: 3, beats: 0.5, hand: 'right' },
+      ...[0, 1, 2, 3, 4, 5].map((index) => ({ midi: 60 + index, startBeat: 6 + index * 0.5, beats: 0.5, hand: 'right' })),
+      { midi: 48, startBeat: 6, beats: 3, hand: 'right' },
+    ],
+  }
+  const heldXml = pianoXml(held, false)
+  const division = Number(heldXml.match(/<divisions>(\d+)<\/divisions>/)[1])
+  const heldMeasures = heldXml.match(/<measure[\s\S]*?<\/measure>/g)
+  assert.equal(heldMeasures.length, 3)
+  for (const [index, measure] of heldMeasures.entries()) {
+    const totals = new Map()
+    for (const [, body] of measure.matchAll(/<note>([\s\S]*?)<\/note>/g)) {
+      if (body.includes('<chord/>')) continue
+      const voice = body.match(/<voice>(\d+)<\/voice>/)[1]
+      totals.set(voice, (totals.get(voice) ?? 0) + Number(body.match(/<duration>(\d+)<\/duration>/)[1]))
+    }
+    for (const [voice, total] of totals)
+      assert.equal(total, 3 * division, `bar ${index + 1} voice ${voice} fills exactly one 3/4 bar`)
+    const pitched = [...measure.matchAll(/<note>(?:(?!<\/note>)[\s\S])*?<pitch>(?:(?!<\/note>)[\s\S])*?<\/note>/g)]
+      .filter(([note]) => !note.includes('<tie type="stop"/>')).length
+    assert.equal(pitched, [8, 1, 7][index], `bar ${index + 1} keeps every sounding note onset`)
+  }
+  assert.match(heldMeasures[0], /<voice>2<\/voice>/, 'the held chord and the moving line are written as separate voices')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

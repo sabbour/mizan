@@ -8,7 +8,7 @@ export function measures(song: MeterSong): BarMeter[] {
   const inputs = [song.barMap, song.bars, song.beatsPerBar, song.beatUnit]
   const previous = cache.get(song)
   if (previous && inputs.every((input, index) => input === previous.inputs[index])) return previous.bars
-  if (!Number.isSafeInteger(song.bars) || song.bars <= 0) throw new RangeError('The song has an invalid bar count.')
+  if (!Number.isSafeInteger(song.bars) || song.bars <= 0 || song.bars > 100_000) throw new RangeError('The song has an invalid bar count.')
   if (song.barMap !== undefined && !Array.isArray(song.barMap)) throw new RangeError('The song has an invalid bar map.')
   const unit = song.beatUnit ?? 4
   const bars: BarMeter[] = song.barMap ?? Array.from({ length: song.bars }, (_, index) => ({
@@ -22,7 +22,7 @@ export function measures(song: MeterSong): BarMeter[] {
     if (!Number.isFinite(bar.startBeat) || !Number.isFinite(bar.beats) || bar.beats <= 0 ||
         Math.abs(bar.startBeat - end) > 1e-6 ||
         !Number.isSafeInteger(bar.numerator) || bar.numerator <= 0 ||
-        !Number.isSafeInteger(bar.denominator) || bar.denominator <= 0 ||
+        !Number.isSafeInteger(bar.denominator) || bar.denominator <= 0 || bar.denominator > 64 ||
         !Number.isInteger(Math.log2(bar.denominator)) ||
         (!bar.partial && Math.abs(bar.beats - nominal) > 1e-6) ||
         (bar.partial && bar.beats > nominal + 1e-6) ||

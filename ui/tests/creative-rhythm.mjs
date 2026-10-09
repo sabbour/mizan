@@ -152,7 +152,7 @@ test('meter fallback bounds attacks in simple, compound, odd, and half-note bars
 test('invalid meter or length fails explicitly instead of creating a nonadvancing fallback loop', () => {
   for (const field of ['beatUnit', 'beatsPerBar', 'bars']) {
     for (const value of [0, -1, NaN, Infinity, Number.MIN_VALUE, Number.MAX_VALUE]) {
-      assert.throws(() => accompanimentRhythm(fixture({ [field]: value })), /invalid meter or length/)
+      assert.throws(() => accompanimentRhythm(fixture({ [field]: value })), /invalid meter or length|invalid (or non-contiguous )?bar (map|count)/)
     }
   }
   for (const overrides of [
@@ -160,7 +160,7 @@ test('invalid meter or length fails explicitly instead of creating a nonadvancin
     { beatUnit: 2 ** 52 }, { beatUnit: 2 ** 1000 },
     { beatsPerBar: 3.25 }, { bars: 1.5 }, { bars: Number.MAX_SAFE_INTEGER },
   ]) {
-    assert.throws(() => accompanimentRhythm(fixture(overrides)), /invalid meter or length/)
+    assert.throws(() => accompanimentRhythm(fixture(overrides)), /invalid meter or length|invalid (or non-contiguous )?bar (map|count)/)
   }
 })
 
