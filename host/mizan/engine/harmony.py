@@ -1,5 +1,6 @@
 import math
 import json
+from bisect import bisect_right
 import logging
 import os
 from collections import Counter
@@ -10,7 +11,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 from ..errors import ModelFailed
-from ..meter import beat_at_time, build_bar_map, time_at_beat
+from ..meter import beat_at_time, build_bar_map, time_at_beat, validate_bar_map
 from .audio import Audio, spectra
 from .models import BEAT_THIS, BEAT_THIS_FRONTEND, ensure_model
 from .providers import PROVIDER_ERRORS, VerifiedModel, check_cancel
@@ -959,7 +960,7 @@ def align_chord_changes(chords: list[dict], times: np.ndarray, chroma: np.ndarra
     return aligned
 
 
-def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
+def analyze_harmony(audio: Audio, cancelled: Event | None = None, onsets=None) -> dict:
     times, chroma, energy, flux = features(audio, cancelled)
     beat_details = {"method": "onset-grid-v2", "provider": {"effectiveProviders": ["CPU-DSP"]}}
     if os.environ.get("MIZAN_BEATS", "auto").lower() == "auto":
@@ -994,7 +995,8 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     timing["beatConfidence"] = timing.get("confidence", 0.0)
     duration = audio.duration
     tempo_map = None
-    if _tracked(timing):
+    tracked = _tracked(timing)
+    if tracked:
         beats = np.asarray(timing["times"], dtype=float)
         indices = timing.get("downbeatIndices")
         if indices is None:
@@ -1044,6 +1046,21 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     timing.pop("beatsTracked", None)
     key = detect_key(chroma)
     bar_map = build_bar_map(total_beats, meter["changes"], pickup=pickup)
+    compound = compound_reading(bar_map, tempo_map, bpm, onsets) if tracked and onsets is not None else None
+    if compound:
+        bar_map, tempo_map, compound_bars = compound
+        total_beats = bar_map[-1]["startBeat"] + bar_map[-1]["beats"]
+        spans = np.diff([point["beat"] for point in tempo_map])
+        bpm = timing["bpm"] = round(60 / float(np.median(np.diff([point["time"] for point in tempo_map]) / spans)), 3)
+        changes = []
+        for bar in bar_map:
+            if not changes or any(changes[-1][key] != bar[key] for key in ("numerator", "denominator", "status")):
+                changes.append({key: bar[key] for key in ("startBeat", "numerator", "denominator", "status")})
+        nominal = Counter(bar["numerator"] * 4 / bar["denominator"] for bar in bar_map if not bar.get("partial"))
+        meter = {**meter, "changes": changes, "beatsPerBar": nominal.most_common(1)[0][0],
+                 "evidence": {**meter.get("evidence", {}), "compoundBars": compound_bars}}
+        timing["meter"] = meter
+        beats_per_bar = meter["beatsPerBar"]
     bars = len(bar_map)
 
     def seconds(beat):
@@ -1073,6 +1090,8 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     meter_warning = (
         f"Measured recurring groups suggest {' then '.join(spellings)}; written denominator and tempo "
         "subdivision remain unverified. "
+        + ("Note onsets divide the tracked beat in thirds in some passages; those bars are written "
+           "in compound x/8 time. " if meter.get("evidence", {}).get("compoundBars") else "")
         + ("Some passages had downbeats at a fraction of the bar; they are written as half-bar "
            "accents, not signature changes. "
            if meter.get("evidence", {}).get("observedShorterGroups") else "")
@@ -1089,6 +1108,56 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
             "sectionEnergy": [value / maximum if maximum else 0 for value in section_energy],
             "warnings": [meter_warning]
             + (["Tempo is uncertain; the display uses a 120 BPM grid."] if timing["confidence"] == 0 else [])}
+
+
+def compound_reading(bar_map: list[dict], tempo_map: list[dict], bpm: float, onsets) -> tuple | None:
+    """Re-spell bars whose tracked beats the transcribed onsets divide in thirds as compound x/8.
+
+    Off-beat onsets are compared with the third and quarter grids of each tracked beat, pooled
+    over the bar and its neighbours. Where thirds clearly win, the tracked pulse is a dotted
+    quarter, so each tracked beat spans 1.5 quarter beats (four tracked beats become 12/8).
+    Duple passages keep their spelling. Recording seconds are unchanged; only the score beat
+    numbering in the tempo map follows the new beat unit.
+    """
+    if not tempo_map or not len(onsets):
+        return None
+    positions = np.array([beat_at_time(tempo_map, bpm, float(onset)) for onset in onsets])
+    fraction = positions % 1
+    off = (fraction > 0.08) & (fraction < 0.92)
+    thirds = abs(fraction * 3 - np.round(fraction * 3)) / 3
+    quarters = abs(fraction * 4 - np.round(fraction * 4)) / 4
+    starts = [bar["startBeat"] for bar in bar_map]
+    owner = np.searchsorted(starts, positions, side="right") - 1
+    votes = np.zeros((len(bar_map), 2))
+    for bar, keep, third, quarter in zip(owner, off, thirds, quarters):
+        if keep and 0 <= bar < len(bar_map) and abs(third - quarter) > 0.01:
+            votes[bar, 0 if third < quarter else 1] += 1
+    factors = []
+    for index, bar in enumerate(bar_map):
+        pooled = votes[max(0, index - 1):index + 2].sum(axis=0)
+        # A bar's own onsets decide at section edges; sparse bars borrow their neighbours' evidence.
+        triple, duple = votes[index] if votes[index].sum() >= 4 else pooled
+        factors.append(1.5 if bar["denominator"] == 4 and pooled[0] >= 8 and triple >= 0.75 * (triple + duple)
+                       else 1.0)
+    for index in range(1, len(factors) - 1):
+        if factors[index - 1] == factors[index + 1] != factors[index]:
+            factors[index] = factors[index - 1]
+    if 1.5 not in factors:
+        return None
+    converted, cursor = [], 0.0
+    for bar, factor in zip(bar_map, factors):
+        item = {**bar, "startBeat": cursor, "beats": bar["beats"] * factor}
+        if factor != 1:
+            item.update(numerator=bar["numerator"] * 3, denominator=8)
+        converted.append(item)
+        cursor += item["beats"]
+
+    def score_beat(beat):
+        index = min(len(bar_map) - 1, max(0, bisect_right(starts, beat) - 1))
+        return converted[index]["startBeat"] + (beat - bar_map[index]["startBeat"]) * factors[index]
+
+    mapped = [{"beat": round(score_beat(point["beat"]), 6), "time": point["time"]} for point in tempo_map]
+    return validate_bar_map(converted), mapped, factors.count(1.5)
 
 
 def _tracked(timing: dict) -> bool:

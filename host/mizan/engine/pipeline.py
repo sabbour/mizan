@@ -404,8 +404,11 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
     report("transcribe", 1)
     started = time.perf_counter()
     report("chords", 0)
-    # Full mix retains attacks for beat analysis; peak-based chroma reduces noise.
-    harmony = analyze_harmony(audio, cancelled)
+    # Full mix retains attacks for beat analysis; peak-based chroma reduces noise. Transcribed
+    # onsets show whether the tracked beat divides in halves or thirds (simple vs compound time).
+    onsets = sorted({round(event["onset"], 4) for event in (*model_events, *piano, *drums, *(vocals or []))
+                     if event["onset"] < audio.duration})
+    harmony = analyze_harmony(audio, cancelled, onsets)
     pitched_notes = bool(piano or vocals or any(
         event["instrument"] not in ("drums", "acoustic_piano", "program_0")
         and event["onset"] < audio.duration for event in model_events))

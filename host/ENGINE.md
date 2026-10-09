@@ -600,7 +600,16 @@ bar stays (`unverified`) and the passage is listed in `observedShorterGroups`
 with a warning. Otherwise observed longer or shorter groups, sustained (3 to 6,
 6 to 3) or alternating (3,6 or 4,8), are kept as `unverified` bars rather than
 split or merged into the primary bar. Any phase shift, ambiguous related group
-or many missing downbeats marks the bars `unverified`. The count gives a grouping
+or many missing downbeats marks the bars `unverified`. When transcribed note
+onsets divide the tracked beat in thirds over a passage (off-beat onsets closer
+to the third grid than the quarter grid, at least 75% with eight or more votes
+nearby), the tracked pulse there is a dotted quarter: those bars are written in
+compound time (four tracked beats become 12/8, two become 6/8) and the tempo map
+numbers each such tracked beat as 1.5 quarter beats; recording seconds do not
+change. One differing bar between agreeing neighbours follows them. Without
+onset evidence (imports, DSP-only analysis) bars keep simple time. 12/8 and a
+triple-feel 6/4 have the same bar length and cannot be told apart from onsets.
+The count gives a grouping
 in tracked beats, not a written denominator or tempo octave (the same song can
 track at 92 or 184 BPM).
 Drum notation writes automatic hits on the bar's sixteenth grid (UI score and

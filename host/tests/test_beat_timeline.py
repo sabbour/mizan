@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 
 from mizan.engine.audio import Audio
-from mizan.engine.harmony import activation_beat_grid, analyze_harmony, clean_beats, downbeat_meter
+from mizan.engine.harmony import activation_beat_grid, analyze_harmony, clean_beats, compound_reading, downbeat_meter
 from mizan.engine.models import BEAT_THIS
-from mizan.engine.output import build_song, drum_notation_beats, export_midi, export_musicxml
+from mizan.engine.output import build_song, drum_notation_beats, export_midi, export_musicxml, quantize
 from mizan.meter import beat_at_time, build_bar_map, song_bar_map, time_at_beat
 
 
@@ -316,3 +316,47 @@ def test_cached_user_labelled_four_four_song_gets_no_invented_short_signature():
     assert [group["groupBeats"] for group in meter["evidence"]["observedShorterGroups"]] == [2, 2]
     total = data["downbeatIndices"][-1] - data["downbeatIndices"][0] + 4
     assert {bar["numerator"] for bar in build_bar_map(total, meter["changes"])} == {4}
+
+def sectioned_onsets(beats, sections):
+    # (bars, subdivisions per tracked beat) per section, four tracked beats per bar.
+    onsets, bar = [], 0
+    for count, parts in sections:
+        for index in range(bar * 4, (bar + count) * 4):
+            period = beats[index + 1] - beats[index]
+            onsets.extend(beats[index] + period * step / parts for step in range(parts))
+        bar += count
+    return onsets
+
+
+def test_triple_subdivided_passages_become_compound_bars_with_unchanged_seconds():
+    beats = np.arange(0, 20 * 4 + 1) * 0.4
+    tempo_map = [{"beat": float(index), "time": round(float(time), 6)} for index, time in enumerate(beats)]
+    bars = build_bar_map(80, [{"startBeat": 0, "numerator": 4, "denominator": 4, "status": "supported"}])
+    onsets = sectioned_onsets(beats, [(5, 4), (8, 3), (7, 2)])
+    bar_map, mapped, count = compound_reading(bars, tempo_map, 150, onsets)
+    assert count == 8
+    assert [(bar["numerator"], bar["denominator"]) for bar in bar_map] == [(4, 4)] * 5 + [(12, 8)] * 8 + [(4, 4)] * 7
+    assert [bar["beats"] for bar in bar_map] == [4] * 5 + [6] * 8 + [4] * 7
+    assert [point["time"] for point in mapped] == [point["time"] for point in tempo_map]
+    # A triplet onset in a compound bar is now a straight eighth of the dotted-quarter beat.
+    triplet = beats[5 * 4] + 0.4 / 3
+    assert quantize(triplet, 150, 0, mapped) == 20.5
+    assert compound_reading(bars, tempo_map, 150, sectioned_onsets(beats, [(20, 4)])) is None
+    # One triple-subdivided bar between duple bars is not a signature change.
+    assert compound_reading(bars, tempo_map, 150, sectioned_onsets(beats, [(9, 4), (1, 3), (10, 4)])) is None
+
+
+def test_compound_reading_reaches_analysis_only_with_onset_evidence(monkeypatch):
+    beats = np.arange(0.2, 60, 0.4)
+    tracked(monkeypatch, beats, beats[::4])
+    audio = Audio(np.zeros(60 * 11025, dtype=np.float32), 11025)
+    plain = analyze_harmony(audio)
+    assert {(bar["numerator"], bar["denominator"]) for bar in plain["barMap"]} == {(4, 4)}
+    onsets = sectioned_onsets(beats, [(10, 2), (16, 3), (10, 2)])
+    harmony = analyze_harmony(audio, onsets=onsets)
+    signatures = [(bar["numerator"], bar["denominator"]) for bar in harmony["barMap"]]
+    assert signatures.count((12, 8)) == 16 and (4, 4) in signatures
+    assert harmony["timing"]["meter"]["evidence"]["compoundBars"] == 16
+    assert "compound x/8" in harmony["warnings"][0]
+    for point in harmony["tempoMap"]:
+        assert any(abs(point["time"] - time) < 1e-6 for time in [0.0, *beats, 60.0])
