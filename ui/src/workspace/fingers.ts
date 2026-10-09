@@ -20,9 +20,28 @@ export function suggestFingers(notes: readonly PianoNote[]): Map<PianoNote, Fing
     // The thumb's key; a five-finger position covers about a sixth above (right) or below (left) it.
     let thumb: number | null = null
     const span = 8
+    const assigned: PianoNote[] = []
     for (const start of [...groups.keys()].sort((a, b) => a - b)) {
       const group = groups.get(start)!.slice().sort((a, b) => a.midi - b.midi)
       const keys = group.map((note) => keyOf(note.midi))
+      // While notes are still held the hand cannot move: new notes take free fingers within reach of
+      // that position, and a note out of reach gets no suggestion rather than an impossible one.
+      const held = assigned.filter((note) => note.startBeat < start - 1e-6 && note.startBeat + note.beats > start + 1e-6)
+      if (held.length && thumb !== null) {
+        const taken = new Set(held.map((note) => result.get(note)!.finger))
+        for (const [index, note] of group.entries()) {
+          const offset = hand === 'right' ? keys[index] - thumb : thumb - keys[index]
+          if (offset < 0 || offset > span + 4) continue
+          let finger = Math.min(5, 1 + Math.round(offset * 4 / span))
+          while (taken.has(finger) && finger < 5) finger++
+          if (taken.has(finger)) continue
+          result.set(note, { hand, finger })
+          taken.add(finger)
+          assigned.push(note)
+        }
+        continue
+      }
+      assigned.push(...group)
       if (group.length > 1) {
         const width = keys[keys.length - 1] - keys[0]
         const spread = group.length === 2 ? [1, width <= 4 ? 3 : width <= 7 ? 4 : 5]

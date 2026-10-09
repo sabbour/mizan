@@ -289,6 +289,13 @@ try {
     'a left-hand triad spreads 5-3-1 from the bottom, the thumb on top')
   assert.equal(fingering.get(quarterTone).hand, 'right', 'a microtonal note keeps its hand')
   assert.deepEqual(handNotes, handBefore, 'finger suggestions never change source notes')
+  const heldLow = { midi: 57, startBeat: 0, beats: 3, hand: 'right' }
+  const farAbove = { midi: 72, startBeat: 1, beats: 1, hand: 'right' }
+  const nearAbove = { midi: 62, startBeat: 2, beats: 1, hand: 'right' }
+  const holding = suggestFingers([heldLow, farAbove, nearAbove])
+  assert.equal(holding.get(heldLow).finger, 1)
+  assert.equal(holding.get(farAbove), undefined, 'a note out of reach of a held note gets no impossible suggestion')
+  assert.ok(holding.get(nearAbove).finger > 1, 'a note within reach of a held thumb takes another finger')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 900, bottom: 1100 }), 600,
     'the active line centre moves to the usable viewport centre')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 350, bottom: 450 }), 0, 'a centred line does not scroll')
