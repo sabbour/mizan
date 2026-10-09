@@ -76,6 +76,15 @@ try {
   const instrumentOnly = process.argv.includes('--instrument')
   const meterOnly = process.argv.includes('--meter')
   const readabilityOnly = process.argv.includes('--cairokee-readability')
+  const courseOnly = process.argv.includes('--course')
+  if (courseOnly) {
+    for (const [width, height] of [[1440, 900], [1024, 640]]) {
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+      console.log(await evaluate(`(${courseChecks.toString()})(${width})`))
+      await call('Page.navigate', { url: testUrl })
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".course")'); i++) await sleep(100)
+    }
+  }
   if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
   if (meterOnly) console.log(await evaluate(`(${browserMeterChecks.toString()})()`))
   if (readabilityOnly) {
@@ -120,7 +129,7 @@ try {
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -134,10 +143,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -168,7 +177,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -1617,4 +1626,50 @@ async function realHostChecks(opened) {
     check(errors.length === 0, errors.join('; '))
     return `Real host integration passed: seven cross-origin range URLs; six full-length aligned stems; vocals/guitar/quiet piano/full mix playback; half-speed max drift ${maxDrift.toFixed(3)}s; initial six-stem preparation ${prepareSeconds.toFixed(2)}s.`
   } finally { engine.dispose() }
+}
+
+async function courseChecks(width) {
+  const check = (value, message) => { if (!value) throw new Error(message) }
+  const wait = async (test, message) => {
+    for (let i = 0; i < 120; i++) {
+      if (test()) return
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error(message)
+  }
+  // A library song's saved mixer state must survive practising lessons untouched.
+  localStorage.setItem('mizan:mixer:s1', JSON.stringify({ muted: ['piano'], volumes: { drums: 0.6 } }))
+  const before = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
+  await wait(() => document.querySelectorAll('.course-lesson').length === 19, 'The library lists the 19 course lessons')
+  check(document.querySelectorAll('.course-level').length === 6, 'Lessons are grouped in six levels')
+  const lessons = [...document.querySelectorAll('.course-lesson')]
+  check(lessons.every((button) => button.getBoundingClientRect().right <= innerWidth), `Course rows fit at ${width}px`)
+  lessons.find((button) => button.textContent.includes('Groove, fill, crash')).click()
+  await wait(() => document.querySelector('.ws .practice-kit') && document.querySelector('.ws .score-bar[aria-label="Bar 4"]'),
+    'The lesson opens in the practice workspace with its score and 3D kit')
+  const where = () => document.querySelector('.ws-where').textContent
+  const pressed = (label) => [...document.querySelectorAll('.ws-foot button')].find((button) => button.textContent.includes(label))?.getAttribute('aria-pressed')
+  check(document.querySelector('.ws-song').textContent === 'Lesson 15: Groove, fill, crash', 'Lesson title')
+  check(/70 bpm · 70%/.test(where()), `The lesson starts at its starting tempo: ${where()}`)
+  check(pressed('Loop') === 'true' && pressed('Count-in') === 'true' && pressed('Click') === 'true', 'Loop, count-in and click are on')
+  check(document.querySelector('.lesson-goal')?.textContent.includes('crash'), 'The lesson instructions are beside the score')
+  check(document.querySelectorAll('.lesson-counts tr').length === 3, 'Count and sticking for the groove and fill bars')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }))
+  await wait(() => /75 bpm · 75%/.test(where()), 'Speed rises in 5% steps')
+  document.querySelector('.lesson-nav button:last-child').click()
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 16: Fill around the toms', 'Next lesson opens')
+  await wait(() => /65 bpm · 65%/.test(where()), 'The next lesson starts at its own tempo')
+  await wait(() => ['High tom', 'High-mid tom', 'Low-mid tom', 'High floor tom', 'Low floor tom'].every((name) =>
+    [...document.querySelectorAll('.kit-pill')].some((pill) => pill.textContent === name)), 'The tom fill names five distinct toms')
+  document.querySelector('.ws-back').click()
+  await wait(() => document.querySelector('.course') && !document.querySelector('.ws'), 'Back returns to the library')
+  await new Promise((resolve) => setTimeout(resolve, 900))
+  const after = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
+  const changed = Object.keys(before).filter((key) => after[key] !== before[key])
+  const added = Object.keys(after).filter((key) => !(key in before))
+  check(!changed.length, `Library song state is untouched: ${changed}`)
+  check(added.every((key) => key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:course:')), `Lesson state is namespaced: ${added}`)
+  check(JSON.parse(after['mizan:course:position:snare-fill']).rate === 0.75, 'The lesson resumes at the practised speed')
+  for (const key of added) localStorage.removeItem(key)
+  return `Course checks passed at ${width}px: discovery, lesson defaults, instructions, speed, next lesson, back, namespaced state.`
 }

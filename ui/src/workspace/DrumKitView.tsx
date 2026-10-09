@@ -422,10 +422,11 @@ export function DrumKitView({ song, engine }: Props) {
           <span key={state} className="kit-pill kit-state" data-hat-state={state}>Hat {HAT_LABEL[state]}</span>
         ))}
         <span className="practice-note">
-          Hits light briefly. Toms and hi-hat states come from the transcription&apos;s GM drum detail
-          {plan.unspecified.length
-            ? `; hits without it (${plan.unspecified.map((name) => name.replace(/ \(.*\)$/, '').toLowerCase()).join(', ')}) stay unspecified: toms light their family dimly and the hat keeps its last known state`
-            : ''}.
+          {song.source === 'course' ? 'Hits light briefly. Every stroke in the lesson names its kit piece and hi-hat state' : <>
+            Hits light briefly. Toms and hi-hat states come from the transcription&apos;s GM drum detail
+            {plan.unspecified.length
+              ? `; hits without it (${plan.unspecified.map((name) => name.replace(/ \(.*\)$/, '').toLowerCase()).join(', ')}) stay unspecified: toms light their family dimly and the hat keeps its last known state`
+              : ''}</>}.
         </span>
       </p>
     </section>

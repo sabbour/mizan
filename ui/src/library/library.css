@@ -1858,3 +1858,41 @@
 .cloud-setup-progress strong { display: flex; align-items: center; }
 .cloud-setup-progress progress { width: 100%; accent-color: var(--accent); }
 .cloud-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Built-in drum course: lessons in order, grouped by level, below the songs. */
+.course { width: 100%; max-width: 1280px; margin: 40px auto 0; scroll-margin-top: 140px; }
+.course-intro { max-width: 72ch; margin: 0 0 14px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.course-levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 18px 36px;
+  margin: 0;
+  padding: 16px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.course-level h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--ink); }
+.course-level ol { margin: 0; padding: 0; list-style: none; }
+.course-lesson {
+  display: grid;
+  grid-template-columns: 2.2ch minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease);
+}
+.course-lesson:hover { background: var(--accent-wash); }
+.course-lesson:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.course-number { color: var(--ink-2); font-size: 12px; text-align: right; }
+.course-meta { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .course-lesson { transition: none; } }

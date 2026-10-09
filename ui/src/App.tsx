@@ -1,4 +1,4 @@
-import { Component, useCallback, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
 import { Library } from './library/Library'
@@ -8,8 +8,11 @@ import { host, type Entry, type Opened } from './library/bridge'
 import { fromHost } from './library/adapt'
 import { useQueue } from './library/useQueue'
 import { activeAnalysis, analysisProgress, decodingErrorHeadline, jobTitle } from './library/format'
+import { lessonById, lessonNote, lessonSong } from './course/curriculum'
+import { LessonPanel } from './course/Course'
+import { lessonPosition, saveLessonPosition } from './course/state'
 
-type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' }
+type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
 
 const NOTE: Record<Entry['source'], string> = { youtube: 'Draft transcription', midi: 'Imported MIDI', musicxml: 'Imported MusicXML' }
 
@@ -75,6 +78,9 @@ export default function App() {
   const job = view.kind === 'job' ? queue.jobs.find((j) => j.id === view.id) : undefined
   const done = queue.finished
   const opened = view.kind === 'song' || view.kind === 'job' ? view.opened : undefined
+  const lesson = view.kind === 'lesson' ? lessonById(view.id) : undefined
+  // One song and starting position per opened lesson, so the workspace keeps its engine across renders.
+  const practised = useMemo(() => lesson && { song: lessonSong(lesson), start: lessonPosition(lesson) }, [lesson])
   const updating = opened && activeAnalysis(queue.jobs, opened.entry.id)
   const updated = opened && done?.songId === opened.entry.id
   const decodingHeadline = decodingErrorHeadline(opened?.song.decodingErrors?.count)
@@ -100,6 +106,20 @@ export default function App() {
     <>
       {view.kind === 'credits' ? (
         <Credits onBack={() => setView({ kind: 'library' })} />
+      ) : lesson && practised ? (
+        <WorkspaceBoundary key={`course:${lesson.id}`} onBack={back}>
+          <Workspace
+            key={`course:${lesson.id}`}
+            song={practised.song}
+            songId={`course:${lesson.id}`}
+            start={practised.start}
+            note={lessonNote(lesson)}
+            defaults={{ click: true, drums: 'kit' }}
+            onPosition={(position) => saveLessonPosition(lesson, position)}
+            onBack={back}
+            analysisNotice={<LessonPanel lesson={lesson} onLesson={(id) => setView({ kind: 'lesson', id })} />}
+          />
+        </WorkspaceBoundary>
       ) : opened ? (
         <WorkspaceBoundary key={`${opened.entry.id}:${openRevision}`} onBack={back}>
           <Workspace
@@ -147,6 +167,7 @@ export default function App() {
           onQueueChange={queue.refresh}
           onOpen={(e) => void open(e.id)}
           onCredits={() => setView({ kind: 'credits' })}
+          onLesson={(id) => setView({ kind: 'lesson', id })}
           onDetails={(j) => setView((v) => (v.kind === 'job' && v.id === j.id ? { kind: 'library' } : { kind: 'job', id: j.id }))}
         />
       )}

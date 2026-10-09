@@ -29,6 +29,8 @@ type Props = {
   onBack?: () => void
   onDeleteTrack?: (trackId: string) => Promise<void>
   analysisNotice?: ReactNode
+  /** Starting choices for this song only, e.g. a drum lesson opens with the click on and the 3D kit. */
+  defaults?: { click?: boolean; drums?: PracticeView }
 }
 
 const DEMO = buildSong()
@@ -37,7 +39,7 @@ const EMPTY_STEMS: Stem[] = []
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
@@ -54,11 +56,11 @@ export function Workspace({
   const [rate, setRate] = useState(start?.rate ?? 1)
   const [loop, setLoop] = useState<Loop>(start?.loop ?? null)
   const [countIn, setCountIn] = useState(true)
-  const [click, setClick] = useState(false)
+  const [click, setClick] = useState(defaults?.click ?? false)
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
-  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: 'score', drums: 'score' })
+  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: 'score', drums: defaults?.drums ?? 'score' })
   const [noteNames, setNoteNames] = useState(false)
   const [smooth, setSmooth] = useState(false)
   // The accompaniment as played: with smooth voicing, each chord in the inversion nearest the one before (read as C/E).
@@ -288,6 +290,10 @@ export function Workspace({
     const timer = setTimeout(() => onPosition(latest.current), 800)
     return () => clearTimeout(timer)
   }, [onPosition, position, pos.playing])
+  // Leaving by any route (next lesson, re-open) keeps the latest setup, not only the last debounced one.
+  const savePosition = useRef(onPosition)
+  savePosition.current = onPosition
+  useEffect(() => () => savePosition.current?.(latest.current), [])
   const leave = useCallback(() => {
     engine.pause()
     onPosition?.(latest.current)

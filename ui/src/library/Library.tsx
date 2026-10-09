@@ -4,6 +4,7 @@ import { host, HostError, IMPORTABLE, toBase64, type CloudReadinessProgress, typ
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
 import { activeAnalysis, analysisProgress, ago, clock, decodingErrorHeadline, jobExecutionLabel, jobQueueLabel, jobQueuePosition, jobTitle, jobStageLabel, jobStagePercent, resumeParts, sourceLine, took } from './format'
+import { CourseSection } from '../course/Course'
 import './library.css'
 
 type Problem = { message: string; fix: string | null }
@@ -15,6 +16,8 @@ type Props = {
   version: number
   onQueueChange: () => void
   onOpen: (entry: Entry) => void
+  /** Opens a built-in drum course lesson. */
+  onLesson: (id: string) => void
   onDetails: (job: QueueJob) => void
   selectedJob?: string
   onCredits: () => void
@@ -49,7 +52,7 @@ function inFolder(entry: Entry, id: string) {
   return entry.folders.includes(id)
 }
 
-export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selectedJob, onCredits }: Props) {
+export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDetails, selectedJob, onCredits }: Props) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedFolder, setSelectedFolder] = useState('all')
@@ -914,6 +917,8 @@ export function Library({ jobs, version, onQueueChange, onOpen, onDetails, selec
             </section>
           </div>
         )}
+
+        <CourseSection onLesson={onLesson} />
       </main>
 
       {songDrag && draggedEntry && (
