@@ -34,8 +34,8 @@ export const ACOUSTIC_LAYOUT = {
   KickPedal: { front: -0.005 },
 }
 
-/** Hi-hat top-cymbal travel along the pull rod from its exported rest height (metres). */
-export const HAT_STATES = { fullyOpen: 0.02, partiallyOpen: 0, closed: -0.013, pedalClosed: -0.0152 }
+/** Hi-hat travel from rest; pedalClosed stops at rim contact instead of driving through the cymbals. */
+export const HAT_STATES = { fullyOpen: 0.02, partiallyOpen: 0, closed: -0.013, pedalClosed: -0.013 }
 
 /** Remove collapsed strips and repair seam normals; leave intentional membrane and playable-zone boundaries open. */
 function finishCymbal(mesh) {
@@ -298,9 +298,13 @@ export function buildAcoustic(kit, q, rootExtras) {
       else kit.instance(`HiHat_Leg_0${i + 1}`, w, legs, firstLeg)
     })
     const opts = { bellR: h.R * 0.24, bellH: 0.03, bow: 0.012, thick: 0.0018, rings: [26, 12, 5][q], segments: cymbalSegments(128) }
-    kit.part('HiHat_BottomCymbal', M.chain(standWorld, M.t(0, h.height, 0), M.rx(Math.PI)), node, [P(finishCymbal(cymbal(h.R, opts)), 'cymbal', 'cymbal', 'HiHat')], { pivot: 'centre shaft' })
-    const restY = h.height + 0.015
-    kit.part('HiHat_TopCymbal', M.mul(standWorld, M.t(0, restY, 0)), node, [P(finishCymbal(cymbal(h.R, opts)), 'cymbal', 'cymbal', 'HiHat', 'surface')],
+    const hatMesh = finishCymbal(cymbal(h.R, opts))
+    let rimY = Infinity
+    for (let i = 1; i < hatMesh.p.length; i += 3) rimY = Math.min(rimY, hatMesh.p[i])
+    // Mirror the flipped bottom rim and leave 0.2 mm clearance in the closed state.
+    const restY = h.height - 2 * rimY - HAT_STATES.closed + 0.0002
+    kit.part('HiHat_BottomCymbal', M.chain(standWorld, M.t(0, h.height, 0), M.rx(Math.PI)), node, [P(hatMesh, 'cymbal', 'cymbal', 'HiHat')], { pivot: 'centre shaft' })
+    kit.part('HiHat_TopCymbal', M.mul(standWorld, M.t(0, restY, 0)), node, [P(hatMesh, 'cymbal', 'cymbal', 'HiHat', 'surface')],
       { pivot: 'centre shaft', travelAxis: [0, 1, 0], states: HAT_STATES })
     kit.part('HiHat_Clutch', M.mul(standWorld, M.t(0, restY + 0.03, 0)), node, [P(merge(
       lathe([[0.0001, -0.024], [0.014, -0.024], [0.014, -0.004], [0.022, -0.004], [0.022, 0.004], [0.0001, 0.004]], S(20, 8)),
