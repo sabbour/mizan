@@ -12,7 +12,7 @@ import { DrumKitView } from './DrumKitView'
 import type { PracticeView } from './PracticeViewPicker'
 import { drumKey, drumNotationBeats, drumPosition, notationGrid, notationNotes } from './musicxml'
 import type { Sticking } from './sticking'
-import type { KitStyle } from './prefs'
+import { DEFAULT_KIT_STYLE, type KitStyle } from './prefs'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
 /** `sky` is how far (px, ≤ 0) the highest note or mark rises above the system's top staff line. */
@@ -325,7 +325,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', sticking, kitStyle = 'electronic', onKitStyle = () => {}, onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', sticking, kitStyle = DEFAULT_KIT_STYLE, onKitStyle = () => {}, onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)

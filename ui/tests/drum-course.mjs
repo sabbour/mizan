@@ -182,6 +182,9 @@ try {
     const offsets = new Set(lessonHits(lesson(id)).filter((hit) => hit.lane === lane).map((hit) => +(hit.startBeat % 1).toFixed(3)))
     assert.ok([...offsets].every((offset) => offset === 0 || offset === 0.667) && offsets.has(0.667), `${id} swings: beat and "let"`)
   }
+  // Genre copy matches the notes: the rock kick plays 1, "1 &" and "2 &".
+  assert.match(lesson('genre-rock').steps.join(' '), /Kick on 1, "1 &" and "2 &"/)
+  assert.deepEqual(lessonHits(lesson('genre-rock')).filter((hit) => hit.lane === 'kick' && hit.startBeat < 4).map((hit) => hit.startBeat), [0, 0.5, 1.5])
   // Copy matches the authored patterns.
   for (const item of LESSONS) {
     const used = new Set()
@@ -298,17 +301,19 @@ try {
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: false, sticking: false })
       savePref('click', true)
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false }, 'saving one keeps the others')
-      for (const style of ['studio', 'acoustic', 'illustrated', 'electronic']) {
+      for (const style of ['acoustic:HandPaintedAnime', 'electronic:LowPoly', 'acoustic:NeonRhythm', 'electronic:TechnicalBlueprint', 'acoustic:ClayStudyModel', 'electronic:Realistic']) {
         savePref('kitStyle', style)
-        assert.equal(loadPrefs().kitStyle, style, `the ${style} kit style is remembered`)
+        assert.equal(loadPrefs().kitStyle, style, `the ${style} kit and look are remembered`)
       }
-      assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false, kitStyle: 'electronic' })
+      assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false, kitStyle: 'electronic:Realistic' })
       assert.deepEqual([...store.keys()], ['mizan:practice'], 'one key, and nothing else is written')
       assert.equal(warnings.length, 0)
       for (const [stored, expected] of [
         ['{not json', {}], ['[1]', {}], ['{"rate":1.5,"countIn":"no","click":true}', { click: true }],
         ['{"rate":0.33,"sticking":false}', { sticking: false }], ['{"rate":0.25,"countIn":true}', { rate: 0.25, countIn: true }],
         ['{"kitStyle":"vintage","click":false}', { click: false }],
+        ['{"kitStyle":"illustrated"}', { kitStyle: 'acoustic:HandPaintedAnime' }], ['{"kitStyle":"studio"}', { kitStyle: 'electronic:Realistic' }],
+        ['{"kitStyle":"acoustic"}', { kitStyle: 'acoustic:Realistic' }],
       ]) {
         store.set('mizan:practice', stored)
         assert.deepEqual(loadPrefs(), expected, `restores what it can from ${stored}`)

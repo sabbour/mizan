@@ -14,7 +14,7 @@ import { TrackPicker } from './TrackPicker'
 import { ChordView, type ChordMode } from './ChordView'
 import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
-import { loadPrefs, savePref, type KitStyle } from './prefs'
+import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
 import './workspace.css'
 
@@ -62,7 +62,7 @@ export function Workspace({
   const [countIn, setCountIn] = useState(prefs.countIn ?? true)
   const [click, setClick] = useState(prefs.click ?? defaults?.click ?? false)
   const [showSticking, setShowSticking] = useState(prefs.sticking ?? true)
-  const [kitStyle, setKitStyle] = useState(prefs.kitStyle ?? 'electronic')
+  const [kitStyle, setKitStyle] = useState<KitStyle>(prefs.kitStyle ?? DEFAULT_KIT_STYLE)
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.

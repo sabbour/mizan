@@ -1,5 +1,6 @@
 import type { KitPiece } from './kit'
-import type { KitStyle } from './prefs'
+/** The procedural looks, kept as the fallback when a kit's GLB file cannot be loaded. */
+export type KitStyle = 'electronic' | 'studio' | 'acoustic' | 'illustrated'
 
 /**
  * The 3D drum kit scene: procedural geometry for a five-piece kit (two rack toms, one floor tom) in four looks, baked
@@ -14,9 +15,6 @@ export type Material = { color: Vec3; metal: number; rough: number; pattern: num
 export type Batch = { target: Target | null; material: Material; hatTop: boolean; kind: 'solid' | 'blob' | 'floor'; data: Float32Array; count: number }
 export type Kit = { batches: Batch[]; anchors: Map<KitPiece, Vec3> }
 
-export const KIT_STYLE_LABEL: Record<KitStyle, string> = {
-  electronic: 'Electronic', studio: 'Studio electronic', acoustic: 'Acoustic', illustrated: 'Illustrated acoustic',
-}
 
 // Column-major 4x4 matrices.
 export const multiply = (a: Float32Array, b: Float32Array) => {
@@ -470,3 +468,34 @@ void main() {
   vec3 lit = tint * (0.55 + 0.45 * k) + 0.12;
   gl_FragColor = vec4(clamp(mix(col, lit, glow), 0.0, 1.0), 1.0);
 }`
+
+/** The procedural kit in the asset renderer's format, so a missing GLB still shows a working kit with feedback. */
+export function fallbackScene(kit: 'acoustic' | 'electronic'): import('./kitAsset').Prepared {
+  const built = buildKit(kit)
+  const items: import('./kitAsset').Item[] = built.batches.filter((batch) => batch.kind === 'solid').map((batch, index) => {
+    const count = batch.count
+    const data = new Float32Array(count * 12)
+    for (let i = 0; i < count; i++) {
+      data.set(batch.data.subarray(i * 9, i * 9 + 6), i * 12)
+      data.set([0, 0], i * 12 + 6)
+      data.set([1, 0, 0, 1], i * 12 + 8)
+    }
+    // The hi-hat top rides its rod: keep it in its own frame so the hat states move it in place.
+    let frame = identity()
+    if (batch.hatTop) {
+      const centre = [0, 1, 2].map((k) => { let s = 0; for (let i = 0; i < count; i++) s += data[i * 12 + k]; return s / count })
+      for (let i = 0; i < count; i++) for (let k = 0; k < 3; k++) data[i * 12 + k] -= centre[k]
+      frame = translate(centre[0], centre[1], centre[2])
+    }
+    const m = batch.material
+    return {
+      name: `fallback:${index}`, data, index: Uint32Array.from({ length: count }, (_, i) => i),
+      material: { name: `fallback:${index}`, base: [...m.color, 1] as [number, number, number, number], metal: m.metal, rough: m.rough, emissive: [0, 0, 0],
+        baseTex: -1, ormTex: -1, normalTex: -1, emissiveTex: -1, normalScale: 1, blend: false },
+      frame, target: batch.target ?? undefined, glows: !!batch.target && batch.target !== 'hatPedal',
+      motion: batch.hatTop ? 'hat' : undefined, center: [0, 0, 0],
+    }
+  })
+  return { items, anchors: built.anchors, center: [0.08, 0.6, 0.06], radius: 1.08, images: 0,
+    hatStates: { fullyOpen: 0.06, partiallyOpen: 0.024, closed: 0, pedalClosed: 0 } }
+}

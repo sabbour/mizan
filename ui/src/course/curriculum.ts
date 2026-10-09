@@ -556,7 +556,7 @@ export const LESSONS: Lesson[] = [
     goal: 'Driving rock: accented ride eighths, a big backbeat and a kick that pushes into beat 3.',
     tempo: { start: 77, target: 110 }, limbs: 'Right hand: ride · Left hand: snare · Right foot: kick',
     steps: ['Accent the ride on the beats; the "&" is lighter.', 'Kick on 1, "1 &" and "2 &": the "2 &" pushes into beat 3.', 'Every backbeat is a full stroke.'],
-    bars: twice({ steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R R R R+L R', notes: { rd: 'XxXxXxXx', sn: '--X---X-', bd: 'x-x--x--' } }),
+    bars: twice({ steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R R R R+L R', notes: { rd: 'XxXxXxXx', sn: '--X---X-', bd: 'xx-x----' } }),
   },
   {
     id: 'genre-blues-shuffle', collection: 'genre', style: 'Blues', feel: 'Shuffle: swung eighths in triplets',

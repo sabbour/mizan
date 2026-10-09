@@ -1758,6 +1758,9 @@ async function courseChecks(width, phase) {
   check(song, 'Library has a song to open')
   song.click()
   await wait(() => document.querySelector('.track-button') && document.querySelector('.ws .score-bar[aria-label="Bar 3"]'), 'The song opens')
+  // A library song with a saved place (bar 34) still opens from the top, keeping the player's saved choices.
+  await wait(() => bar() === 1, `A library song opens at bar 1 (${where()})`)
+  check(pressed('Count-in') === 'false' && pressed('Click') === 'false', 'Saved count-in and click stay in force')
   document.querySelector('.ws .score-bar[aria-label="Bar 3"]').click()
   await wait(() => bar() === 3, 'Bar 3 is selected in the song')
   document.querySelector('.track-button').click()

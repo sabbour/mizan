@@ -2,8 +2,23 @@
  * Choices that follow the player across songs, lessons and restarts: count-in, speed, click, the sticking letters
  * and the drum kit's look. Each is stored only when the player changes it, so an absent value keeps the default.
  */
-export type KitStyle = 'electronic' | 'studio' | 'acoustic' | 'illustrated'
-export const KIT_STYLES: KitStyle[] = ['electronic', 'studio', 'acoustic', 'illustrated']
+export type KitType = 'acoustic' | 'electronic'
+export const KIT_TYPES: KitType[] = ['electronic', 'acoustic']
+/** Looks apply to either kit; only LowPoly changes the geometry (to the asset's own low level of detail). */
+export const LOOKS = ['Realistic', 'HandPaintedAnime', 'StylizedAnimated3D', 'LowPoly', 'NeonRhythm', 'TechnicalBlueprint', 'ClayStudyModel'] as const
+export type Look = (typeof LOOKS)[number]
+/** A kit and its look, stored together, e.g. `electronic:Realistic`. */
+export type KitStyle = `${KitType}:${Look}`
+export const KIT_STYLES: KitStyle[] = KIT_TYPES.flatMap((kit) => LOOKS.map((look) => `${kit}:${look}` as KitStyle))
+export const DEFAULT_KIT_STYLE: KitStyle = 'electronic:Realistic'
+/** Earlier single-word choices, kept so a saved choice still opens the same kit. */
+const LEGACY: Record<string, KitStyle> = {
+  electronic: 'electronic:Realistic', studio: 'electronic:Realistic', acoustic: 'acoustic:Realistic', illustrated: 'acoustic:HandPaintedAnime',
+}
+export const splitKitStyle = (style: KitStyle) => {
+  const [kit, look] = style.split(':') as [KitType, Look]
+  return { kit, look }
+}
 export type PracticePrefs = { countIn?: boolean; rate?: number; click?: boolean; sticking?: boolean; kitStyle?: KitStyle }
 
 const KEY = 'mizan:practice'
@@ -35,6 +50,7 @@ function read(warn: boolean): PracticePrefs {
   }
   if ('kitStyle' in saved) {
     if (KIT_STYLES.includes(saved.kitStyle as KitStyle)) prefs.kitStyle = saved.kitStyle as KitStyle
+    else if (typeof saved.kitStyle === 'string' && saved.kitStyle in LEGACY) prefs.kitStyle = LEGACY[saved.kitStyle]
     else if (warn) console.warn('Ignoring the saved drum kit style; it is not one of the offered styles.', saved.kitStyle)
   }
   if ('rate' in saved) {
