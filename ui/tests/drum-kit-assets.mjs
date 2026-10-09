@@ -1429,7 +1429,7 @@ async function main() {
   const args = process.argv.slice(2)
   if (args.includes('--self-test')) return selfTest()
   if (args.includes('--help')) {
-    console.log('Usage: node ui\\tests\\drum-kit-assets.mjs [--geometry-only] [--out-dir <dir> | <acoustic.glb> <electronic.glb>]')
+    console.log('Usage: node ui\\tests\\drum-kit-assets.mjs [--geometry-only] [--out-dir <dir> | <acoustic.glb> [<electronic.glb>]]')
     return
   }
   const geometryOnly = args.includes('--geometry-only')
@@ -1453,12 +1453,12 @@ async function main() {
     }
     const dir = resolve(outDir)
     files = [resolve(dir, 'AcousticKit.glb'), resolve(dir, 'ElectronicKit.glb')]
-  } else if (fileArgs.length === 2) files = fileArgs.map((path) => resolve(path))
+  } else if (fileArgs.length === 1 || fileArgs.length === 2) files = fileArgs.map((path) => resolve(path))
   else if (fileArgs.length === 0) {
     const models = resolve(thisDir, '..', 'public', 'models')
     files = [resolve(models, 'AcousticKit.glb'), resolve(models, 'ElectronicKit.glb')]
   } else {
-    console.error('Usage: node ui\\tests\\drum-kit-assets.mjs [--geometry-only] [--out-dir <dir> | <acoustic.glb> <electronic.glb>]')
+    console.error('Usage: node ui\\tests\\drum-kit-assets.mjs [--geometry-only] [--out-dir <dir> | <acoustic.glb> [<electronic.glb>]]')
     process.exitCode = 2
     return
   }
@@ -1475,7 +1475,7 @@ async function main() {
     }
   }
   if (failed) process.exitCode = 1
-  else console.log('Both assets passed mechanical checks.')
+  else console.log('All supplied assets passed mechanical checks.')
   console.log('Visual inspection remains necessary for silhouette, finishes, intersections, branding, and runtime effects.')
 }
 
