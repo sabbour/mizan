@@ -1,0 +1,745 @@
+{
+  "schemaVersion": 1,
+  "asset": "ui/public/models/ElectronicKit.glb",
+  "bytes": 26079848,
+  "sha256": "91a9d932966918f2253cc076314fb76e30202abef29e4bc5934361148a534172",
+  "measured": {
+    "boundsM": {
+      "min": [
+        -0.7184263843261762,
+        0,
+        -0.48839397750864155
+      ],
+      "max": [
+        0.6680579951946212,
+        1.120351099013431,
+        0.5517101645469665
+      ],
+      "size": {
+        "width": 1.3864843795207973,
+        "height": 1.120351099013431,
+        "depth": 1.040104142055608
+      }
+    },
+    "lodTriangles": [
+      98544,
+      32380,
+      14258
+    ],
+    "textureCount": 32,
+    "imageCount": 32,
+    "externalUriCount": 0,
+    "baseColorMapSizes": [
+      {
+        "material": "MAT_PowderCoatedMetal_Black",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "MAT_Rubber_Black",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "HandPaintedAnime_rubber",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_Plastic_Black",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "HandPaintedAnime_drum",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_MeshHead_LightGray",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "HandPaintedAnime_head",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_Chrome",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "HandPaintedAnime_cymbal",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_Steel_Brushed",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_DisplayEmission",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_DisplayGlass",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_SeatVinyl_Black",
+        "width": 1024,
+        "height": 1024
+      }
+    ],
+    "requiredBaseMaterialMaps": [
+      {
+        "material": "MAT_Rubber_Black",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "MAT_MeshHead_LightGray",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "MAT_PowderCoatedMetal_Black",
+        "width": 2048,
+        "height": 2048
+      },
+      {
+        "material": "MAT_Steel_Brushed",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_Chrome",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_Plastic_Black",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_DisplayGlass",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_DisplayEmission",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "material": "MAT_SeatVinyl_Black",
+        "width": 1024,
+        "height": 1024
+      }
+    ],
+    "boundsMethod": "World-space bounds of visible default-scene geometry, excluding collision-only nodes."
+  },
+  "officialValidator": {
+    "mode": "full",
+    "electronicViolations": 0,
+    "printedOpenBoundaryEdges": 0,
+    "note": "The unchanged checkMeshes returns from inside its TANGENT branch after the first tangent-bearing primitive, so its printed topology totals do not cover all mesh primitives."
+  },
+  "resolvedReported40": {
+    "originalPrimitive": {
+      "mesh": "Rack_LeftPost",
+      "primitive": 0,
+      "lod": 0,
+      "openBoundaryEdges": 40,
+      "loops": [
+        {
+          "planeYLocalM": 1,
+          "radiusM": 0.0001,
+          "segments": 20
+        },
+        {
+          "planeYLocalM": 1.03,
+          "radiusM": 0.0001,
+          "segments": 20
+        }
+      ]
+    },
+    "cause": "The post-cap lathe used nonzero 0.0001 m endpoint radii instead of the axis, leaving two artificial circular boundary loops.",
+    "correction": "Electronic builder axis endpoints now use radius 0; the same exact-position audit finds zero open edges on Rack_LeftPost primitive 0 in every LOD and on its Rack_RightPost instance."
+  },
+  "independentWeldedTopology": {
+    "positionWeldToleranceM": 0.000001,
+    "totals": {
+      "openBoundaryEdges": 2358,
+      "nonManifoldEdges": 0,
+      "inconsistentWindingEdges": 0,
+      "degenerateTriangles": 0,
+      "duplicateFaces": 0
+    },
+    "openBoundaryEdgesByLod": {
+      "LOD0": {
+        "openBoundaryEdges": 1456
+      },
+      "LOD1": {
+        "openBoundaryEdges": 608
+      },
+      "LOD2": {
+        "openBoundaryEdges": 294
+      }
+    },
+    "affectedPrimitiveCount": 34,
+    "openBoundaryPrimitives": [
+      {
+        "mesh": "Snare_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Body"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 2868
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "Snare_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Head"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 5248
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomHigh_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Body"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 2868
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomHigh_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Head"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 5248
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomMid_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Body"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 2868
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomMid_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Head"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 5248
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "FloorTom_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Body"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 2868
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "FloorTom_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Head"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 128,
+            "triangles": 5248
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "HiHat_PedalBoard",
+        "primitive": 0,
+        "referencedNodes": [
+          "HiHat_PedalBoard"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 8,
+            "triangles": 840
+          }
+        ],
+        "kind": "float32-weld-tolerance-seam",
+        "detail": "Eight edges arise from four near-coincident rounded-box grip seams after float32 transform/serialization; endpoint separation is below 3e-8 m and is a quantization-bin artifact, not a physical gap."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 0,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 192,
+            "triangles": 576
+          }
+        ],
+        "kind": "rubber-edge-band",
+        "detail": "Two circumferential boundaries belong to the annular rubber edge strip; it is modeled as a surface band overlapping the pad shell/head, not a separate closed solid."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 1,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 96,
+            "triangles": 3744
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "Throne_Post",
+        "primitive": 0,
+        "referencedNodes": [
+          "Throne_Post"
+        ],
+        "lods": [
+          {
+            "lod": 0,
+            "openBoundaryEdges": 136,
+            "triangles": 972
+          }
+        ],
+        "kind": "hollow-post-ends",
+        "detail": "Open circumferences are ends of telescoping post/collar tubes, intentionally hollow hardware."
+      },
+      {
+        "mesh": "Snare_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Body"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 1566
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "Snare_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Head"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 918
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomHigh_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Body"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 1566
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomHigh_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Head"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 918
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomMid_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Body"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 1566
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomMid_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Head"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 918
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "FloorTom_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Body"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 1566
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "FloorTom_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Head"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 54,
+            "triangles": 918
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 0,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 80,
+            "triangles": 240
+          }
+        ],
+        "kind": "rubber-edge-band",
+        "detail": "Two circumferential boundaries belong to the annular rubber edge strip; it is modeled as a surface band overlapping the pad shell/head, not a separate closed solid."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 1,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 40,
+            "triangles": 600
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "Throne_Post",
+        "primitive": 0,
+        "referencedNodes": [
+          "Throne_Post"
+        ],
+        "lods": [
+          {
+            "lod": 1,
+            "openBoundaryEdges": 56,
+            "triangles": 468
+          }
+        ],
+        "kind": "hollow-post-ends",
+        "detail": "Open circumferences are ends of telescoping post/collar tubes, intentionally hollow hardware."
+      },
+      {
+        "mesh": "Snare_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Body"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 468
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "Snare_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "Snare_Head"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 168
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomHigh_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Body"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 468
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomHigh_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomHigh_Head"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 168
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "TomMid_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Body"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 468
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "TomMid_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "TomMid_Head"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 168
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "FloorTom_Body",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Body"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 468
+          }
+        ],
+        "kind": "pad-shell-head-interface",
+        "detail": "One circular upper shell edge remains open at the mesh-head/rim seating interface; the separate head and rim cover this interface."
+      },
+      {
+        "mesh": "FloorTom_Head",
+        "primitive": 0,
+        "referencedNodes": [
+          "FloorTom_Head"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 24,
+            "triangles": 168
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 0,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 36,
+            "triangles": 108
+          }
+        ],
+        "kind": "rubber-edge-band",
+        "detail": "Two circumferential boundaries belong to the annular rubber edge strip; it is modeled as a surface band overlapping the pad shell/head, not a separate closed solid."
+      },
+      {
+        "mesh": "Kick_Pad",
+        "primitive": 1,
+        "referencedNodes": [
+          "Kick_Pad"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 18,
+            "triangles": 90
+          }
+        ],
+        "kind": "playable-membrane-perimeter",
+        "detail": "The independently selectable striking membrane is an open surface whose perimeter terminates under the surrounding rim."
+      },
+      {
+        "mesh": "Throne_Post",
+        "primitive": 0,
+        "referencedNodes": [
+          "Throne_Post"
+        ],
+        "lods": [
+          {
+            "lod": 2,
+            "openBoundaryEdges": 48,
+            "triangles": 444
+          }
+        ],
+        "kind": "hollow-post-ends",
+        "detail": "Open circumferences are ends of telescoping post/collar tubes, intentionally hollow hardware."
+      }
+    ],
+    "countingUnit": "Unique mesh primitive definitions, grouped by LOD; instanced geometry is counted once per mesh definition."
+  }
+}
