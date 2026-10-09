@@ -1664,12 +1664,12 @@ async function courseChecks(width, phase) {
     check(pressed('Count-in') === 'false' && pressed('Click') === 'false' && pressed('Sticking') === 'false',
       `Count-in, click and sticking stay off after a restart (${pressed('Count-in')}, ${pressed('Click')}, ${pressed('Sticking')})`)
     check(/75 bpm · 75%/.test(where()), `The chosen speed survives a restart: ${where()}`)
-    await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'illustrated', 'The kit style survives a restart')
+    await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'acoustic:HandPaintedAnime', 'The kit and look survive a restart')
     toggle('Count-in').click(); toggle('Click').click(); toggle('Sticking').click()
     await wait(() => pressed('Sticking') === 'true' && document.querySelector('.kit-hand'), 'Sticking returns with its legend')
     await back()
     const saved = JSON.parse(localStorage.getItem('mizan:practice'))
-    check(Object.keys(saved).length === 5 && saved.kitStyle === 'illustrated' && saved.countIn === true && saved.rate === 0.75 && saved.click === true && saved.sticking === true,
+    check(Object.keys(saved).length === 5 && saved.kitStyle === 'acoustic:HandPaintedAnime' && saved.countIn === true && saved.rate === 0.75 && saved.click === true && saved.sticking === true,
       `Preferences saved: ${localStorage.getItem('mizan:practice')}`)
     for (const key of Object.keys(localStorage)) if (key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:course:') || key === 'mizan:practice') localStorage.removeItem(key)
     return `Course restart checks passed at ${width}px: count-in, click, sticking and speed restored after reload, then reset.`
@@ -1704,12 +1704,12 @@ async function courseChecks(width, phase) {
   document.querySelector('.chordview-option[data-view="score"]').click(); await sleep(300)
   document.querySelector('.chordview-option[data-view="kit"]').click(); await sleep(300)
   check(bar() === 3, `Switching the practice view keeps the position (${where()})`)
-  // The kit style is a look only: Electronic by default, and changing it keeps the position.
-  await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'electronic', 'The kit starts Electronic')
+  // Kit and look are one compact menu: the electronic kit in its realistic look by default; changing it is a view change only.
+  await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'electronic:Realistic', 'The kit starts as the realistic electronic kit')
   const look = document.querySelector('.kit-style select')
-  check(look && [...look.options].map((option) => option.value).join(',') === 'electronic,studio,acoustic,illustrated' &&
-    document.querySelector('.kit-style').getBoundingClientRect().height < 40, 'The kit look is one compact menu with four looks')
-  for (const style of ['studio', 'acoustic', 'illustrated']) {
+  check(look && look.querySelectorAll('optgroup').length === 2 && look.options.length === 14 &&
+    document.querySelector('.kit-style').getBoundingClientRect().height < 40, 'Kit and look are one compact menu: two kits, seven looks each')
+  for (const style of ['electronic:LowPoly', 'acoustic:NeonRhythm', 'acoustic:HandPaintedAnime']) {
     look.value = style
     look.dispatchEvent(new Event('change', { bubbles: true }))
     await wait(() => document.querySelector('.practice-kit')?.dataset.style === style && look.value === style, `The ${style} kit is shown`)
