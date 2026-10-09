@@ -274,18 +274,29 @@ function checkAccessors(json, bin, issues, getAccessor) {
 }
 
 function checkMeshes(json, bin, issues, getAccessor) {
-  const topology = { openBoundaryEdges: 0, nonManifoldEdges: 0, inconsistentWindingEdges: 0, inwardClosedComponents: 0, degenerateTriangles: 0, duplicateFaces: 0 }
+  const topology = {
+    meshes: json.meshes?.length ?? 0, primitives: 0, analyzedPrimitives: 0, skippedPrimitives: 0,
+    openBoundaryEdges: 0, nonManifoldEdges: 0, inconsistentWindingEdges: 0, inwardClosedComponents: 0,
+    degenerateTriangles: 0, duplicateFaces: 0,
+  }
   for (const [mi, mesh] of (json.meshes ?? []).entries()) {
+    if (!Array.isArray(mesh.primitives) || !mesh.primitives.length) {
+      issue(issues, 'empty-mesh', `${mesh.name ?? `mesh ${mi}`} has no primitives to validate.`)
+      continue
+    }
     for (const [pi, prim] of (mesh.primitives ?? []).entries()) {
+      topology.primitives++
       const label = `${mesh.name ?? `mesh ${mi}`} primitive ${pi}`
       if (prim.mode !== undefined && prim.mode !== 4) issue(issues, 'primitive-mode', `${label} is not a triangle list.`)
       if (!isIndex(prim.attributes?.POSITION, json.accessors?.length ?? 0)) {
         issue(issues, 'position-attribute', `${label} has no valid POSITION accessor.`)
+        topology.skippedPrimitives++
         continue
       }
       const position = getAccessor(prim.attributes.POSITION)
       if (!position || position.size !== 3 || position.accessor.componentType !== 5126) {
         issue(issues, 'position-format', `${label} POSITION must be a float VEC3.`)
+        topology.skippedPrimitives++
         continue
       }
       if (!position.accessor.min || !position.accessor.max) issue(issues, 'position-bounds', `${label} POSITION accessor must declare min/max bounds.`)
@@ -305,7 +316,11 @@ function checkMeshes(json, bin, issues, getAccessor) {
       if (indices.length % 3) issue(issues, 'triangle-index-count', `${label} index count is not divisible by three.`)
       const invalid = indices.some((x) => !Number.isInteger(x) || x < 0 || x >= position.accessor.count)
       if (invalid) issue(issues, 'bad-index', `${label} references a vertex outside POSITION.`)
-      if (invalid || !position.finite) continue
+      if (invalid || !position.finite) {
+        topology.skippedPrimitives++
+        continue
+      }
+      topology.analyzedPrimitives++
 
       const normal = prim.attributes.NORMAL === undefined ? null : getAccessor(prim.attributes.NORMAL)
       const seenFaces = new Set(), edges = new Map(), sets = new Map(), faces = []
@@ -409,7 +424,6 @@ function checkMeshes(json, bin, issues, getAccessor) {
             break
           }
         }
-        return topology
       }
       for (const [kind, mapping] of Object.entries(prim.extensions?.KHR_materials_variants?.mappings ?? {})) {
         void kind
@@ -423,6 +437,7 @@ function checkMeshes(json, bin, issues, getAccessor) {
       }
     }
   }
+  return topology
 }
 
 const matIdentity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
@@ -1096,6 +1111,62 @@ function fixtureDocument({ positions = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1], ind
   return { json, bin, bytes: makeFixtureGlb(json, bin) }
 }
 
+function traversalFixture() {
+  const chunks = [], bufferViews = [], accessors = []
+  let byteLength = 0
+  const addAccessor = (values, type, componentType, width, position = false) => {
+    const padding = (4 - byteLength % 4) % 4
+    if (padding) { chunks.push(Buffer.alloc(padding)); byteLength += padding }
+    const bytes = Buffer.alloc(values.length * width)
+    values.forEach((value, i) => width === 4 ? bytes.writeFloatLE(value, i * width) : bytes.writeUInt16LE(value, i * width))
+    const view = bufferViews.length
+    bufferViews.push({ buffer: 0, byteOffset: byteLength, byteLength: bytes.length })
+    chunks.push(bytes); byteLength += bytes.length
+    const accessor = { bufferView: view, componentType, count: values.length / ({ SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[type]), type }
+    if (position) {
+      accessor.min = [0, 1, 2].map((k) => Math.min(...values.filter((_, i) => i % 3 === k)))
+      accessor.max = [0, 1, 2].map((k) => Math.max(...values.filter((_, i) => i % 3 === k)))
+    }
+    accessors.push(accessor)
+    return accessors.length - 1
+  }
+  const addPrimitive = ({ positions, indices, normals, tangents }) => {
+    const attributes = { POSITION: addAccessor(positions, 'VEC3', 5126, 4, true) }
+    if (normals) attributes.NORMAL = addAccessor(normals, 'VEC3', 5126, 4)
+    if (tangents) attributes.TANGENT = addAccessor(tangents, 'VEC4', 5126, 4)
+    return { attributes, indices: addAccessor(indices, 'SCALAR', 5123, 2), mode: 4 }
+  }
+  const tetra = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+  const positions = [], normals = [], tangents = [], indices = []
+  for (const face of faces) {
+    const p = face.map((i) => tetra[i])
+    const ab = p[1].map((x, k) => x - p[0][k]), ac = p[2].map((x, k) => x - p[0][k])
+    const n = normalize([ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]])
+    for (const vertex of p) {
+      positions.push(...vertex); normals.push(...n); tangents.push(1, 0, 0, 1); indices.push(indices.length)
+    }
+  }
+  const first = addPrimitive({ positions, indices, normals, tangents })
+  const badIndices = [...indices]; badIndices[badIndices.length - 1] = positions.length / 3
+  const laterPrimitive = addPrimitive({ positions, indices: badIndices })
+  const laterMesh = addPrimitive({
+    positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+    indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    normals: Array.from({ length: 9 }, () => [0, 0, -1]).flat(),
+  })
+  const bin = Buffer.concat(chunks)
+  const json = {
+    asset: { version: '2.0' }, buffers: [{ byteLength }],
+    bufferViews, accessors,
+    meshes: [
+      { name: 'TangentFirst', primitives: [first, laterPrimitive] },
+      { name: 'BadTopologyLaterMesh', primitives: [laterMesh] },
+    ],
+  }
+  return { json, bin }
+}
+
 function makeHierarchyFixture(profile) {
   const nodes = [{ name: profile.root, children: [] }]
   const visit = (parentName) => {
@@ -1128,8 +1199,27 @@ function selfTest() {
   const meshIssues = []
   const get = makeAccessorReader(good.json, good.bin, meshIssues)
   checkAccessors(good.json, good.bin, meshIssues, get)
-  checkMeshes(good.json, good.bin, meshIssues, get)
+  const validTopology = checkMeshes(good.json, good.bin, meshIssues, get)
   assert.equal(meshIssues.length, 0, 'seam-welded, disconnected closed components should pass topology checks')
+  assert.deepEqual(
+    [validTopology.meshes, validTopology.primitives, validTopology.analyzedPrimitives, validTopology.skippedPrimitives],
+    [1, 1, 1, 0],
+    'valid GLB traversal counts must distinguish meshes, primitives, analyzed data, and skips',
+  )
+
+  const traversal = traversalFixture()
+  const traversalIssues = []
+  const traversalTopology = checkMeshes(traversal.json, traversal.bin, traversalIssues, makeAccessorReader(traversal.json, traversal.bin, traversalIssues))
+  assert.deepEqual(
+    [traversalTopology.meshes, traversalTopology.primitives, traversalTopology.analyzedPrimitives, traversalTopology.skippedPrimitives],
+    [2, 3, 2, 1],
+    'mesh traversal must continue past a valid tangent-bearing first primitive and account for later invalid data',
+  )
+  assert(traversalIssues.some((x) => x.code === 'bad-index' && x.message.includes('TangentFirst primitive 1')), 'a bad index in a later primitive must be reported')
+  assert(traversalIssues.some((x) => x.code === 'duplicate-face' && x.message.includes('BadTopologyLaterMesh primitive 0')), 'duplicate topology in a later mesh must be reported')
+  assert(traversalIssues.some((x) => x.code === 'non-manifold-edge' && x.message.includes('BadTopologyLaterMesh primitive 0')), 'non-manifold topology in a later mesh must be reported')
+  assert(traversalIssues.some((x) => x.code === 'normal-winding' && x.message.includes('BadTopologyLaterMesh primitive 0')), 'invalid normals in a later mesh must be reported')
+  console.log(`Regression traversal: ${traversalTopology.meshes} meshes / ${traversalTopology.primitives} primitives (${traversalTopology.analyzedPrimitives} topology-analyzed; ${traversalTopology.skippedPrimitives} invalid-data skips).`)
 
   const pbrIssues = []
   checkMaterials({ materials: [], images: [], textures: [] }, Buffer.alloc(0), { materials: [], primaryMaterials: [] }, false, pbrIssues)
@@ -1169,7 +1259,7 @@ function selfTest() {
   checkBudgets(profiles.acoustic, [220001, 76946, 39396], budgetIssues)
   assert(budgetIssues.some((x) => x.code === 'triangle-budget' && x.message.includes('LOD0')), 'triangle-budget overflow must fail')
   assert(budgetIssues.some((x) => x.code === 'low-poly-budget'), 'LowPoly intersection budget overflow must fail')
-  console.log('Asset validator self-test passed: seam-welded closed multipart GLB plus missing hierarchy, external URI, bad index, non-finite vertex, unapplied scale, missing PBR maps, and budget overflow fixtures.')
+  console.log('Asset validator self-test passed: closed multipart topology, later-primitive bad index, later-mesh duplicate/non-manifold topology and reversed normals after a tangent-bearing primitive, missing hierarchy, external URI, NaN, scale, missing PBR maps, and budget fixtures.')
 }
 
 function printResult({ issues, report }, file) {
@@ -1177,7 +1267,7 @@ function printResult({ issues, report }, file) {
     const size = report.bounds?.size?.join(' × ') ?? 'no bounds'
     console.log(`${file} (${report.kit}, ${report.validationMode}): LOD ${report.triangles?.join(' / ')} tris; actual bounds ${size} m; ${report.textures} textures / ${report.images} images; ${issues.length} violation(s).`)
     if (report.storedBounds) console.log(`  Builder-declared bounds (informational only): ${report.storedBounds.join(' × ')} m.`)
-    if (report.topology) console.log(`  Welded topology: ${report.topology.nonManifoldEdges} non-manifold, ${report.topology.openBoundaryEdges} open-boundary, ${report.topology.inconsistentWindingEdges} inconsistent-winding, ${report.topology.inwardClosedComponents} inward-closed, ${report.topology.degenerateTriangles} degenerate, ${report.topology.duplicateFaces} duplicate faces.`)
+    if (report.topology) console.log(`  Traversed ${report.topology.meshes} meshes / ${report.topology.primitives} primitives (${report.topology.analyzedPrimitives} topology-analyzed; ${report.topology.skippedPrimitives} invalid-data skips). Welded topology: ${report.topology.nonManifoldEdges} non-manifold, ${report.topology.openBoundaryEdges} open-boundary, ${report.topology.inconsistentWindingEdges} inconsistent-winding, ${report.topology.inwardClosedComponents} inward-closed, ${report.topology.degenerateTriangles} degenerate, ${report.topology.duplicateFaces} duplicate faces.`)
     if (report.materialBaseColorSizes?.length) {
       const maps = report.materialBaseColorSizes.map(({ material, width, height }) => `${material} ${width}×${height}`).join('; ')
       console.log(`  Embedded realistic base-color map sizes: ${maps}.`)
@@ -1191,8 +1281,7 @@ function printResult({ issues, report }, file) {
   }
   for (const [code, messages] of grouped) {
     console.log(`  ERROR [${code}] ${messages.length} finding(s):`)
-    for (const message of messages.slice(0, 3)) console.log(`    ${message}`)
-    if (messages.length > 3) console.log(`    … ${messages.length - 3} more`)
+    for (const message of messages) console.log(`    ${message}`)
   }
 }
 
