@@ -22,8 +22,7 @@ type Props = {
 
 const KIT_LABEL: Record<KitType, string> = { electronic: 'Electronic kit', acoustic: 'Acoustic kit' }
 const LOOK_LABEL: Record<Look, string> = {
-  Realistic: 'Realistic', HandPaintedAnime: 'Hand-painted anime', StylizedAnimated3D: 'Stylized animated 3D', LowPoly: 'Low poly',
-  NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint', ClayStudyModel: 'Clay study model',
+  Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
 }
 
 const perspective = (fov: number, aspect: number, near: number, far: number) => {

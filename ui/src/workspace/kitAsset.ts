@@ -174,11 +174,9 @@ function material(json: Gltf, index: number): MaterialView {
   }
 }
 
-/** Which embedded level of detail a look draws: LowPoly uses the asset's own low level; others the full model. */
-export function lodFor(asset: Asset, look: Look): number {
-  const root = asset.json.nodes[asset.json.scenes[asset.json.scene ?? 0].nodes[0]]
-  const extras = root.extras as { lod?: { lowPolyLook?: { lod?: number } } } | undefined
-  return look === 'LowPoly' ? extras?.lod?.lowPolyLook?.lod ?? 2 : 0
+/** Which embedded level of detail a look draws: every offered look draws the full model. */
+export function lodFor(_asset: Asset, _look: Look): number {
+  return 0
 }
 
 /** Prepares one look of a kit: picks the level of detail and each primitive's variant material. */

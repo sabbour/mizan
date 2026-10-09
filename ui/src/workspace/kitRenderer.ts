@@ -4,8 +4,8 @@ import type { Look } from './prefs'
 
 /**
  * WebGL renderer for a prepared kit. One program serves every look: the look picks the shading model (PBR,
- * hand-painted bands, soft stylised light, flat low-poly facets, neon, blueprint, clay) and the extra passes
- * (outline, transparency, glow halo). The hit feedback is the same for every look and comes from `Feedback`.
+ * painted clay, neon, blueprint) and the extra passes (outline, transparency, glow halo). The hit feedback is the
+ * same for every look and comes from `Feedback`.
  */
 
 /** Per piece, from the shared playback clock: an upcoming note's glow, the hit pulse, and time since the hit. */
@@ -26,16 +26,13 @@ export type Feedback = {
 }
 export type FrameState = { hat: HatState; feedback: Map<Target, Feedback>; selected: ReadonlySet<Target> }
 
-const LOOK_INDEX: Record<Look, number> = { Realistic: 0, HandPaintedAnime: 1, StylizedAnimated3D: 2, LowPoly: 3, NeonRhythm: 4, TechnicalBlueprint: 5, ClayStudyModel: 6 }
-/** Background and floor tone per look; the neon stage is dark for contrast. */
-const STAGE: Record<Look, { bg: Vec3; floor: Vec3; shadow: number; ink?: Vec3; inkWidth?: number }> = {
+const LOOK_INDEX: Record<Look, number> = { Realistic: 0, ClayStudyModel: 1, NeonRhythm: 2, TechnicalBlueprint: 3 }
+/** Background and floor tone per look; the neon stage is dark for contrast. Blueprint outlines its translucent parts too. */
+const STAGE: Record<Look, { bg: Vec3; floor: Vec3; shadow: number; ink?: Vec3; inkWidth?: number; inkAll?: boolean }> = {
   Realistic: { bg: [1, 1, 1], floor: [0.91, 0.91, 0.915], shadow: 0.075 },
-  HandPaintedAnime: { bg: [1, 1, 1], floor: [0.95, 0.93, 0.88], shadow: 0.07, ink: [0.26, 0.24, 0.23], inkWidth: 0.0022 },
-  StylizedAnimated3D: { bg: [1, 1, 1], floor: [0.93, 0.93, 0.95], shadow: 0.09 },
-  LowPoly: { bg: [1, 1, 1], floor: [0.92, 0.93, 0.94], shadow: 0.08 },
+  ClayStudyModel: { bg: [1, 0.988, 0.962], floor: [0.95, 0.92, 0.85], shadow: 0.1, ink: [0.36, 0.27, 0.21], inkWidth: 0.0016 },
   NeonRhythm: { bg: [0.035, 0.035, 0.05], floor: [0.06, 0.06, 0.08], shadow: 0.12 },
-  TechnicalBlueprint: { bg: [0.93, 0.95, 0.98], floor: [0.88, 0.91, 0.96], shadow: 0.03, ink: [0.16, 0.28, 0.48], inkWidth: 0.0014 },
-  ClayStudyModel: { bg: [1, 1, 1], floor: [0.9, 0.88, 0.85], shadow: 0.14 },
+  TechnicalBlueprint: { bg: [0.93, 0.95, 0.98], floor: [0.88, 0.91, 0.96], shadow: 0.03, ink: [0.1, 0.2, 0.42], inkWidth: 0.0012, inkAll: true },
 }
 export const stageBackground = (look: Look) => STAGE[look].bg
 
@@ -61,6 +58,13 @@ uniform float ink; uniform vec3 inkColor; uniform float halo; uniform float alph
 uniform float pulse; uniform vec3 tint; uniform vec3 tint2; uniform float split; uniform float upcoming; uniform vec3 upTint;
 varying vec3 vn; varying vec3 wp; varying vec2 vuv; varying vec3 vt; varying float vw; varying vec3 lp;
 float bands(float x, float steps) { float s = x * steps; return (floor(s) + smoothstep(0.35, 0.65, fract(s))) / steps; }
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float noise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+    mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
 void main() {
   if (flatten > 0.0) { gl_FragColor = vec4(0.0, 0.0, 0.0, shadowAlpha); return; }
   if (floorPass > 0.0) {
@@ -70,10 +74,13 @@ void main() {
   }
   vec3 V = normalize(eye - wp);
   vec3 N = normalize(vn);
-  if (look > 2.5 && look < 3.5) {
-    // Low poly: one flat normal per facet.
-    N = normalize(cross(dFdx(wp), dFdy(wp)));
-    if (dot(N, vn) < 0.0) N = -N;
+  // Surface curvature on screen: large where a rim, bevel or edge turns sharply (blueprint draws these as lines).
+  float crease = length(fwidth(N));
+  if (look > 0.5 && look < 1.5) {
+    // Painted clay: a little of each facet's flat normal, for a hand-modelled surface.
+    vec3 facet = normalize(cross(dFdx(wp), dFdy(wp)));
+    if (dot(facet, N) < 0.0) facet = -facet;
+    N = normalize(mix(N, facet, 0.18));
   }
   if (ink > 0.0) {
     if (dot(N, V) > 0.0) discard;
@@ -93,7 +100,7 @@ void main() {
   vec3 base = baseColor.rgb * texel.rgb;
   float ao = 1.0, r = rough, mt = metal;
   if (hasOrm > 0.5) { vec3 orm = texture2D(ormTex, vuv).rgb; ao = orm.r; r *= orm.g; mt *= orm.b; }
-  if (hasNormal > 0.5 && look < 2.5) {
+  if (hasNormal > 0.5 && look < 0.5) {
     vec3 T = normalize(vt - N * dot(N, vt));
     vec3 B = cross(N, T) * vw;
     vec3 t = texture2D(normalTex, vuv).xyz * 2.0 - 1.0;
@@ -107,6 +114,7 @@ void main() {
   float facing = max(dot(N, V), 0.0);
   float occlusion = mix(0.6, 1.0, smoothstep(0.0, 0.45, wp.y)) * ao;
   vec3 col;
+  float a = alpha;
   if (look < 0.5) {
     float shine = mix(220.0, 3.0, pow(r, 0.6));
     vec3 F0 = mix(vec3(0.04), base, mt);
@@ -123,30 +131,25 @@ void main() {
     col = diffuse * (1.0 - mt) + env * F * occlusion * mix(0.6, 1.0, mt) + spec * F;
     col = vec3(1.0) - exp(-col * 1.15);
   } else if (look < 1.5) {
-    // Hand-painted: warm soft light in four gentle bands, painted highlight, occlusion only where parts meet.
-    float light = bands(clamp(k * 0.75 + f * 0.2 + 0.15, 0.0, 1.0), 4.0);
-    vec3 warm = mix(vec3(0.62, 0.6, 0.68), vec3(1.05, 0.98, 0.88), light);
-    float highlight = smoothstep(0.82, 0.9, dot(N, normalize(key + V))) * 0.18 * (1.0 - r * 0.5);
-    col = base * warm * mix(0.75, 1.0, occlusion) + highlight;
+    // Hand-painted clay: matte clay forms under a warm painted light. Soft toon bands between a cool violet shade
+    // and warm cream light, a slow painted drift in tone across each part, a soft highlight and a warm sky rim.
+    float wrap = clamp(dot(N, key) * 0.55 + 0.45 + f * 0.12, 0.0, 1.0);
+    float light = mix(wrap, bands(wrap, 3.0), 0.6);
+    float wash = noise(lp * 9.0) * 0.65 + noise(lp * 23.0) * 0.35;
+    vec3 paint = base * (0.93 + 0.14 * wash) * mix(vec3(1.0), vec3(1.05, 1.0, 0.9), wash * 0.5);
+    col = paint * mix(vec3(0.5, 0.48, 0.62), vec3(1.07, 1.0, 0.87), light) * mix(0.72, 1.0, occlusion);
+    col += vec3(1.0, 0.95, 0.82) * smoothstep(0.88, 0.96, dot(N, normalize(key + V))) * 0.1;
+    col += vec3(1.0, 0.9, 0.74) * pow(1.0 - facing, 3.0) * 0.14 * light;
   } else if (look < 2.5) {
-    // Stylised animated: smooth wrapped light, a broad clean highlight and a soft rim.
-    float wrap = pow(clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0), 1.4);
-    float broad = pow(max(dot(N, normalize(key + V)), 0.0), 18.0) * 0.45 * (1.0 - r * 0.6);
-    col = base * (0.32 + 0.8 * wrap) * occlusion + broad + vec3(0.9, 0.95, 1.0) * pow(1.0 - facing, 3.0) * 0.18;
-  } else if (look < 3.5) {
-    float light = floor(clamp(k * 0.8 + f * 0.25 + 0.1, 0.0, 0.999) * 3.0) / 3.0;
-    col = base * (0.45 + 0.65 * light);
-  } else if (look < 4.5) {
     // Neon: dark metal lit by cool rims; colour only from emission.
     float spec = pow(max(dot(N, normalize(key + V)), 0.0), 40.0) * 0.35;
     col = base * (0.25 + 0.35 * k) + spec * vec3(0.7, 0.75, 0.9) + vec3(0.25, 0.3, 0.45) * pow(1.0 - facing, 3.0) * 0.6;
-  } else if (look < 5.5) {
-    // Blueprint: flat blue-gray with bright structural edges.
-    col = base * (0.82 + 0.18 * k) + vec3(0.75, 0.85, 1.0) * pow(1.0 - facing, 2.5) * 0.45;
   } else {
-    // Clay: matte, soft and evenly lit, with deep occlusion near the floor and joints.
-    float wrap = clamp(dot(N, key) * 0.6 + 0.4, 0.0, 1.0);
-    col = base * (0.3 + 0.75 * wrap) * mix(0.55, 1.0, occlusion);
+    // Blueprint: flat blue-gray fills with drawn lines where surfaces turn sharply (rims, bevels, edges).
+    col = base * (0.82 + 0.18 * k) + vec3(0.75, 0.85, 1.0) * pow(1.0 - facing, 2.5) * 0.3;
+    float line = smoothstep(0.18, 0.45, crease);
+    col = mix(col, inkColor, line * 0.85);
+    a = max(a, line * 0.8);
   }
   vec3 glowE = emissive * (hasEmis > 0.5 ? texture2D(emisTex, vuv).rgb : vec3(1.0));
   col += glowE;
@@ -154,7 +157,7 @@ void main() {
   float edge = 0.25 + 0.75 * pow(1.0 - facing, 2.0);
   col = mix(col, hitColour, clamp(pulse * 0.75, 0.0, 0.85)) + hitColour * pulse * 0.25;
   col += upTint * upcoming * edge * 0.55;
-  gl_FragColor = vec4(clamp(col, 0.0, 1.0), alpha);
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), a);
 }`
 
 const SHADOW_FRAGMENT_PRELUDE = ''
@@ -339,6 +342,7 @@ export class KitRenderer {
     gl.uniform3fv(this.at.eye, this.eye)
     gl.uniform1f(this.at.look, LOOK_INDEX[look])
     gl.uniform3fv(this.at.bg, stage.bg)
+    gl.uniform3fv(this.at.inkColor, stage.ink ?? [0, 0, 0])
     for (const name of ['flatten', 'floorPass', 'ink', 'halo', 'grow']) gl.uniform1f(this.at[name], 0)
     gl.uniform1f(this.at.alpha, 1)
     this.feedbackUniforms(undefined, false)
@@ -382,33 +386,42 @@ export class KitRenderer {
       this.elements(item.count)
     }
     this.feedbackUniforms(undefined, false)
-    if (stage.ink) {
+    const outline = (item: Uploaded) => {
       gl.uniform1f(this.at.ink, 1)
       gl.uniform1f(this.at.grow, stage.inkWidth!)
-      gl.uniform3fv(this.at.inkColor, stage.ink)
-      for (const item of this.items) {
-        if (translucent(item)) continue
-        this.bind(item)
-        gl.uniformMatrix4fv(this.at.m, false, model(item))
-        this.elements(item.count)
-      }
+      this.elements(item.count)
       gl.uniform1f(this.at.ink, 0)
       gl.uniform1f(this.at.grow, 0)
     }
+    if (stage.ink) for (const item of this.items) {
+      if (translucent(item)) continue
+      this.bind(item)
+      gl.uniformMatrix4fv(this.at.m, false, model(item))
+      outline(item)
+    }
     const glass = this.items.filter(translucent)
     if (glass.length) {
-      gl.enable(gl.BLEND)
-      gl.depthMask(false)
       const distance = (item: Uploaded) => { const c = item.frame === IDENTITY ? prepared.center : item.center; return -Math.hypot(c[0] - this.eye[0], c[1] - this.eye[1], c[2] - this.eye[2]) }
       for (const item of glass.sort((a, b) => distance(a) - distance(b))) {
         this.bind(item)
-        this.material(item)
         gl.uniformMatrix4fv(this.at.m, false, model(item))
+        if (stage.inkAll) {
+          // The part's own depth first, so its outline shows only around its silhouette, not through its faint fill.
+          gl.colorMask(false, false, false, false)
+          this.elements(item.count)
+          gl.colorMask(true, true, true, true)
+          outline(item)
+          gl.depthFunc(gl.LEQUAL)
+        }
+        gl.enable(gl.BLEND)
+        gl.depthMask(!!stage.inkAll)
+        this.material(item)
         gl.uniform1f(this.at.alpha, item.material.base[3])
         this.elements(item.count)
+        gl.depthMask(true)
+        gl.disable(gl.BLEND)
+        gl.depthFunc(gl.LESS)
       }
-      gl.depthMask(true)
-      gl.disable(gl.BLEND)
       gl.uniform1f(this.at.alpha, 1)
     }
     // Glow halo around pieces that are lit by the feedback, for every look.

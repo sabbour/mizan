@@ -79,15 +79,12 @@ try {
     const full = prepare(asset, 'Realistic')
     const geometry = (p) => p.items.map((item) => item.index.length).reduce((a, b) => a + b, 0)
     const names = (p) => p.items.filter((item) => item.target).map((item) => item.name).sort().join(',')
+    assert.deepEqual([...LOOKS], ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint'], 'four looks are offered')
     for (const look of LOOKS) {
       const p = prepare(asset, look)
-      if (look === 'LowPoly') {
-        const tris = triangleCount(p)
-        assert.ok(lodFor(asset, look) > 0 && tris >= 15000 && tris <= 35000, `${kit} LowPoly draws ${tris} triangles (15k-35k)`)
-      } else {
-        assert.equal(geometry(p), geometry(full), `${kit} ${look} keeps the full geometry`)
-        assert.equal(names(p), names(full), `${kit} ${look} keeps every playable and moving part`)
-      }
+      assert.ok(lodFor(asset, look) === 0 && triangleCount(p) === triangleCount(full), `${kit} ${look} draws the full model`)
+      assert.equal(geometry(p), geometry(full), `${kit} ${look} keeps the full geometry`)
+      assert.equal(names(p), names(full), `${kit} ${look} keeps every playable and moving part`)
       const targets = new Set(p.items.filter((item) => item.glows).map((item) => item.target))
       for (const piece of ['kick', 'snare', 'tom1', 'tom2', 'floor', 'hihat', 'crash', 'ride'])
         assert.ok(targets.has(piece), `${kit} ${look}: ${piece} has a surface for the feedback`)
@@ -109,7 +106,7 @@ try {
     assert.ok(!full.items.some((item) => item.name.startsWith('Throne')), `${kit}: the throne behind the camera is left out of the view`)
   }
   assert.ok(fallbackScene('acoustic').items.length > 5, 'a built-in kit stands in when a model cannot load')
-  console.log('Kit runtime checks passed: clock feedback (anticipation, hit, fade, loop, count-in, rate, hands, sticking off, reduced motion), part motions, and both kits in all seven looks.')
+  console.log('Kit runtime checks passed: clock feedback (anticipation, hit, fade, loop, count-in, rate, hands, sticking off, reduced motion), part motions, and both kits in all four looks.')
 } finally {
   await vite.close()
 }

@@ -4,16 +4,17 @@
  */
 export type KitType = 'acoustic' | 'electronic'
 export const KIT_TYPES: KitType[] = ['electronic', 'acoustic']
-/** Looks apply to either kit; only LowPoly changes the geometry (to the asset's own low level of detail). */
-export const LOOKS = ['Realistic', 'HandPaintedAnime', 'StylizedAnimated3D', 'LowPoly', 'NeonRhythm', 'TechnicalBlueprint', 'ClayStudyModel'] as const
+/** Looks apply to either kit and draw its full geometry. `ClayStudyModel` is shown as "Hand-painted clay". */
+export const LOOKS = ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint'] as const
 export type Look = (typeof LOOKS)[number]
 /** A kit and its look, stored together, e.g. `electronic:Realistic`. */
 export type KitStyle = `${KitType}:${Look}`
 export const KIT_STYLES: KitStyle[] = KIT_TYPES.flatMap((kit) => LOOKS.map((look) => `${kit}:${look}` as KitStyle))
 export const DEFAULT_KIT_STYLE: KitStyle = 'electronic:Realistic'
-/** Earlier single-word choices, kept so a saved choice still opens the same kit. */
+/** Earlier choices, kept so a saved choice still opens the same kit; the retired painted and low-poly looks became the painted clay. */
 const LEGACY: Record<string, KitStyle> = {
-  electronic: 'electronic:Realistic', studio: 'electronic:Realistic', acoustic: 'acoustic:Realistic', illustrated: 'acoustic:HandPaintedAnime',
+  electronic: 'electronic:Realistic', studio: 'electronic:Realistic', acoustic: 'acoustic:Realistic', illustrated: 'acoustic:ClayStudyModel',
+  ...Object.fromEntries(KIT_TYPES.flatMap((kit) => ['HandPaintedAnime', 'StylizedAnimated3D', 'LowPoly'].map((look) => [`${kit}:${look}`, `${kit}:ClayStudyModel`]))),
 }
 export const splitKitStyle = (style: KitStyle) => {
   const [kit, look] = style.split(':') as [KitType, Look]

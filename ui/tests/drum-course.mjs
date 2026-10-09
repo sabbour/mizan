@@ -301,7 +301,7 @@ try {
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: false, sticking: false })
       savePref('click', true)
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false }, 'saving one keeps the others')
-      for (const style of ['acoustic:HandPaintedAnime', 'electronic:LowPoly', 'acoustic:NeonRhythm', 'electronic:TechnicalBlueprint', 'acoustic:ClayStudyModel', 'electronic:Realistic']) {
+      for (const style of ['acoustic:NeonRhythm', 'electronic:TechnicalBlueprint', 'acoustic:ClayStudyModel', 'electronic:ClayStudyModel', 'electronic:Realistic']) {
         savePref('kitStyle', style)
         assert.equal(loadPrefs().kitStyle, style, `the ${style} kit and look are remembered`)
       }
@@ -312,7 +312,8 @@ try {
         ['{not json', {}], ['[1]', {}], ['{"rate":1.5,"countIn":"no","click":true}', { click: true }],
         ['{"rate":0.33,"sticking":false}', { sticking: false }], ['{"rate":0.25,"countIn":true}', { rate: 0.25, countIn: true }],
         ['{"kitStyle":"vintage","click":false}', { click: false }],
-        ['{"kitStyle":"illustrated"}', { kitStyle: 'acoustic:HandPaintedAnime' }], ['{"kitStyle":"studio"}', { kitStyle: 'electronic:Realistic' }],
+        ['{"kitStyle":"illustrated"}', { kitStyle: 'acoustic:ClayStudyModel' }], ['{"kitStyle":"electronic:LowPoly"}', { kitStyle: 'electronic:ClayStudyModel' }],
+        ['{"kitStyle":"acoustic:HandPaintedAnime"}', { kitStyle: 'acoustic:ClayStudyModel' }], ['{"kitStyle":"electronic:StylizedAnimated3D"}', { kitStyle: 'electronic:ClayStudyModel' }], ['{"kitStyle":"studio"}', { kitStyle: 'electronic:Realistic' }],
         ['{"kitStyle":"acoustic"}', { kitStyle: 'acoustic:Realistic' }],
       ]) {
         store.set('mizan:practice', stored)
