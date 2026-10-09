@@ -1,6 +1,7 @@
 import type { BarMeter, Song } from './song'
 
 type MeterSong = Pick<Song, 'bars' | 'beatsPerBar' | 'beatUnit' | 'barMap'>
+type TimedSong = Pick<Song, 'bpm' | 'tempoMap'>
 const cache = new WeakMap<MeterSong, { inputs: unknown[]; bars: BarMeter[] }>()
 
 export function measures(song: MeterSong): BarMeter[] {
@@ -58,4 +59,28 @@ export function songBeats(song: MeterSong): number {
 
 export function pulseBeats(bar: BarMeter): number {
   return bar.denominator === 8 && bar.numerator >= 6 && bar.numerator % 3 === 0 ? 1.5 : 4 / bar.denominator
+}
+
+/** Recording seconds for a score beat; beyond the map the nearest segment's tempo continues. */
+export function recordingSeconds(song: TimedSong, beat: number): number {
+  const map = song.tempoMap
+  if (!map?.length) return beat * 60 / song.bpm
+  if (beat <= map[0].beat) return map[0].time + (beat - map[0].beat) * 60 / song.bpm
+  for (let i = 1; i < map.length; i++) {
+    const right = map[i]
+    if (beat <= right.beat) {
+      const left = map[i - 1]
+      return left.time + (beat - left.beat) / (right.beat - left.beat) * (right.time - left.time)
+    }
+  }
+  if (map.length === 1) return map[0].time + (beat - map[0].beat) * 60 / song.bpm
+  const left = map[map.length - 2]
+  const right = map[map.length - 1]
+  return right.time + (beat - right.beat) / (right.beat - left.beat) * (right.time - left.time)
+}
+
+/** Quarter-note tempo across one bar of the recording. */
+export function barTempo(song: MeterSong & TimedSong, index: number): number {
+  const bar = measures(song)[index]
+  return 60 * bar.beats / (recordingSeconds(song, bar.startBeat + bar.beats) - recordingSeconds(song, bar.startBeat))
 }

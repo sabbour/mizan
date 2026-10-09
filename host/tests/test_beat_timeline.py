@@ -360,3 +360,36 @@ def test_compound_reading_reaches_analysis_only_with_onset_evidence(monkeypatch)
     assert "compound x/8" in harmony["warnings"][0]
     for point in harmony["tempoMap"]:
         assert any(abs(point["time"] - time) < 1e-6 for time in [0.0, *beats, 60.0])
+
+def test_compound_and_simple_passages_export_at_recording_speed(monkeypatch, tmp_path):
+    beats = np.arange(0.2, 60, 0.4)
+    tracked(monkeypatch, beats, beats[::4])
+    audio = Audio(np.zeros(60 * 11025, dtype=np.float32), 11025)
+    harmony = analyze_harmony(audio, onsets=sectioned_onsets(beats, [(10, 2), (16, 3), (10, 2)]))
+    hits = [{"lane": "snare" if index % 3 else "kick", "onset": float(onset), "velocity": 0.8, "confidence": 0.4}
+            for index, onset in enumerate(sectioned_onsets(beats, [(10, 2), (16, 3), (10, 2)]))]
+    song = build_song("Compound", "test", audio.duration, harmony, [], hits, {})
+    tempo_map, bpm = song["tempoMap"], song["bpm"]
+    assert [hit["onset"] for hit in song["drums"]] == [hit["onset"] for hit in hits]
+    export_midi(song, tmp_path / "compound.mid")
+    midi = mido.MidiFile(tmp_path / "compound.mid")
+    seconds, note_times, signature_times = 0.0, [], []
+    for message in midi:
+        seconds += message.time
+        if message.type == "note_on" and message.velocity:
+            note_times.append(seconds)
+        elif message.type == "time_signature":
+            signature_times.append((seconds, message.numerator, message.denominator))
+    offset = time_at_beat(tempo_map, bpm, 0)
+    expected = sorted(time_at_beat(tempo_map, bpm, hit["startBeat"]) - offset for hit in song["drums"])
+    assert max(abs(a - b) for a, b in zip(sorted(note_times), expected)) < 0.002
+    assert max(abs(a + offset - b) for a, b in zip(sorted(note_times), sorted(hit["onset"] for hit in hits))) < 0.02
+    changes = [(time_at_beat(tempo_map, bpm, bar["startBeat"]) - offset, bar["numerator"], bar["denominator"])
+               for index, bar in enumerate(song["barMap"]) if index and (bar["numerator"], bar["denominator"]) != (
+                   song["barMap"][index - 1]["numerator"], song["barMap"][index - 1]["denominator"])]
+    assert [(n, d) for _, n, d in changes] == [(12, 8), (4, 4)]
+    for when, numerator, denominator in changes:
+        assert any(abs(time - when) < 0.002 and (n, d) == (numerator, denominator) for time, n, d in signature_times)
+    export_musicxml(song, tmp_path / "compound.musicxml")
+    tempos = [float(node.get("tempo")) for node in ET.parse(tmp_path / "compound.musicxml").find(".//part").iter("sound")]
+    assert tempos == pytest.approx([150, 225, 150], rel=0.01)

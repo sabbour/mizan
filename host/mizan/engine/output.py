@@ -121,22 +121,44 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
     }
 
 
+def tempo_changes(song: dict) -> list[tuple[float, float]]:
+    """(score beat, quarter BPM) from beat zero, following the recording's tempo map when present."""
+    points = song.get("tempoMap") or []
+    changes = [(0.0, float(song["bpm"]))]
+    for left, right in zip(points, points[1:]):
+        if right["beat"] <= 0:
+            continue
+        bpm = 60 * (right["beat"] - left["beat"]) / (right["time"] - left["time"])
+        start = max(0.0, left["beat"])
+        if start == changes[-1][0]:
+            changes[-1] = (start, bpm)
+        elif not math.isclose(bpm, changes[-1][1], rel_tol=1e-6):
+            changes.append((start, bpm))
+    return changes
+
+
 def export_midi(song: dict, path: Path) -> None:
     midi = mido.MidiFile(ticks_per_beat=480)
     tempo = mido.MidiTrack()
-    tempo.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(song["bpm"])))
     bar_map = song_bar_map(song)
     end_tick = round((bar_map[-1]["startBeat"] + bar_map[-1]["beats"]) * midi.ticks_per_beat)
-    previous_signature, previous_tick, previous_bar = None, 0, None
+    # Tempo follows the recording map, so simple and compound passages keep their real speed.
+    meta = [(round(beat * midi.ticks_per_beat), 0, mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm)))
+            for beat, bpm in tempo_changes(song)]
+    previous_signature, previous_bar = None, None
     for bar in bar_map:
         signature = (bar["numerator"], bar["denominator"])
         if signature != previous_signature or previous_bar is not None and previous_bar.get("partial"):
-            tick = round(bar["startBeat"] * midi.ticks_per_beat)
-            tempo.append(mido.MetaMessage("time_signature", numerator=signature[0],
-                                          denominator=signature[1], time=tick - previous_tick))
-            previous_signature, previous_tick = signature, tick
+            meta.append((round(bar["startBeat"] * midi.ticks_per_beat), 1,
+                         mido.MetaMessage("time_signature", numerator=signature[0], denominator=signature[1])))
+            previous_signature = signature
         previous_bar = bar
-    tempo.append(mido.MetaMessage("end_of_track", time=end_tick - previous_tick))
+    previous_tick = 0
+    for tick, _, message in sorted(meta, key=lambda item: item[:2]):
+        message.time = tick - previous_tick
+        tempo.append(message)
+        previous_tick = tick
+    tempo.append(mido.MetaMessage("end_of_track", time=max(0, end_tick - previous_tick)))
     midi.tracks.append(tempo)
     fractional = any(
         note["midi"] != int(note["midi"])
@@ -231,6 +253,10 @@ def export_musicxml(song: dict, path: Path) -> None:
     part_list = ET.SubElement(root, "part-list")
     division = 480
     bar_map = song_bar_map(song)
+    tempo_map = song.get("tempoMap")
+    bar_tempos = [round(60 * bar["beats"] / (time_at_beat(tempo_map, song["bpm"], bar["startBeat"] + bar["beats"])
+                                              - time_at_beat(tempo_map, song["bpm"], bar["startBeat"])), 3)
+                  if tempo_map else song["bpm"] for bar in bar_map]
     small_bars = [bar for bar in bar_map if bar["beats"] < 1 / division]
     gaps = [bar["beats"] for bar in small_bars]
     for track in song["tracks"]:
@@ -296,7 +322,12 @@ def export_musicxml(song: dict, path: Path) -> None:
                     ET.SubElement(clef, "line").text = "2"
                 direction = ET.SubElement(measure, "direction")
                 ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = "Draft transcription"
-                ET.SubElement(direction, "sound", tempo=str(song["bpm"]))
+                ET.SubElement(direction, "sound", tempo=str(bar_tempos[0]))
+                written_tempo = bar_tempos[0]
+            elif not math.isclose(bar_tempos[bar], written_tempo, rel_tol=0.05):
+                # Quarter-note tempo changes where the beat unit or speed changes (e.g. 4/4 to 12/8).
+                ET.SubElement(measure, "sound", tempo=str(bar_tempos[bar]))
+                written_tempo = bar_tempos[bar]
             if drum:
                 _drum_measure(measure, drum_bars.get(bar, []), start_tick, end_tick, division)
                 continue

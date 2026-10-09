@@ -1,5 +1,5 @@
 import type { DrumLane, Song, Track } from './song'
-import { barAt as measureIndex, barStart, measures as meterMeasures } from './meter'
+import { barAt as measureIndex, barStart, barTempo, measures as meterMeasures } from './meter'
 
 const DIV = 16 // divisions per quarter note
 const notationEvents = (song: Song) => [...song.piano, ...song.vocals, ...song.chords, ...song.drums,
@@ -467,8 +467,14 @@ function annotations(song: Song, bar: number, chords: boolean, scale = 1): strin
   const grid = notationGrid(song)
   const span = grid.bars[bar - 1]
   let xml = ''
-  if (bar === 1) {
-    xml += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${Math.round(song.bpm)}</per-minute></metronome></direction-type><sound tempo="${song.bpm}"/></direction>`
+  const tempo = barTempo(song, bar - 1)
+  const previous = bar > 1 ? barTempo(song, bar - 2) : undefined
+  const meter = meterMeasures(song)[bar - 1]
+  const compound = meter.denominator === 8 && meter.numerator > 3 && meter.numerator % 3 === 0
+  const unitChanged = bar > 1 && (meterMeasures(song)[bar - 2].denominator === 8) !== (meter.denominator === 8)
+  // Mark the tempo at the start and where the beat unit or speed changes (e.g. 4/4 to 12/8).
+  if (bar === 1 || unitChanged || Math.abs(tempo / previous! - 1) >= 0.05) {
+    xml += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit>${compound ? '<beat-unit-dot/>' : ''}<per-minute>${Math.round(compound ? tempo / 1.5 : tempo)}</per-minute></metronome></direction-type><sound tempo="${Math.round(tempo * 1000) / 1000}"/></direction>`
   }
   let cursor = 0
   for (const c of song.chords) {

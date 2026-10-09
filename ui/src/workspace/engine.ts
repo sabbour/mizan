@@ -1,6 +1,6 @@
 import type { Stem } from '../library/bridge'
 import { sustainedChords, type DrumHit, type DrumLane, type MelodyNote, type PianoNote, type Song } from './song'
-import { barAt, barStart, measures, pulseBeats, songBeats } from './meter'
+import { barAt, barStart, measures, pulseBeats, recordingSeconds, songBeats } from './meter'
 import { accompanimentRhythm, chordRhythm } from './creative'
 import { Recording } from './recording'
 
@@ -701,20 +701,7 @@ export class Engine {
   }
 
   private recordingTime(beat: number): number {
-    const map = this.song.tempoMap
-    if (!map?.length) return beat * 60 / this.song.bpm
-    if (beat <= map[0].beat) return map[0].time + (beat - map[0].beat) * 60 / this.song.bpm
-    for (let i = 1; i < map.length; i++) {
-      const right = map[i]
-      if (beat <= right.beat) {
-        const left = map[i - 1]
-        return left.time + (beat - left.beat) / (right.beat - left.beat) * (right.time - left.time)
-      }
-    }
-    if (map.length === 1) return map[0].time + (beat - map[0].beat) * 60 / this.song.bpm
-    const left = map[map.length - 2]
-    const right = map[map.length - 1]
-    return right.time + (beat - right.beat) / (right.beat - left.beat) * (right.time - left.time)
+    return recordingSeconds(this.song, beat)
   }
 
   private seekMedia(beat: number): void {
