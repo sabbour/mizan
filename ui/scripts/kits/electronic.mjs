@@ -4,6 +4,27 @@ import { cymbal, foot, lathe, M, merge, pedalParts, rod, roundedBox, seg, sweep,
 
 const P = (mesh, key, cat, comp, role) => ({ mesh, key, cat, comp, role })
 const localize = (world, prims) => prims.map((p) => ({ ...p, mesh: transform(p.mesh, M.inverseRigid(world)) }))
+const flip = (mesh) => {
+  const idx = mesh.idx.slice()
+  for (let i = 0; i < idx.length; i += 3) [idx[i + 1], idx[i + 2]] = [idx[i + 2], idx[i + 1]]
+  return { ...mesh, n: mesh.n.map((x) => -x), idx }
+}
+const roundPath = (points, radius = 0.025, steps = 5) => {
+  const out = [points[0]]
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i], prev = points[i - 1], next = points[i + 1]
+    const cut = Math.min(radius, v.len(v.sub(prev, p)) * 0.35, v.len(v.sub(next, p)) * 0.35)
+    const a = v.add(p, v.scale(v.norm(v.sub(prev, p)), cut))
+    const b = v.add(p, v.scale(v.norm(v.sub(next, p)), cut))
+    out.push(a)
+    for (let j = 1; j <= steps; j++) {
+      const t = j / steps, u = 1 - t
+      out.push([0, 1, 2].map((k) => u * u * a[k] + 2 * u * t * p[k] + t * t * b[k]))
+    }
+  }
+  out.push(points.at(-1))
+  return out
+}
 
 export const ELECTRONIC_MATERIALS = (t) => ({
   rubber: { name: 'MAT_Rubber_Black', set: t.rubberCymbal, size: 2048 },
@@ -23,12 +44,12 @@ export const ELECTRONIC_LAYOUT = {
   TomMid: { center: [0.15, 0.8, -0.19], R: 0.125, H: 0.065, tilt: [0.32, 0.08] },
   FloorTom: { center: [0.4, 0.6, 0.06], R: 0.15, H: 0.1, tilt: [0.14, 0.06] },
   HiHat: { center: [-0.48, 0.86, 0.04], R: 0.15, tilt: [0.06, -0.04], pedal: [-0.3, 0, 0.12] },
-  Crash: { center: [-0.42, 1.15, -0.28], R: 0.175, tilt: [0.3, -0.12] },
+  Crash: { center: [-0.42, 1.09, -0.28], R: 0.175, tilt: [0.3, -0.12] },
   Ride: { center: [0.46, 1.04, -0.28], R: 0.2, tilt: [0.25, 0.14] },
   Kick: { tower: [0, 0, -0.1], padY: 0.27, R: 0.11 },
   Rack: { left: [-0.55, -0.2], right: [0.6, -0.2], height: 1.0, bar: 0.62 },
   Module: { center: [-0.6, 0.94, -0.12] },
-  Throne: { center: [0, 0, 0.42], seat: 0.52 },
+  Throne: { center: [0, 0, 0.35], seat: 0.52 },
 }
 
 /** Builds one level of detail of the electronic kit; returns the root node index. */
@@ -61,10 +82,11 @@ export function buildElectronic(kit, q, rootExtras) {
     kit.instance('Rack_Leg_Right', M.t(rx, 0, rz), legs, first)
   }
   const clamps = kit.part('Rack_Clamps', M.identity(), rack)
-  const clampMesh = merge(roundedBox(0.06, 0.06, 0.06, 0.012, { steps: q ? 1 : 2 }), transform(lathe([[0.0001, 0], [0.012, 0], [0.012, 0.022], [0.0001, 0.026]], S(12, 6)), M.chain(M.t(0, 0, 0.03), M.rx(Math.PI / 2))))
+  const clampMesh = roundedBox(0.06, 0.06, 0.06, 0.012, { steps: q ? 1 : 2 })
+  const clampBolt = transform(lathe([[0.0001, 0], [0.012, 0], [0.012, 0.022], [0.0001, 0.026]], S(12, 6)), M.chain(M.t(0, 0, 0.03), M.rx(Math.PI / 2)))
   let firstClamp = null
   const clamp = (name, at) => {
-    if (firstClamp === null) firstClamp = kit.part(name, M.t(...at), clamps, [P(clampMesh, 'plastic', 'hardware')])
+    if (firstClamp === null) firstClamp = kit.part(name, M.t(...at), clamps, [P(clampMesh, 'plastic', 'hardware'), P(clampBolt, 'chrome', 'hardware')])
     else kit.instance(name, M.t(...at), clamps, firstClamp)
   }
   const arms = kit.part('Rack_MountingArms', M.identity(), rack)
@@ -73,7 +95,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const world = M.t(...from)
     const elbow = [to[0], from[1] + 0.02, (from[2] + to[2]) / 2]
     kit.part(name, world, arms, localize(world, [P(merge(
-      sweep([from, [from[0], from[1] + 0.02, from[2]], elbow, [to[0], to[1] - 0.03, to[2]]], 0.0115, S(16, 8)),
+      sweep(roundPath([from, [from[0], from[1] + 0.02, from[2]], elbow, [to[0], to[1] - 0.03, to[2]]], 0.025, q === 2 ? 2 : 5), 0.0115, S(16, 8)),
       transform(lathe([[0.0001, -0.018], [0.014, -0.014], [0.018, 0], [0.014, 0.014], [0.0001, 0.018]], S(16, 8)), M.t(to[0], to[1] - 0.02, to[2])),
     ), 'powder', 'hardware')]), { pivot: 'clamp' })
   }
@@ -86,7 +108,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const node = kit.part(name, pivot, root, [], { pivot: 'mounting bracket' })
     const body = merge(
       lathe([[R - 0.008, -H / 2], [R - 0.012, -H / 2 + 0.002], [R - 0.004, -H / 2 + 0.006], [R, -H / 2 + 0.014], [R, H / 2 - 0.01], [R - 0.004, H / 2 - 0.004], [R - 0.01, H / 2], [R - 0.012, H / 2]], segs),
-      lathe([[0.0001, -H / 2], [R - 0.008, -H / 2]].reverse(), segs),
+      flip(lathe([[0.0001, -H / 2], [R - 0.008, -H / 2]].reverse(), segs)),
       transform(roundedBox(0.05, 0.03, 0.05, 0.008, { steps: q ? 1 : 2 }), M.t(0, -H / 2 - 0.012, 0)),
       // Small lug-style blocks around the shell, as on the reference pads.
       ...Array.from({ length: q === 2 ? 0 : 6 }, (_, i) => {
@@ -124,7 +146,7 @@ export function buildElectronic(kit, q, rootExtras) {
   const cymbalPad = (name, c, comp, postTop, opts) => {
     const world = M.chain(M.t(...c.center), M.rx(c.tilt[0]), M.rz(c.tilt[1]))
     const node = kit.part(name, world, root, [], { pivot: 'centre mounting hole' })
-    kit.part(`${name}_Cymbal`, world, node, [P(cymbal(c.R, { bellR: c.R * 0.2, bellH: 0.022, bow: 0.012, thick: 0.008, rings: [20, 8, 4][q], segments: S(128, 16), ...opts }), 'rubber', 'cymbal', comp, 'surface')],
+    kit.part(`${name}_Cymbal`, world, node, [P(cymbal(c.R, { bellR: c.R * 0.2, bellH: 0.022, bow: 0.012, thick: 0.008, hole: 0.0045, rings: [20, 8, 4][q], segments: S(128, 16), ...opts }), 'rubber', 'cymbal', comp, 'surface')],
       { pivot: 'centre mounting hole', wobbleAxis: 'local X and Z' })
     const normal = M.dir(world, [0, 1, 0])
     const below = v.sub(c.center, v.scale(normal, 0.04))
@@ -148,12 +170,12 @@ export function buildElectronic(kit, q, rootExtras) {
     const h = L.HiHat
     const world = M.chain(M.t(...h.center), M.rx(h.tilt[0]), M.rz(h.tilt[1]))
     const node = kit.part('HiHat', world, root, [], { pivot: 'centre shaft' })
-    kit.part('HiHat_Cymbal', world, node, [P(cymbal(h.R, { bellR: h.R * 0.22, bellH: 0.02, bow: 0.008, thick: 0.009, rings: [20, 8, 4][q], segments: S(128, 16) }), 'rubber', 'cymbal', 'HiHat', 'surface')],
+    kit.part('HiHat_Cymbal', world, node, [P(cymbal(h.R, { bellR: h.R * 0.22, bellH: 0.02, bow: 0.008, thick: 0.009, hole: 0.0045, rings: [20, 8, 4][q], segments: S(128, 16) }), 'rubber', 'cymbal', 'HiHat', 'surface')],
       { pivot: 'centre shaft', travelAxis: [0, 1, 0], states: { fullyOpen: 0.006, partiallyOpen: 0, closed: -0.004, pedalClosed: -0.005 } })
     const from = [lx, 0.82, lz]
     const mountWorld = M.t(...from)
     kit.part('HiHat_Mount', mountWorld, node, localize(mountWorld, [
-      P(merge(sweep([from, [from[0], from[1] + 0.02, from[2] + 0.06], [h.center[0], h.center[1] - 0.06, h.center[2]], [h.center[0], h.center[1] - 0.012, h.center[2]]], 0.0095, S(16, 8)),
+      P(merge(sweep(roundPath([from, [from[0], from[1] + 0.02, from[2] + 0.06], [h.center[0], h.center[1] - 0.06, h.center[2]], [h.center[0], h.center[1] - 0.012, h.center[2]]], 0.025, q === 2 ? 2 : 5), 0.0095, S(16, 8)),
         rod([h.center[0], h.center[1] - 0.02, h.center[2]], [h.center[0], h.center[1] + 0.03, h.center[2]], 0.004, S(10, 5))), 'powder', 'hardware'),
       P(transform(roundedBox(0.05, 0.05, 0.05, 0.01, { steps: q ? 1 : 2 }), M.t(...from)), 'plastic', 'hardware'),
     ]), { pivot: 'clamp on the rack post' })
@@ -161,7 +183,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const pedal = kit.part('HiHat_Pedal', pedalWorld, node)
     const parts = pedalParts({ heelZ: 0.26, toeZ: 0.0, toeY: 0.06, width: 0.08, q })
     kit.part('HiHat_PedalBase', pedalWorld, pedal, [P(merge(parts.base, parts.hinge, transform(roundedBox(0.1, 0.05, 0.05, 0.01, { steps: q ? 1 : 2 }), M.t(0, 0.025, -0.01))), 'plastic', 'hardware')])
-    kit.part('HiHat_PedalBoard', M.mul(pedalWorld, M.t(0, 0.022, 0.26)), pedal, [P(parts.footboard, 'steel', 'hardware', 'HiHat')], { pivot: 'heel hinge', rotationAxis: [1, 0, 0], pressAngle: 0.14 })
+    kit.part('HiHat_PedalBoard', M.mul(pedalWorld, M.t(0, 0.022, 0.26)), pedal, [P(transform(parts.footboard, M.rx(parts.angle * 2)), 'steel', 'hardware', 'HiHat')], { pivot: 'heel hinge', rotationAxis: [1, 0, 0], pressAngle: 0.14 })
     kit.collider('COL_HiHat', world, node, { type: 'cylinder', axis: 'y', radius: h.R, height: 0.03 }, 'HiHat_Cymbal')
   }
 
@@ -189,7 +211,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const parts = pedalParts({ heelZ: 0.3, toeZ: 0.02, toeY: 0.075, q })
     kit.part('Kick_PedalBase', pedalWorld, pedal, [P(merge(parts.base, parts.hinge,
       ...[-1, 1].map((s) => transform(roundedBox(0.016, 0.14, 0.026, 0.004, { steps: q ? 1 : 2 }), M.t(s * 0.06, 0.07, 0.04)))), 'steel', 'hardware')])
-    kit.part('Kick_PedalBoard', M.mul(pedalWorld, M.t(0, 0.022, 0.3)), pedal, [P(parts.footboard, 'steel', 'hardware', 'Kick')], { pivot: 'heel hinge', rotationAxis: [1, 0, 0], pressAngle: 0.18 })
+    kit.part('Kick_PedalBoard', M.mul(pedalWorld, M.t(0, 0.022, 0.3)), pedal, [P(transform(parts.footboard, M.rx(parts.angle * 2)), 'steel', 'hardware', 'Kick')], { pivot: 'heel hinge', rotationAxis: [1, 0, 0], pressAngle: 0.18 })
     const axle = M.point(pedalWorld, [0, 0.13, 0.04])
     const tip = [0, k.padY, k.tower[2] + 0.04]
     const beaterWorld = M.aim(axle, tip)
@@ -205,7 +227,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const m = L.Module
     const bracket = [lx, m.center[1] - 0.06, lz]
     const world = M.chain(M.t(...m.center), M.ry(0.55), M.rx(-0.55))
-    const node = kit.part('DrumModule', M.t(...bracket), root, [P(transform(sweep([bracket, [bracket[0] - 0.02, bracket[1] + 0.02, bracket[2] + 0.04], v.sub(m.center, [0, 0.03, -0.0])], 0.01, S(12, 6)), M.inverseRigid(M.t(...bracket))), 'powder', 'hardware')],
+    const node = kit.part('DrumModule', M.t(...bracket), root, [P(transform(sweep(roundPath([bracket, [bracket[0] - 0.02, bracket[1] + 0.02, bracket[2] + 0.04], v.sub(m.center, [0, 0.03, -0.0])], 0.012, q === 2 ? 2 : 4), 0.01, S(12, 6)), M.inverseRigid(M.t(...bracket))), 'powder', 'hardware')],
       { pivot: 'mounting bracket' })
     kit.part('DrumModule_Body', world, node, [P(roundedBox(0.22, 0.15, 0.05, 0.012, { steps: q ? 1 : 3 }), 'plastic', 'hardware')])
     kit.part('DrumModule_Display', M.mul(world, M.t(-0.035, 0.03, 0.026)), node, [
