@@ -12,6 +12,7 @@ import { HarmonyLineView } from './HarmonyLineView'
 import { Transport } from './Transport'
 import { TrackPicker } from './TrackPicker'
 import { ChordView, type ChordMode } from './ChordView'
+import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
 import './workspace.css'
 
@@ -56,6 +57,8 @@ export function Workspace({
   const [click, setClick] = useState(false)
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
+  // A view choice only; it never touches the engine, so playback, mixer and position carry on.
+  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: 'score', drums: 'score' })
   const [noteNames, setNoteNames] = useState(false)
   const [smooth, setSmooth] = useState(false)
   // The accompaniment as played: with smooth voicing, each chord in the inversion nearest the one before (read as C/E).
@@ -417,6 +420,10 @@ export function Workspace({
           <ChordView value={chordMode} onChange={setChordMode} smooth={instrument === 'chords' ? smooth : null} onSmooth={() => setSmooth((v) => !v)} />
         )}
         {track?.id === 'harmony-line' && <HarmonyLineView value={harmony} onChange={setHarmony} />}
+        {!chart && (instrument === 'piano' || instrument === 'drums') && (
+          <PracticeViewPicker instrument={instrument} value={practice[instrument]}
+            onChange={(view) => setPractice((current) => ({ ...current, [instrument]: view }))} />
+        )}
         <TrackPicker
           tracks={tracks}
           stems={visibleStems}
@@ -444,7 +451,7 @@ export function Workspace({
       {chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} onPick={pick} previewId={track?.id ?? 'chords'} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} />
       )}
 
       <footer className="ws-foot">

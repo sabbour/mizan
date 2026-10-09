@@ -29,6 +29,73 @@
 .ws[data-instrument="vocals"] .guide { position: sticky; bottom: 0; width: 100%; flex-shrink: 0; background: white; height: 160px; border-top: 1px solid var(--line); }
 .ws[data-instrument="vocals"] .guide-canvas { width: 100%; max-width: 1320px; height: 125px; display: block; margin: 0 auto; }
 .ws[data-instrument="vocals"] .guide-legend { max-width: 1320px; margin: 8px auto 0; font-size: 12px; color: var(--ink-2); }
+
+/* Practice guides dock under the score like the vocal guide; the score keeps scrolling above them. */
+.practice-view {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: none;
+  width: 100%;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+}
+.practice-hands .practice-canvas { display: block; width: 100%; max-width: 1320px; height: 150px; margin: 0 auto; }
+.practice-kit .practice-stage { position: relative; max-width: 1320px; height: 240px; margin: 0 auto; }
+.practice-kit .practice-canvas { display: block; width: 100%; height: 100%; }
+.kit-label {
+  position: absolute;
+  translate: -50% -100%;
+  margin-top: -16px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.86);
+  color: var(--ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.practice-failure {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--chrome);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: center;
+}
+.practice-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  max-width: 1320px;
+  margin: 6px auto 0;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.practice-note { color: var(--ink-3); }
+.legend-key { display: inline-block; width: 12px; height: 12px; margin-right: -6px; border-radius: 2px; }
+.legend-right { background: var(--accent); }
+.legend-left { background: var(--ink-2); }
+.kit-pill {
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  transition: background-color 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease);
+}
+.kit-pill[data-lit] { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
+@media (prefers-reduced-motion: reduce) { .kit-pill { transition: none; } }
+@media (max-height: 760px) {
+  .practice-hands .practice-canvas { height: 112px; }
+  .practice-kit .practice-stage { height: 176px; }
+}
 .song-analysis { display: block; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
 
 .num {

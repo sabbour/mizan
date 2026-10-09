@@ -276,6 +276,19 @@ try {
   ], 'a change of displayed beat unit at the same quarter tempo gets its own marking')
 
   const { centerDelta } = await vite.ssrLoadModule('/src/workspace/follow.ts')
+  const { suggestFingers } = await vite.ssrLoadModule('/src/workspace/fingers.ts')
+  const scale = [60, 62, 64, 65, 67].map((midi, index) => ({ midi, startBeat: index, beats: 1, hand: 'right' }))
+  const chord = [48, 52, 55].map((midi) => ({ midi, startBeat: 0, beats: 2, hand: 'left' }))
+  const quarterTone = { midi: 64.5, startBeat: 6, beats: 1, hand: 'right' }
+  const handNotes = [...scale, ...chord, quarterTone]
+  const handBefore = structuredClone(handNotes)
+  const fingering = suggestFingers(handNotes)
+  assert.deepEqual(scale.map((note) => fingering.get(note).finger), [1, 2, 3, 4, 5],
+    'a rising five-note right-hand line stays in one hand position from the thumb')
+  assert.deepEqual(chord.map((note) => fingering.get(note).finger), [5, 3, 1],
+    'a left-hand triad spreads 5-3-1 from the bottom, the thumb on top')
+  assert.equal(fingering.get(quarterTone).hand, 'right', 'a microtonal note keeps its hand')
+  assert.deepEqual(handNotes, handBefore, 'finger suggestions never change source notes')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 900, bottom: 1100 }), 600,
     'the active line centre moves to the usable viewport centre')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 350, bottom: 450 }), 0, 'a centred line does not scroll')

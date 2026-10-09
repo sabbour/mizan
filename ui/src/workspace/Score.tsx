@@ -7,6 +7,9 @@ import { barAt, barStart, measures } from './meter'
 import { useFrame, useReducedMotion, useSize } from './hooks'
 import { Guide } from './Guide'
 import { centerDelta, usableSpan } from './follow'
+import { HandsView } from './HandsView'
+import { DrumKitView } from './DrumKitView'
+import type { PracticeView } from './PracticeViewPicker'
 import { notationGrid, notationNotes } from './musicxml'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
@@ -180,6 +183,8 @@ type Props = {
   audioError: boolean
   vocalGuide?: boolean
   instrumentGuide?: string
+  /** A practice guide docked under the score: a keyboard for piano, a 3D kit for drums. */
+  practice?: PracticeView
   onPick: (bar: number, extend: boolean) => void
   previewId: string
 }
@@ -264,7 +269,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -503,6 +508,8 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
       </div>
       {vocalGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="vocals" study showWave={false} />}
       {instrumentGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="other" trackId={instrumentGuide} study showWave={false} />}
+      {practice === 'hands' && instrument === 'piano' && status === 'ready' && <HandsView song={song} engine={engine} />}
+      {practice === 'kit' && instrument === 'drums' && status === 'ready' && <DrumKitView song={song} engine={engine} />}
       {status === 'loading' && (
         <div className="score-skeleton" role="status">
           <span className="visually-hidden">Drawing the score</span>
