@@ -32,8 +32,15 @@ export type MelodyNote = Omit<PianoNote, 'hand'>
 
 export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'snare' | 'floortom' | 'kick'
 
-/** `confidence` is present on automatic transcriptions; imported hits omit it and keep their written rhythm. */
-export type DrumHit = { trackId?: string; lane: DrumLane; startBeat: number; velocity: number; confidence?: number }
+/**
+ * `confidence` is present on automatic transcriptions; imported hits omit it and keep their written rhythm.
+ * `sourceMidi` is the GM percussion pitch the transcriber reported (a specific tom, a pedalled hat); generic
+ * detectors omit it. `articulation` is only set by explicit source metadata or authored lessons, never guessed.
+ */
+export type DrumHit = {
+  trackId?: string; lane: DrumLane; startBeat: number; velocity: number; confidence?: number
+  sourceMidi?: number; articulation?: 'half-open'
+}
 
 /** One transcribed part. A song lists only the parts that were actually transcribed. */
 /** `creative` tracks are generated to play along with, listed apart from the transcribed ones. */

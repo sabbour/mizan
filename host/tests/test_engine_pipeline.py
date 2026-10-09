@@ -578,3 +578,24 @@ def test_direct_audio_403_retries_hls_without_hiding_other_failures(monkeypatch,
     monkeypatch.setattr(media, "run_command", denied)
     with pytest.raises(DownloadFailed, match="429"):
         media.download_video(URL, tmp_path, Event())
+
+
+def test_drum_midi_export_keeps_detected_gm_pitch_only_when_it_matches_the_lane(tmp_path):
+    from mizan.engine.drums import gm_pitch
+    assert gm_pitch({"lane": "hightom", "sourceMidi": 47}) == 47
+    assert gm_pitch({"lane": "hihat", "sourceMidi": 44}) == 44
+    assert gm_pitch({"lane": "hightom"}) == 48
+    # A pitch from another lane, or a non-integer, never overrides the lane.
+    assert gm_pitch({"lane": "snare", "sourceMidi": 47}) == 38
+    assert gm_pitch({"lane": "floortom", "sourceMidi": 43.0}) == 41
+    harmony = analyze_harmony(Audio(np.zeros(22050 * 4), 22050))
+    drums = [{"lane": lane, "onset": onset, "velocity": 0.6, "confidence": 0.4, "possibleLanes": [lane], **extra}
+             for lane, onset, extra in [("hightom", 0.5, {"sourceMidi": 50}), ("floortom", 1.0, {"sourceMidi": 43}),
+                                        ("hihat", 1.5, {"sourceMidi": 44}), ("kick", 2.0, {})]]
+    song = build_song("Kit", URL, 4, harmony, [], drums, {})
+    assert [hit.get("sourceMidi") for hit in song["drums"]] == [50, 43, 44, None]
+    path = tmp_path / "kit.mid"
+    export_midi(song, path)
+    pitches = [message.note for track in mido.MidiFile(path).tracks for message in track
+               if message.type == "note_on" and message.velocity and message.channel == 9]
+    assert pitches == [50, 43, 44, 36]

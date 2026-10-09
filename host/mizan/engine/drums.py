@@ -8,6 +8,22 @@ from .providers import check_cancel
 
 GM_DRUMS = {"kick": 36, "snare": 38, "hihat": 42, "openhat": 46,
             "hightom": 48, "floortom": 41, "ride": 51, "crash": 49}
+# Each GM percussion pitch the transcriber reports, by kit lane; the pitch itself is kept as sourceMidi.
+GM_LANES = {
+    35: "kick", 36: "kick", 38: "snare", 40: "snare",
+    42: "hihat", 44: "hihat", 46: "openhat",
+    41: "floortom", 43: "floortom", 45: "floortom",
+    47: "hightom", 48: "hightom", 50: "hightom",
+    49: "crash", 57: "crash", 51: "ride", 59: "ride",
+}
+
+
+def gm_pitch(hit: dict) -> int:
+    """The detected GM pitch when it belongs to the hit's lane (a specific tom, pedal hat), else the lane's."""
+    source = hit.get("sourceMidi")
+    return source if type(source) is int and GM_LANES.get(source) == hit["lane"] else GM_DRUMS[hit["lane"]]
+
+
 MERGED_CLASSES = {
     "kick": ["kick", "floortom"],
     "snare": ["snare", "hightom"],

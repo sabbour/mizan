@@ -6,7 +6,7 @@ import mido
 
 from ..meter import bar_index, beat_at_time, song_bar_map, time_at_beat
 from .accompaniment import generate_accompaniment
-from .drums import GM_DRUMS
+from .drums import GM_DRUMS, gm_pitch
 
 
 DETECTED_GM_PROGRAMS = {"clean_electric_guitar": 27}
@@ -195,7 +195,7 @@ def export_midi(song: dict, path: Path) -> None:
         for event in sorted(events, key=lambda item: item["startBeat"]):
             start = max(0, round(event["startBeat"] * midi.ticks_per_beat))
             end = max(start + 1, round((event["startBeat"] + event.get("beats", 0.1)) * midi.ticks_per_beat))
-            pitch = GM_DRUMS[event["lane"]] if channel == 9 else event["midi"]
+            pitch = gm_pitch(event) if channel == 9 else event["midi"]
             if fractional and channel != 9:
                 channel = next((value for value in owned if active[value] <= start), None)
                 if channel is None:

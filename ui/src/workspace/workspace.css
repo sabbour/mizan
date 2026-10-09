@@ -42,7 +42,7 @@
   background: #ffffff;
 }
 .practice-hands .practice-canvas { display: block; width: 100%; max-width: 1320px; height: 150px; margin: 0 auto; }
-.practice-kit .practice-stage { position: relative; max-width: 1320px; height: 240px; margin: 0 auto; }
+.practice-kit .practice-stage { position: relative; max-width: 1320px; height: 280px; margin: 0 auto; }
 .practice-kit .practice-canvas { display: block; width: 100%; height: 100%; }
 .kit-label {
   position: absolute;

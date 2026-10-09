@@ -25,6 +25,7 @@ import numpy as np
 from ..errors import InvalidTranscriptionModel, MizanError, ModelFailed, ModelUnavailable
 from ..paths import app_dir
 from .audio import Audio
+from .drums import GM_LANES
 from .providers import check_cancel
 
 MODELS = {
@@ -68,13 +69,7 @@ _active: tuple[str, str] | None = None
 _errors: dict[tuple[str, str], str] = {}
 _speed = 0.0
 _last_sample = (0.0, 0)
-DRUM_LANES = {
-    35: "kick", 36: "kick", 38: "snare", 40: "snare",
-    42: "hihat", 44: "hihat", 46: "openhat",
-    41: "floortom", 43: "floortom", 45: "floortom",
-    47: "hightom", 48: "hightom", 50: "hightom",
-    49: "crash", 57: "crash", 51: "ride", 59: "ride",
-}
+DRUM_LANES = GM_LANES
 
 
 def _spec(model: str) -> dict:

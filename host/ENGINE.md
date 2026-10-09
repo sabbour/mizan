@@ -52,8 +52,13 @@ separated audio** times the stem WAV writes; `diagnostics.separate.inferenceSeco
 retains the HT-Demucs inference time separately.
 
 **Official MuScriptor** maps GM MIDI drum tokens
-to separate lanes in `DRUM_LANES`, including floor tom, high tom, ride, crash
-and open hat. Actual tom events depend on the model's detected notes.
+to separate lanes in `DRUM_LANES` (`drums.GM_LANES`), including floor tom, high
+tom, ride, crash and open hat, and keeps the detected pitch on each hit as
+`sourceMidi`. The practice kit uses it to tell the six GM toms
+(50/48/47/45/43/41) and closed, open and pedalled hats (42/46/44) apart, and
+MIDI export writes it when it belongs to the hit's lane; hits without it stay
+generic lane hits. Half-open hats come only from explicit articulation data.
+Actual tom events depend on the model's detected notes.
 MuScriptor's other instrument labels become individual pitched-note tracks
 through `instrumentNotes` and `tracks`.
 

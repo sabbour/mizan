@@ -326,6 +326,25 @@ try {
     assert.equal(pitched, [8, 1, 7][index], `bar ${index + 1} keeps every sounding note onset`)
   }
   assert.match(heldMeasures[0], /<voice>2<\/voice>/, 'the held chord and the moving line are written as separate voices')
+
+  const { kitStrike, tomRate } = await vite.ssrLoadModule('/src/workspace/kit.ts')
+  const strike = (hit) => kitStrike({ startBeat: 0, velocity: 0.8, ...hit })
+  assert.deepEqual([50, 48, 47].map((sourceMidi) => strike({ lane: 'hightom', sourceMidi }).pieces[0]), ['tom1', 'tom2', 'tom3'])
+  assert.deepEqual([45, 43, 41].map((sourceMidi) => strike({ lane: 'floortom', sourceMidi }).pieces[0]), ['tom4', 'floor1', 'floor2'],
+    'the six GM tom pitches reach six distinct kit pieces')
+  assert.deepEqual(strike({ lane: 'hightom' }), { pieces: ['tom1', 'tom2', 'tom3', 'tom4'], specified: false, foot: false,
+    label: 'Rack tom (which one is unspecified)' }, 'a generic tom stays unspecified instead of naming a drum')
+  assert.equal(strike({ lane: 'hightom', sourceMidi: 41 }).specified, false, 'a floor-tom pitch on the rack lane is not trusted')
+  assert.deepEqual(['hihat:42', 'openhat:46', 'hihat:44', 'hihat:'].map((key) => {
+    const [lane, midi] = key.split(':')
+    return strike({ lane, ...(midi ? { sourceMidi: Number(midi) } : {}) }).hat ?? 'unspecified'
+  }), ['closed', 'open', 'pedal', 'unspecified'], 'hat states come from GM 42/46/44 only; a generic hat claims none')
+  assert.equal(strike({ lane: 'openhat', articulation: 'half-open' }).hat, 'half-open', 'half-open only from explicit articulation')
+  assert.ok(strike({ lane: 'hihat', sourceMidi: 44 }).foot && strike({ lane: 'kick' }).foot)
+  assert.deepEqual([{ lane: 'hightom', sourceMidi: 48 }, { lane: 'floortom', sourceMidi: 41 }, { lane: 'hightom' }].map((hit) => tomRate(hit)),
+    [1, 1, 1], 'lane-default GM toms and generic toms keep their existing sample pitch')
+  assert.ok(tomRate({ lane: 'hightom', sourceMidi: 50 }) > 1 && tomRate({ lane: 'hightom', sourceMidi: 47 }) < 1 &&
+    tomRate({ lane: 'floortom', sourceMidi: 45 }) > tomRate({ lane: 'floortom', sourceMidi: 43 }), 'specific toms are tuned high to low')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

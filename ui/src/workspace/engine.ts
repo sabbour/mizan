@@ -1,6 +1,7 @@
 import type { Stem } from '../library/bridge'
 import { sustainedChords, type DrumHit, type DrumLane, type MelodyNote, type PianoNote, type Song } from './song'
 import { barAt, barStart, measures, pulseBeats, recordingSeconds, songBeats } from './meter'
+import { tomRate } from './kit'
 import { accompanimentRhythm, chordRhythm } from './creative'
 import { Recording } from './recording'
 
@@ -672,6 +673,8 @@ export class Engine {
   private drum(time: number, hit: DrumHit, id: string): void {
     const buffer = this.drumSamples.get(hit.lane)
     if (!buffer) return
+    const pedal = hit.lane === 'hihat' && hit.sourceMidi === 44
+    const half = hit.articulation === 'half-open'
     if (hit.lane === 'hihat') {
       for (const open of this.openHats) {
         try {
@@ -685,11 +688,14 @@ export class Engine {
     const ctx = this.ctx!
     const source = ctx.createBufferSource()
     source.buffer = buffer
+    source.playbackRate.value = tomRate(hit) * (pedal ? 0.85 : 1)
     const gain = ctx.createGain()
-    gain.gain.value = Math.min(1, hit.velocity * (hit.lane === 'crash' ? 0.62 : 0.82))
+    // The pedalled hat is a soft "chick"; a half-open hat rings, but shorter than an open one.
+    gain.gain.value = Math.min(1, hit.velocity * (hit.lane === 'crash' ? 0.62 : 0.82) * (pedal ? 0.5 : 1))
     source.connect(gain).connect(this.bus(id))
-    if (hit.lane === 'openhat') this.openHats.add(source)
-    this.track(source, time, Math.min(time + buffer.duration + 0.02, this.noteBoundary))
+    if (hit.lane === 'openhat' || half) this.openHats.add(source)
+    const ring = pedal ? 0.08 : half ? 0.35 : buffer.duration / source.playbackRate.value
+    this.track(source, time, Math.min(time + ring + 0.02, this.noteBoundary))
   }
 
   private tick(time: number, accent: boolean, gain: number): void {
