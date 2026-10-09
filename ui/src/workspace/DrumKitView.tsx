@@ -98,7 +98,8 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     if (!element) return
     // Visual tests can ask to keep the drawn frame so it can be read back.
     const keep = !!(globalThis as { __mizanKitCapture?: boolean }).__mizanKitCapture
-    const gl = element.getContext('webgl', { antialias: true, stencil: true, preserveDrawingBuffer: keep })
+    // Opaque canvas: blended passes (shadows, translucent parts) must not punch holes through to the page.
+    const gl = element.getContext('webgl', { alpha: false, antialias: true, stencil: true, preserveDrawingBuffer: keep })
     if (!gl) {
       setFailure('The 3D kit needs WebGL, which this device has turned off. The highlighted names below follow the same hits.')
       return
@@ -214,7 +215,6 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     }
     setLabels(placed)
     lastSignature.current = ''
-    ;(globalThis as any).__kitCam = ((globalThis as any).__kitCam ?? 0) + 1
   }, [scene, generation, context, plan])
 
   useFrame(engine, (t) => {
@@ -237,11 +237,12 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     const { selected: chosen } = latest.current
     const signature = `${hat}|${[...chosen].join(',')}|${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${Math.round(Math.min(f.since, 3) * 30)}`).join(',')}`
     if (signature === lastSignature.current) return
-    ;(globalThis as any).__kitSig = signature + ' <- ' + lastSignature.current
     lastSignature.current = signature
     if (current && !failure) {
       const [width, height] = current.size()
       current.renderer.draw(width, height, { hat, feedback, selected: chosen })
+      // Visual tests can read the frame right after it is drawn.
+      ;(globalThis as { __mizanKitFrame?: (canvas: HTMLCanvasElement, state: { hat: string; feedback: typeof feedback }) => void }).__mizanKitFrame?.(canvas.current!, { hat, feedback })
     }
     if (section.current) {
       const lit = [...feedback].filter(([, f]) => f.pulse > 0.05).map(([target]) => target)

@@ -111,8 +111,9 @@ export function loadKit(kit: KitType): Promise<Asset> {
           const full = await createImageBitmap(blob)
           if (full.width <= MAX_TEXTURE && full.height <= MAX_TEXTURE) return full
           const scale = MAX_TEXTURE / Math.max(full.width, full.height)
+          const size = { resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale) }
           full.close()
-          return await createImageBitmap(blob, { resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale), resizeQuality: 'high' })
+          return await createImageBitmap(blob, { ...size, resizeQuality: 'high' })
         } catch {
           return null
         }
