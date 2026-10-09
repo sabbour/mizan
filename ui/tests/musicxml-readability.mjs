@@ -345,6 +345,14 @@ try {
     [1, 1, 1], 'lane-default GM toms and generic toms keep their existing sample pitch')
   assert.ok(tomRate({ lane: 'hightom', sourceMidi: 50 }) > 1 && tomRate({ lane: 'hightom', sourceMidi: 47 }) < 1 &&
     tomRate({ lane: 'floortom', sourceMidi: 45 }) > tomRate({ lane: 'floortom', sourceMidi: 43 }), 'specific toms are tuned high to low')
+  const kitXml = drumXml({ ...buildSong(), bars: 1, chords: [], piano: [], vocals: [], drums: [
+    { lane: 'hightom', startBeat: 0, velocity: 0.8, sourceMidi: 47 }, { lane: 'hihat', startBeat: 1, velocity: 0.5, sourceMidi: 44 },
+    { lane: 'hightom', startBeat: 2, velocity: 0.8 }, { lane: 'kick', startBeat: 3, velocity: 0.8 },
+  ] }, false)
+  const heads = [...kitXml.matchAll(/<display-step>(\w)<\/display-step><display-octave>(\d)<\/display-octave><\/unpitched>(<notehead>[^<]+<\/notehead>)?[\s\S]*?<voice>(\d)<\/voice>/g)]
+    .map(([, step, octave, head, voice]) => `${step}${octave}${head ? 'x' : ''}:${voice}`)
+  assert.deepEqual(heads, ['B4:1', 'E5:1', 'D4x:2', 'F4:2'],
+    'a GM low-mid tom has its own line, the pedalled hat is written with the feet, a generic tom keeps its lane')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

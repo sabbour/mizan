@@ -1,4 +1,4 @@
-import type { DrumLane, Song, Track } from './song'
+import type { DrumHit, DrumLane, Song, Track } from './song'
 import { barAt as measureIndex, barStart, barTempo, measures as meterMeasures } from './meter'
 
 const DIV = 16 // divisions per quarter note
@@ -693,8 +693,27 @@ const DRUM_POS: Record<DrumLane, [string, number, string | null]> = {
   kick: ['F', 4, null],
 }
 
-function drumHead(lane: DrumLane): string {
-  const [step, octave, head] = DRUM_POS[lane]
+/**
+ * Where a hit is written: its lane, or a GM-specific position when the hit names one. The six GM toms get
+ * their own lines and spaces and the pedalled hi-hat is written with the feet below the staff; generic lane
+ * hits keep the lane positions above.
+ */
+type DrumKey = DrumLane | 'pedal' | 'tom50' | 'tom48' | 'tom47' | 'tom45' | 'tom43' | 'tom41'
+const DETAIL_POS: Record<Exclude<DrumKey, DrumLane>, [string, number, string | null]> = {
+  pedal: ['D', 4, 'x'],
+  tom50: ['E', 5, null], tom48: ['D', 5, null], tom47: ['B', 4, null],
+  tom45: ['A', 4, null], tom43: ['G', 4, null], tom41: ['E', 4, null],
+}
+export function drumKey(hit: Pick<DrumHit, 'lane' | 'sourceMidi'>): DrumKey {
+  if (hit.lane === 'hihat' && hit.sourceMidi === 44) return 'pedal'
+  if ((hit.lane === 'hightom' && [50, 48, 47].includes(hit.sourceMidi ?? 0)) ||
+      (hit.lane === 'floortom' && [45, 43, 41].includes(hit.sourceMidi ?? 0))) return `tom${hit.sourceMidi}` as DrumKey
+  return hit.lane
+}
+const footKey = (key: DrumKey) => key === 'kick' || key === 'pedal'
+
+function drumHead(lane: DrumKey): string {
+  const [step, octave, head] = lane in DRUM_POS ? DRUM_POS[lane as DrumLane] : DETAIL_POS[lane as Exclude<DrumKey, DrumLane>]
   return `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>${head ? `<notehead>${head}</notehead>` : ''}`
 }
 
@@ -724,10 +743,10 @@ const pieceXml = (piece: Piece, division: number) => piece.type
   : typeOf(piece.length, division)
 
 /** Hands or feet voice: chorded simultaneous lanes; each written length reaches the next attack. */
-function drumVoice(attacks: Map<number, DrumLane[]>, voiceNo: number, stem: string, barDivs: number, division: number): string {
+function drumVoice(attacks: Map<number, DrumKey[]>, voiceNo: number, stem: string, barDivs: number, division: number): string {
   const positions = [...attacks.keys()].filter((pos) => pos >= 0 && pos < barDivs).sort((a, b) => a - b)
   if (!positions.length) return `<note><rest measure="yes"/><duration>${barDivs}</duration><voice>${voiceNo}</voice><staff>1</staff></note>`
-  const items: { piece: Piece; lanes?: DrumLane[] }[] = []
+  const items: { piece: Piece; lanes?: DrumKey[] }[] = []
   let cursor = 0
   const rest = (from: number, to: number) => { for (const piece of spanPieces(from, to, division)) items.push({ piece }) }
   positions.forEach((pos, index) => {
@@ -835,10 +854,10 @@ export function drumXml(song: Song, chords = true): string {
   const spans = meterMeasures(song)
   const measures: string[] = []
   const written = drumNotationBeats(song)
-  const hitsByBar = new Map<number, { lane: DrumLane; beat: number }[]>()
+  const hitsByBar = new Map<number, { lane: DrumKey; beat: number }[]>()
   song.drums.forEach((hit, index) => {
     const bar = measureIndex(song, written[index])
-    hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { lane: hit.lane, beat: written[index] }])
+    hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { lane: drumKey(hit), beat: written[index] }])
   })
   for (let bar = 1; bar <= song.bars; bar++) {
     const { startDiv, endDiv, points } = grid.bars[bar - 1]
@@ -847,9 +866,9 @@ export function drumXml(song: Song, chords = true): string {
     const position = (beat: number) => points.length
       ? (grid.toDiv(beat) - startDiv) * 3 : Math.round((beat - span.startBeat) * division)
     const attacks = (feet: boolean) => {
-      const map = new Map<number, DrumLane[]>()
+      const map = new Map<number, DrumKey[]>()
       for (const hit of hitsByBar.get(bar - 1) ?? []) {
-        if ((hit.lane === 'kick') !== feet) continue
+        if (footKey(hit.lane) !== feet) continue
         const lanes = map.get(position(hit.beat)) ?? []
         if (!lanes.includes(hit.lane)) lanes.push(hit.lane)
         map.set(position(hit.beat), lanes)

@@ -294,7 +294,7 @@ def export_musicxml(song: dict, path: Path) -> None:
             hits = _track_events(song, track)
             for hit, beat in zip(hits, drum_notation_beats(hits, bar_map)):
                 drum_bars.setdefault(bar_index(bar_map, beat), []).append(
-                    (max(0, round(beat * division)), hit["lane"]))
+                    (max(0, round(beat * division)), drum_key(hit)))
         events = [(max(0, round(event["startBeat"] * division)),
                    max(1, round((event["startBeat"] + event.get("beats", 0.1)) * division)
                        - max(0, round(event["startBeat"] * division))), event)
@@ -369,11 +369,24 @@ def export_musicxml(song: dict, path: Path) -> None:
 
 DRUM_DISPLAY = {"crash": ("A", 5, "x"), "ride": ("F", 5, "x"), "hihat": ("G", 5, "x"),
                 "openhat": ("G", 5, "circle-x"), "hightom": ("E", 5, None), "snare": ("C", 5, None),
-                "floortom": ("A", 4, None), "kick": ("F", 4, None)}
+                "floortom": ("A", 4, None), "kick": ("F", 4, None),
+                # GM detail: the pedalled hat is written with the feet; the six toms get their own positions.
+                "pedal": ("D", 4, "x"), "tom50": ("E", 5, None), "tom48": ("D", 5, None), "tom47": ("B", 4, None),
+                "tom45": ("A", 4, None), "tom43": ("G", 4, None), "tom41": ("E", 4, None)}
 NOTE_TYPES = ((4, "whole", False), (3, "half", True), (2, "half", False), (1.5, "quarter", True),
               (1, "quarter", False), (0.75, "eighth", True), (0.5, "eighth", False), (0.375, "16th", True),
               (0.25, "16th", False), (0.1875, "32nd", True), (0.125, "32nd", False), (0.0625, "64th", False))
 FINE_UNITS = (1 / 16, 1 / 12)
+
+
+def drum_key(hit: dict) -> str:
+    """The notation position for a hit: its lane, or a GM tom or pedalled-hat position it names (as the UI score)."""
+    source = hit.get("sourceMidi")
+    if hit["lane"] == "hihat" and source == 44:
+        return "pedal"
+    if hit["lane"] == "hightom" and source in (50, 48, 47) or hit["lane"] == "floortom" and source in (45, 43, 41):
+        return f"tom{source}"
+    return hit["lane"]
 
 
 def _fine_unit(gap: float) -> float | None:
@@ -486,7 +499,7 @@ def _drum_measure(measure, hits: list[tuple[int, str]], start_tick: int, end_tic
             ET.SubElement(ET.SubElement(measure, "backup"), "duration").text = str(bar_ticks)
         attacks = {}
         for tick, lane in hits:
-            if (lane == "kick") == feet and start_tick <= tick < end_tick:
+            if (lane in ("kick", "pedal")) == feet and start_tick <= tick < end_tick:
                 lanes = attacks.setdefault(tick - start_tick, [])
                 if lane not in lanes:
                     lanes.append(lane)

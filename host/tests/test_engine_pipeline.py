@@ -599,3 +599,22 @@ def test_drum_midi_export_keeps_detected_gm_pitch_only_when_it_matches_the_lane(
     pitches = [message.note for track in mido.MidiFile(path).tracks for message in track
                if message.type == "note_on" and message.velocity and message.channel == 9]
     assert pitches == [50, 43, 44, 36]
+
+
+def test_drum_musicxml_writes_gm_toms_and_the_pedalled_hat_with_the_feet(tmp_path):
+    from xml.etree import ElementTree as ET
+    from mizan.engine.output import drum_key, export_musicxml
+    assert [drum_key(hit) for hit in ({"lane": "hightom", "sourceMidi": 47}, {"lane": "floortom", "sourceMidi": 41},
+                                       {"lane": "hihat", "sourceMidi": 44}, {"lane": "hightom"}, {"lane": "snare", "sourceMidi": 47})] == \
+        ["tom47", "tom41", "pedal", "hightom", "snare"]
+    harmony = analyze_harmony(Audio(np.zeros(22050 * 4), 22050))
+    drums = [{"lane": lane, "onset": onset, "velocity": 0.6, "confidence": 0.4, "possibleLanes": [lane], **extra}
+             for lane, onset, extra in [("hightom", 0.5, {"sourceMidi": 47}), ("hihat", 1.0, {"sourceMidi": 44}),
+                                        ("hightom", 1.5, {})]]
+    song = build_song("Kit", URL, 4, harmony, [], drums, {})
+    path = tmp_path / "kit.musicxml"
+    export_musicxml(song, path)
+    notes = [(note.findtext("unpitched/display-step"), note.findtext("unpitched/display-octave"), note.findtext("voice"),
+              note.findtext("notehead")) for note in ET.parse(path).getroot().iter("note") if note.find("unpitched") is not None]
+    assert ("B", "4", "1", None) in notes and ("E", "5", "1", None) in notes
+    assert ("D", "4", "2", "x") in notes, "the pedalled hat is written in the feet voice below the staff"
