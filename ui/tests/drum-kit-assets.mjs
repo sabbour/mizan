@@ -895,6 +895,90 @@ function measureLod(json, tree, root, getAccessor, issues) {
   return { triangles, bounds: Number.isFinite(bounds.min[0]) ? bounds : null }
 }
 
+function outerRim(json, tree, name, getAccessor, lod, issues) {
+  const index = tree.byName.get(name)
+  const node = index === undefined ? null : json.nodes[index]
+  const world = index === undefined ? null : tree.worlds.get(index)
+  if (!node || node.mesh === undefined || !isIndex(node.mesh, json.meshes?.length ?? 0) || !world) {
+    issue(issues, 'hi-hat-rim-geometry', `LOD${lod} ${name} has no transformable cymbal mesh for rim-clearance validation.`)
+    return null
+  }
+  if (world.some((value) => !Number.isFinite(value))) {
+    issue(issues, 'hi-hat-rim-geometry', `LOD${lod} ${name} has a non-finite world transform.`)
+    return null
+  }
+  const vertices = []
+  let radius = 0
+  for (const prim of json.meshes[node.mesh].primitives ?? []) {
+    const positions = getAccessor(prim.attributes?.POSITION)
+    if (!positions || positions.size !== 3 || !positions.finite) continue
+    const indices = prim.indices === undefined
+      ? Array.from({ length: positions.accessor.count }, (_, i) => i)
+      : getAccessor(prim.indices)?.values ?? []
+    for (const i of indices) {
+      if (!Number.isInteger(i) || i < 0 || i >= positions.accessor.count) continue
+      const local = positions.values.slice(i * 3, i * 3 + 3)
+      const radial = Math.hypot(local[0], local[2])
+      radius = Math.max(radius, radial)
+      vertices.push({ local, radial })
+    }
+  }
+  const rim = vertices.filter(({ radial }) => radial >= radius - 0.001)
+  if (rim.length < 3 || radius <= 0) {
+    issue(issues, 'hi-hat-rim-geometry', `LOD${lod} ${name} has fewer than three outer-rim vertices.`)
+    return null
+  }
+  return { radius, points: rim.map(({ local }) => point(world, local)) }
+}
+
+function checkAcousticHiHatRim(json, tree, getAccessor, lod, issues) {
+  const bottom = outerRim(json, tree, 'HiHat_BottomCymbal', getAccessor, lod, issues)
+  const top = outerRim(json, tree, 'HiHat_TopCymbal', getAccessor, lod, issues)
+  if (!bottom || !top) return
+  const topIndex = tree.byName.get('HiHat_TopCymbal')
+  const topNode = json.nodes[topIndex]
+  const axis = topNode.extras?.travelAxis
+  const states = topNode.extras?.states
+  if (!Array.isArray(axis) || axis.length !== 3 || axis.some((x) => !Number.isFinite(x)) || Math.hypot(...axis) < 1e-8 ||
+      !states || !['fullyOpen', 'partiallyOpen', 'closed', 'pedalClosed'].every((state) => Number.isFinite(states[state]))) {
+    issue(issues, 'hi-hat-rim-state', `LOD${lod} HiHat_TopCymbal must declare a valid travelAxis and all four state offsets.`)
+    return
+  }
+  const transformedAxis = direction(tree.worlds.get(topIndex), axis)
+  if (transformedAxis.some((value) => !Number.isFinite(value)) || Math.hypot(...transformedAxis) < 1e-8) {
+    issue(issues, 'hi-hat-rim-state', `LOD${lod} HiHat_TopCymbal has an invalid world-space travel axis.`)
+    return
+  }
+  const travel = normalize(transformedAxis)
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const project = (p) => dot(p, travel)
+  const bottomHigh = Math.max(...bottom.points.map(project))
+  const center = (points) => [0, 1, 2].map((k) => points.reduce((sum, p) => sum + p[k], 0) / points.length)
+  const topCenter = center(top.points), bottomCenter = center(bottom.points)
+  const delta = topCenter.map((x, k) => x - bottomCenter[k])
+  const lateral = Math.hypot(...delta.map((x, k) => x - travel[k] * dot(delta, travel)))
+  if (lateral > 0.01 || Math.abs(top.radius - bottom.radius) > 0.005) {
+    issue(issues, 'hi-hat-rim-alignment', `LOD${lod} hi-hat outer rims do not share the pull-rod axis and radius (offset ${lateral.toFixed(3)} m, radii ${bottom.radius.toFixed(3)}/${top.radius.toFixed(3)} m).`)
+  }
+  const gaps = {}
+  for (const state of ['fullyOpen', 'partiallyOpen', 'closed', 'pedalClosed']) {
+    const offset = states[state]
+    const topLow = Math.min(...top.points.map((p) => project(p) + offset))
+    gaps[state] = topLow - bottomHigh
+  }
+  for (const state of ['closed', 'pedalClosed']) {
+    if (gaps[state] < -0.003 - 1e-6 || gaps[state] > 0.005 + 1e-6) {
+      issue(issues, 'hi-hat-rim-clearance', `LOD${lod} ${state} outer-rim clearance is ${gaps[state].toFixed(4)} m; cymbals must meet within -0.003–0.005 m.`)
+    }
+  }
+  if (gaps.partiallyOpen <= 0.005 || gaps.partiallyOpen <= gaps.closed + 0.005) {
+    issue(issues, 'hi-hat-rim-clearance', `LOD${lod} partiallyOpen outer-rim clearance is ${gaps.partiallyOpen.toFixed(4)} m; it must clear the closed rims.`)
+  }
+  if (gaps.fullyOpen <= gaps.partiallyOpen + 0.005) {
+    issue(issues, 'hi-hat-rim-clearance', `LOD${lod} fullyOpen outer-rim clearance is ${gaps.fullyOpen.toFixed(4)} m; it must exceed partiallyOpen clearance.`)
+  }
+}
+
 function checkBudgets(profile, triangles, issues) {
   triangles.forEach((count, lod) => {
     const [min, max] = profile.budgets[lod]
@@ -945,6 +1029,7 @@ function checkLods(json, rootIndex, profile, bin, issues) {
   const metrics = trees.map((tree, i) => {
     checkHierarchy(tree, profile, issues)
     checkScale(json, tree, issues)
+    if (profile.root === 'AcousticDrumKit') checkAcousticHiHatRim(json, tree, getAccessor, i, issues)
     if (i > 0) {
       const base = trees[0]
       for (const name of stableNames) {
@@ -1111,6 +1196,38 @@ function fixtureDocument({ positions = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1], ind
   return { json, bin, bytes: makeFixtureGlb(json, bin) }
 }
 
+function hiHatRimFixture(topY, samples) {
+  const radius = 0.1789, rimY = -0.04181107133626938
+  const positions = []
+  for (let i = 0; i < samples; i++) {
+    const angle = (i / samples) * Math.PI * 2
+    positions.push(radius * Math.cos(angle), rimY, radius * Math.sin(angle))
+  }
+  positions.push(0.17, -0.04271107167005539, 0)
+  const bin = Buffer.alloc(positions.length * 4)
+  positions.forEach((value, i) => bin.writeFloatLE(value, i * 4))
+  const json = {
+    asset: { version: '2.0' }, buffers: [{ byteLength: bin.length }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+    accessors: [{
+      bufferView: 0, componentType: 5126, count: positions.length / 3, type: 'VEC3',
+      min: [0, 1, 2].map((k) => Math.min(...positions.filter((_, i) => i % 3 === k))),
+      max: [0, 1, 2].map((k) => Math.max(...positions.filter((_, i) => i % 3 === k))),
+    }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    nodes: [
+      { name: 'AcousticDrumKit', children: [1] },
+      { name: 'HiHat', children: [2, 3] },
+      { name: 'HiHat_BottomCymbal', translation: [0, 0.86, 0], rotation: [1, 0, 0, 0], mesh: 0 },
+      {
+        name: 'HiHat_TopCymbal', translation: [0, topY, 0], mesh: 0,
+        extras: { travelAxis: [0, 1, 0], states: { fullyOpen: 0.02, partiallyOpen: 0, closed: -0.013, pedalClosed: -0.0152 } },
+      },
+    ],
+  }
+  return { json, bin }
+}
+
 function traversalFixture() {
   const chunks = [], bufferViews = [], accessors = []
   let byteLength = 0
@@ -1206,6 +1323,29 @@ function selfTest() {
     [1, 1, 1, 0],
     'valid GLB traversal counts must distinguish meshes, primitives, analyzed data, and skips',
   )
+
+  const rimY = -0.04181107133626938, localMinY = -0.04271107167005539
+  const oldPose = hiHatRimFixture(0.875, 12)
+  const oldPoseTree = collectTree(oldPose.json, 0)
+  const oldPoseIssues = []
+  checkAcousticHiHatRim(oldPose.json, oldPoseTree, makeAccessorReader(oldPose.json, oldPose.bin, oldPoseIssues), 0, oldPoseIssues)
+  const legacyGap = (0.875 - 0.013 + localMinY) - (0.86 + localMinY)
+  const transformedGap = (0.875 - 0.013 + rimY) - (0.86 - rimY)
+  assert(Math.abs(legacyGap - 0.002) < 1e-8, 'the old unrotated local-minY check should see the wrong rest pose as a 2 mm gap')
+  assert(oldPoseIssues.some((x) => x.code === 'hi-hat-rim-clearance' && x.message.includes('closed') && x.message.includes(transformedGap.toFixed(4))),
+    'the quaternion-aware outer-rim check must reject the same flipped-bell pose as penetrating by about 82 mm')
+
+  const closedOffset = -0.013
+  const bottomRimY = 0.86 - rimY
+  const validTopY = bottomRimY + 0.005 - rimY - closedOffset
+  for (const [lod, samples] of [12, 8, 5].entries()) {
+    const fixture = hiHatRimFixture(validTopY, samples)
+    const fixtureIssues = []
+    const fixtureTree = collectTree(fixture.json, 0, fixtureIssues)
+    checkAcousticHiHatRim(fixture.json, fixtureTree, makeAccessorReader(fixture.json, fixture.bin, fixtureIssues), lod, fixtureIssues)
+    assert.deepEqual(fixtureIssues, [], `flipped closed, pedal-closed, half-open, and open poses should pass LOD${lod}`)
+  }
+  console.log(`Hi-hat rim regression: legacy unrotated gap ${legacyGap.toFixed(3)} m passes; transformed flipped-rim gap ${transformedGap.toFixed(3)} m fails; valid flipped contact/clearance passes LOD0/1/2.`)
 
   const traversal = traversalFixture()
   const traversalIssues = []
