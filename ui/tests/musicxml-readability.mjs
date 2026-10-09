@@ -240,6 +240,19 @@ try {
     { lane: 'snare', startBeat: 2.125, velocity: 1, confidence: 0.4 },
     { lane: 'snare', startBeat: 3.125, velocity: 1 },
   ] }), [2, 2.125, 3.125], 'a genuine 32nd figure and imported rhythms are not coarsened')
+  const roll = [0, 1, 2, 3, 4].map((step) => ({ lane: 'snare', startBeat: 1 + step / 16 + (step % 2 ? 0.004 : -0.003), velocity: 0.7, confidence: 0.4 }))
+  const triplets = Array.from({ length: 12 }, (_, step) => ({ lane: 'hihat', startBeat: step / 3 + (step % 2 ? 0.02 : -0.015 * (step > 0)), velocity: 0.6, confidence: 0.4 }))
+  const fineSong = { ...drumSong, drums: [...roll, ...triplets] }
+  const fineBefore = structuredClone(fineSong.drums)
+  const fineWritten = drumNotationBeats(fineSong)
+  assert.deepEqual(fineWritten.slice(0, 5), [1, 1.0625, 1.125, 1.1875, 1.25], 'a recurring 64th roll keeps distinct 64th attacks')
+  assert.ok(fineWritten.slice(5).every((beat, step) => Math.abs(beat - step / 3) < 1e-9), 'recurring eighth triplets keep exact triplet attacks')
+  const fineScore = drumXml(fineSong, false)
+  assert.ok((fineScore.match(/<actual-notes>3<\/actual-notes><normal-notes>2<\/normal-notes>/g) ?? []).length >= 10,
+    'triplet attacks are written as 3:2 triplet values')
+  assert.match(fineScore, /<type>64th<\/type>/, 'the roll is written with 64th values')
+  assert.doesNotMatch(fineScore, /<actual-notes>(?!3<)/, 'no irregular tuplet ratios are invented')
+  assert.deepEqual(fineSong.drums, fineBefore, 'fine-figure engraving keeps source playback beats')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

@@ -342,30 +342,64 @@ DRUM_DISPLAY = {"crash": ("A", 5, "x"), "ride": ("F", 5, "x"), "hihat": ("G", 5,
 NOTE_TYPES = ((4, "whole", False), (3, "half", True), (2, "half", False), (1.5, "quarter", True),
               (1, "quarter", False), (0.75, "eighth", True), (0.5, "eighth", False), (0.375, "16th", True),
               (0.25, "16th", False), (0.1875, "32nd", True), (0.125, "32nd", False), (0.0625, "64th", False))
+FINE_UNITS = (1 / 16, 1 / 12)
+
+
+def _fine_unit(gap: float) -> float | None:
+    """The 64th or 16th-triplet grid that a recurring fine figure fits, if any."""
+    best = None
+    for unit in FINE_UNITS:
+        steps = math.floor(gap / unit + 0.5)
+        error = abs(gap / unit - steps)
+        if steps >= 1 and error <= 0.15 and (best is None or error < best[1] - 1e-9):
+            best = (unit, error)
+    return best[0] if best else None
 
 
 def drum_notation_beats(hits: list[dict], bar_map: list[dict]) -> list[float]:
     """Written beats matching the workspace drum score; source ``startBeat`` stays the playback time.
 
-    Automatic hits (those with a ``confidence``) move to their bar's sixteenth grid (halves round up,
-    like the workspace). Consecutive same-lane hits 0.1-0.2 beat apart are a genuine fast figure and
-    keep their source beats; closer ones are one written hit. Imported hits keep their rhythm.
+    Automatic hits (those with a ``confidence``) move to their bar's sixteenth grid (halves round
+    up, like the workspace), which removes timing jitter. A same-lane fine figure is kept instead:
+    three or more hits with consistent spacing of 0.05-0.2 beat or off the sixteenth grid
+    (64th rolls, triplets), or an isolated pair 0.1-0.2 beat apart, whose spacing fits the 64th or
+    16th-triplet grid; its hits snap to that grid. Spacing that fits neither is treated as jitter,
+    and closer isolated hits are one written hit. Imported hits keep their written rhythm.
     """
-    written = []
-    for hit in hits:
-        beat = hit["startBeat"]
+    def bar_snap(beat, unit):
         bar = bar_map[bar_index(bar_map, beat)]
-        snapped = bar["startBeat"] + math.floor((beat - bar["startBeat"]) * 4 + 0.5) / 4
-        written.append(snapped if isinstance(hit.get("confidence"), (int, float))
-                       and bar["startBeat"] <= snapped < bar["startBeat"] + bar["beats"] - 1e-9 else beat)
+        snapped = bar["startBeat"] + math.floor((beat - bar["startBeat"]) / unit + 0.5) * unit
+        return snapped if bar["startBeat"] <= snapped < bar["startBeat"] + bar["beats"] - 1e-9 else beat
+
+    automatic = [isinstance(hit.get("confidence"), (int, float)) for hit in hits]
+    written = [bar_snap(hit["startBeat"], 0.25) if automatic[index] else hit["startBeat"]
+               for index, hit in enumerate(hits)]
     lanes = {}
     for index, hit in enumerate(hits):
-        lanes.setdefault((hit.get("trackId"), hit["lane"]), []).append(index)
+        if automatic[index]:
+            lanes.setdefault((hit.get("trackId"), hit["lane"]), []).append(index)
     for indexes in lanes.values():
         indexes.sort(key=lambda index: hits[index]["startBeat"])
-        for left, right in zip(indexes, indexes[1:]):
-            if 0.1 <= hits[right]["startBeat"] - hits[left]["startBeat"] < 0.2:
-                written[left], written[right] = hits[left]["startBeat"], hits[right]["startBeat"]
+        beats = [hits[index]["startBeat"] for index in indexes]
+        start = 0
+        while start < len(indexes) - 1:
+            first_gap = beats[start + 1] - beats[start]
+            stop = start + 1
+            while stop + 1 < len(indexes) and abs(beats[stop + 1] - beats[stop] - first_gap) <= max(0.2 * first_gap, 0.03):
+                stop += 1
+            gap = (beats[stop] - beats[start]) / (stop - start)
+            count = stop - start + 1
+            off_grid = abs(gap - math.floor(gap * 4 + 0.5) / 4) > 0.05
+            unit = _fine_unit(gap) if gap >= 0.05 else None
+            if unit and (count >= 3 and (gap < 0.2 or off_grid) or count == 2 and 0.1 <= gap < 0.2):
+                positions = [bar_snap(beat, unit) for beat in beats[start:stop + 1]]
+                if any(right <= left for left, right in zip(positions, positions[1:])):
+                    positions = beats[start:stop + 1]
+                for step, value in zip(range(start, stop + 1), positions):
+                    written[indexes[step]] = value
+                start = stop + 1
+            else:
+                start = max(stop if count >= 3 else start + 1, start + 1)
     groups = {}
     for index, hit in enumerate(hits):
         groups.setdefault((hit.get("trackId"), hit["lane"], written[index]), []).append(index)
@@ -377,17 +411,40 @@ def drum_notation_beats(hits: list[dict], bar_map: list[dict]) -> list[float]:
     return written
 
 
-def _note_pieces(ticks: int, division: int) -> list[tuple[int, str | None, bool]]:
-    pieces = []
-    while ticks > 0:
-        match = next(((round(beats * division), name, dot) for beats, name, dot in NOTE_TYPES
-                      if round(beats * division) <= ticks and beats * division == round(beats * division)), None)
+def _standard(division: int) -> list[tuple[int, str, bool]]:
+    return [(round(beats * division), name, dot) for beats, name, dot in NOTE_TYPES
+            if beats * division == round(beats * division)]
+
+
+def _span_pieces(start: int, end: int, division: int) -> list[tuple[int, str | None, bool, bool]]:
+    """Standard values for a span, split at beats when needed; 3:2 triplets where exact."""
+    standard = _standard(division)
+    pieces, left = [], end - start
+    while left > 0:
+        match = next((value for value in standard if value[0] <= left), None)
         if match is None:
-            pieces.append((ticks, None, False))
             break
-        pieces.append(match)
-        ticks -= match[0]
-    return pieces
+        pieces.append((*match, False))
+        left -= match[0]
+    if not left:
+        return pieces
+    boundary = (start // division + 1) * division
+    if start < boundary < end:
+        return _span_pieces(start, boundary, division) + _span_pieces(boundary, end, division)
+    triplet = next((value for value in standard if value[0] * 2 == (end - start) * 3), None)
+    return [(end - start, triplet[1], triplet[2], True)] if triplet else pieces + [(left, None, False, False)]
+
+
+def _note_value(note, piece) -> None:
+    _, name, dot, triplet = piece
+    if name:
+        ET.SubElement(note, "type").text = name
+        if dot:
+            ET.SubElement(note, "dot")
+        if triplet:
+            modification = ET.SubElement(note, "time-modification")
+            ET.SubElement(modification, "actual-notes").text = "3"
+            ET.SubElement(modification, "normal-notes").text = "2"
 
 
 def _drum_measure(measure, hits: list[tuple[int, str]], start_tick: int, end_tick: int, division: int) -> None:
@@ -405,42 +462,35 @@ def _drum_measure(measure, hits: list[tuple[int, str]], start_tick: int, end_tic
         positions = sorted(attacks)
         cursor = 0
 
-        def rest(ticks):
-            pieces = [(ticks, None, False)] if ticks == bar_ticks else _note_pieces(ticks, division)
-            for length, name, dot in pieces:
+        def rest(first, last):
+            pieces = ([(bar_ticks, None, False, False)] if last - first == bar_ticks
+                      else _span_pieces(first, last, division))
+            for piece in pieces:
                 note = ET.SubElement(measure, "note")
-                ET.SubElement(note, "rest", **({"measure": "yes"} if ticks == bar_ticks else {}))
-                ET.SubElement(note, "duration").text = str(length)
+                ET.SubElement(note, "rest", **({"measure": "yes"} if last - first == bar_ticks else {}))
+                ET.SubElement(note, "duration").text = str(piece[0])
                 ET.SubElement(note, "voice").text = str(number)
-                if name:
-                    ET.SubElement(note, "type").text = name
-                    if dot:
-                        ET.SubElement(note, "dot")
+                _note_value(note, piece)
 
         for index, position in enumerate(positions):
             if position > cursor:
-                rest(position - cursor)
+                rest(cursor, position)
             following = positions[index + 1] if index + 1 < len(positions) else bar_ticks
-            first, *remainder = _note_pieces(following - position, division)
+            head = _span_pieces(position, following, division)[0]
             for chord, lane in enumerate(attacks[position]):
-                step, octave, head = DRUM_DISPLAY.get(lane, ("C", 5, None))
+                step, octave, notehead = DRUM_DISPLAY.get(lane, ("C", 5, None))
                 note = ET.SubElement(measure, "note")
                 if chord:
                     ET.SubElement(note, "chord")
                 unpitched = ET.SubElement(note, "unpitched")
                 ET.SubElement(unpitched, "display-step").text = step
                 ET.SubElement(unpitched, "display-octave").text = str(octave)
-                ET.SubElement(note, "duration").text = str(first[0])
+                ET.SubElement(note, "duration").text = str(head[0])
                 ET.SubElement(note, "voice").text = str(number)
-                if first[1]:
-                    ET.SubElement(note, "type").text = first[1]
-                    if first[2]:
-                        ET.SubElement(note, "dot")
+                _note_value(note, head)
                 ET.SubElement(note, "stem").text = "down" if feet else "up"
-                if head:
-                    ET.SubElement(note, "notehead").text = head
-            if remainder:
-                rest(sum(length for length, _, _ in remainder))
-            cursor = following
+                if notehead:
+                    ET.SubElement(note, "notehead").text = notehead
+            cursor = position + head[0]
         if cursor < bar_ticks:
-            rest(bar_ticks - cursor)
+            rest(cursor, bar_ticks)

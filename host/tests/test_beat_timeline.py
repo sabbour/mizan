@@ -9,7 +9,7 @@ from mizan.engine.audio import Audio
 from mizan.engine.harmony import activation_beat_grid, analyze_harmony, clean_beats, downbeat_meter
 from mizan.engine.models import BEAT_THIS
 from mizan.engine.output import build_song, drum_notation_beats, export_midi, export_musicxml
-from mizan.meter import beat_at_time, song_bar_map, time_at_beat
+from mizan.meter import beat_at_time, build_bar_map, song_bar_map, time_at_beat
 
 
 def logits(beats, downbeats, duration, fps=50.0):
@@ -184,3 +184,70 @@ def test_drum_musicxml_uses_standard_values_and_chords(tmp_path):
     assert [(note.find("rest") is not None, note.findtext("type"), note.find("dot") is not None)
             for note in feet] == [(False, "half", False), (True, "eighth", False), (False, "quarter", True)]
     assert sum(int(note.findtext("duration")) for note in feet) == 4 * 480
+
+@pytest.mark.parametrize("length", [9, 10, 13])
+def test_stable_long_tracked_groups_are_not_shortened(length):
+    meter = downbeat_meter(list(range(0, length * 20, length)), 0.95)
+    assert meter["supported"] and meter["boundariesVerified"] and meter["beatsPerBar"] == length
+    assert [(change["startBeat"], change["numerator"]) for change in meter["changes"]] == [(0.0, length)]
+
+
+@pytest.mark.parametrize("short,long", [(3, 6), (4, 8)])
+def test_sustained_multiple_groups_stay_long_but_unverified(short, long):
+    counts = [short] * 8 + [long] * 6
+    indices = np.r_[0, np.cumsum(counts)].tolist()
+    meter = downbeat_meter(indices, 0.95)
+    assert meter["supported"] and not meter["boundariesVerified"]
+    bars = build_bar_map(sum(counts), meter["changes"])
+    assert [bar["beats"] for bar in bars] == counts
+    assert all(bar["status"] == "unverified" for bar in bars)
+    # Weak downbeat activation in the middle of each long group is observed evidence of the short bar.
+    activation = np.full(sum(counts) + 1, -10.0)
+    activation[indices] = 8
+    activation[[index + short for index in indices[8:-1]]] = -1
+    evidenced = downbeat_meter(indices, 0.95, activation.tolist())
+    assert evidenced["evidence"]["recoveredWeakDownbeats"] == 6
+    assert [(change["startBeat"], change["numerator"]) for change in evidenced["changes"]] == [(0.0, short)]
+    assert evidenced["boundariesVerified"]
+
+
+@pytest.mark.parametrize("pickup", [1e-7, 1e-10])
+def test_tiny_positive_pickup_keeps_exact_coverage(pickup):
+    total = 4 + pickup
+    bars = build_bar_map(total, [{"startBeat": 0, "numerator": 4, "denominator": 4}], pickup=pickup)
+    assert bars[0] == {"startBeat": 0.0, "beats": pickup, "numerator": 4, "denominator": 4,
+                       "status": "explicit", "partial": True}
+    assert bars[1]["startBeat"] == pickup and bars[-1]["startBeat"] + bars[-1]["beats"] == total
+
+
+def test_pickup_with_whole_bars_and_a_later_change():
+    bars = build_bar_map(19, [{"startBeat": 0, "numerator": 4, "denominator": 4},
+                              {"startBeat": 8, "numerator": 3, "denominator": 4}], pickup=6)
+    assert [(bar["startBeat"], bar["beats"], bar["numerator"], bool(bar.get("partial"))) for bar in bars] == [
+        (0.0, 2.0, 4, True), (2.0, 4, 4, False), (6, 4, 4, False), (10, 4, 4, False),
+        (14, 3, 3, False), (17, 2, 3, True)]
+    assert build_bar_map(16, [{"startBeat": 0, "numerator": 4, "denominator": 4}], pickup=8)[0]["beats"] == 4
+
+def test_drum_fine_figures_roll_and_triplets_keep_distinct_attacks(tmp_path):
+    bars = [{"startBeat": 0.0, "beats": 4.0, "numerator": 4, "denominator": 4}]
+    roll = [{"lane": "snare", "startBeat": 1 + step / 16 + (0.004 if step % 2 else -0.003),
+             "velocity": 0.7, "confidence": 0.4} for step in range(5)]
+    triplets = [{"lane": "hihat", "startBeat": step / 3 + (0.02 if step % 2 else -0.015 * (step > 0)),
+                 "velocity": 0.6, "confidence": 0.4} for step in range(12)]
+    jittered = [{"lane": "ride", "startBeat": step / 2 + (0.06 if step % 2 else -0.04 * (step > 0)),
+                 "velocity": 0.6, "confidence": 0.4} for step in range(8)]
+    hits = roll + triplets + jittered
+    snapshot = json.dumps(hits)
+    written = drum_notation_beats(hits, bars)
+    assert written[:5] == [1 + step / 16 for step in range(5)]
+    assert written[5:17] == pytest.approx([step / 3 for step in range(12)], abs=1e-9)
+    assert written[17:] == [step / 2 for step in range(8)]
+    assert json.dumps(hits) == snapshot
+    song = {"bpm": 120, "bars": 1, "beatsPerBar": 4, "beatUnit": 4,
+            "tracks": [{"id": "drums", "instrument": "drums", "name": "Drum kit"}], "drums": hits}
+    export_musicxml(song, tmp_path / "fine.musicxml")
+    notes = ET.parse(tmp_path / "fine.musicxml").find(".//part[@id='drums']/measure").findall("note")
+    triplet_heads = [note for note in notes if note.find("time-modification") is not None and note.find("rest") is None]
+    assert len(triplet_heads) >= 10
+    assert sum(note.findtext("type") == "64th" for note in notes if note.find("rest") is None) >= 4
+    assert all(note.findtext("type") for note in notes if note.find("rest") is None)

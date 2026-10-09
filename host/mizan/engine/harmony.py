@@ -200,6 +200,9 @@ def activation_beat_grid(beat: np.ndarray, downbeat: np.ndarray, fps: float) -> 
     return {"bpm": round(60 / period, 3), "confidence": round(max(0.0, confidence), 3),
             "times": beat_times.tolist(), "phaseSeconds": float(beat_times[0]),
             "downbeats": beat_times[indices].tolist(), "downbeatIndices": indices,
+            "downbeatActivation": [round(float(downbeat[max(0, int(round(float(time) * fps)) - 2):
+                                                         int(round(float(time) * fps)) + 3].max()), 2)
+                                   for time in beat_times],
             "downbeatSource": "beat-this", "meterConfidence": 0.0, "beatsTracked": True,
             "cleanup": {**cleanup, "rawBeats": len(raw), "rawDownbeats": len(downbeat_times)}}
 
@@ -358,18 +361,30 @@ def inferred_beats_per_bar(timing: dict) -> float:
     return infer_meter(timing)["beatsPerBar"]
 
 
-def _literal_runs(counts: list[int], primary: int) -> set[int]:
-    """Intervals that form sustained or alternating groups unrelated to the primary bar."""
+def _literal_runs(counts: list[int], primary: int) -> tuple[set[int], set[int], int]:
+    """Intervals that form sustained or alternating groups other than the primary bar.
+
+    Returns literal intervals, the literal intervals that are whole multiples of the primary
+    group (a longer bar or regularly missed downbeats, so ambiguous), and the number of
+    sustained shorter divisor runs (extra downbeats or shorter bars, also ambiguous).
+    """
     def distinct(value):
-        return 2 <= value <= 12 and value % primary and primary % value
-    literal = set()
+        return value >= 2 and value % primary and primary % value
+    literal, multiples = set(), set()
+    divisor_runs = 0
     index = 0
     while index < len(counts):
         stop = index
         while stop < len(counts) and counts[stop] == counts[index]:
             stop += 1
-        if stop - index >= 3 and distinct(counts[index]):
+        value = counts[index]
+        if stop - index >= 3 and distinct(value):
             literal.update(range(index, stop))
+        elif stop - index >= 4 and value > primary and value % primary == 0:
+            literal.update(range(index, stop))
+            multiples.update(range(index, stop))
+        elif stop - index >= 4 and 2 <= value < primary and primary % value == 0:
+            divisor_runs += 1
         index = max(stop, index + 1)
     for index in range(len(counts) - 5):
         pattern = counts[index:index + 2]
@@ -378,18 +393,22 @@ def _literal_runs(counts: list[int], primary: int) -> set[int]:
             while stop < len(counts) and counts[stop] == pattern[(stop - index) % 2]:
                 stop += 1
             literal.update(range(index, stop))
-    return literal
+    return literal, multiples, divisor_runs
 
 
-def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
+def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[float] | None = None) -> dict:
     """Bar groups from whole tracked beats between observed downbeats.
 
     The primary group is the most frequent observed bar; isolated tracker errors do not
     become one-off signatures, a sustained phase shift leaves an unverified partial bar,
-    and only sustained or alternating different groups become signature changes.
+    and only sustained or alternating different groups become signature changes. Inside an
+    interval spanning several primary bars, a beat whose downbeat ``activation`` exceeds the
+    song's ordinary beats (90th percentile) is an observed weak downbeat; without that evidence
+    a sustained long group is kept as an unverified longer bar rather than split.
     """
+    indices = [int(value) for value in indices]
     counts = [int(value) for value in np.diff(indices)] if len(indices) > 1 else []
-    usable = Counter(value for value in counts if 2 <= value <= 12)
+    usable = Counter(value for value in counts if value >= 2)
     base = {
         "method": "tracked-downbeat-beat-count-v1",
         "confidenceMeaning": "share of observed downbeat intervals explained by the bar groups; not calibrated",
@@ -404,10 +423,21 @@ def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
                 "changes": [{"startBeat": 0.0, "numerator": 4, "denominator": 4, "status": "unverified"}],
                 "evidence": {"intervals": len(counts)}, "candidates": {}}
     primary = max(sorted(usable), key=lambda value: (usable[value], -value))
-    halved = primary > 7 and any(primary % factor == 0 for factor in (2, 3))
-    if halved:
-        primary //= 2 if primary % 2 == 0 else 3
-    literal = _literal_runs(counts, primary)
+    recovered = 0
+    if activation is not None and len(activation) > indices[-1]:
+        marked = set(indices)
+        middles = {index + primary * step for index, count in zip(indices, counts)
+                   if count > primary and count % primary == 0 for step in range(1, count // primary)}
+        ordinary = [activation[index] for index in range(indices[0], indices[-1])
+                    if index not in marked and index not in middles]
+        if middles and len(ordinary) >= 8:
+            threshold = float(np.percentile(ordinary, 90))
+            weak = {index for index in middles if activation[index] > threshold}
+            if weak:
+                recovered = len(weak)
+                indices = sorted(marked | weak)
+                counts = [int(value) for value in np.diff(indices)]
+    literal, multiples, divisor_runs = _literal_runs(counts, primary)
     anchor, cursor = indices[0], indices[0]
     changes = []
     explained = missing = shifts = subdivisions = 0
@@ -434,7 +464,7 @@ def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
             if cursor != start:
                 cursor = shift(start)
                 shifts += 1
-            mark(cursor, count, "supported")
+            mark(cursor, count, "unverified" if position in multiples else "supported")
             cursor = target
             explained += 1
             continue
@@ -467,7 +497,8 @@ def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
                                                "status": "unverified"}],
                 "evidence": {"intervals": len(counts), "explained": explained},
                 "candidates": {f"{value}/4": count for value, count in usable.items()}}
-    verified = not halved and not shifts and missing <= max(1, len(counts) // 4)
+    verified = (not shifts and not multiples and not divisor_runs
+                and missing <= max(1, len(counts) // 4))
     if not verified:
         changes = [{**change, "status": "unverified"} for change in changes]
     return {
@@ -475,8 +506,9 @@ def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
         "fallback": False, "boundariesVerified": verified, "reason": "downbeat_spacing_supports_meter",
         "anchor": anchor, "changes": changes,
         "evidence": {"intervals": len(counts), "explained": explained, "missingBoundaries": missing,
-                     "phaseShifts": shifts, "halvedLongGroup": halved,
-                     "literalGroups": len(literal)},
+                     "phaseShifts": shifts, "literalGroups": len(literal),
+                     "recoveredWeakDownbeats": recovered,
+                     "ambiguousMultipleGroups": len(multiples), "ambiguousShorterRuns": divisor_runs},
         "candidates": {f"{value}/4": count for value, count in usable.items()},
     }
 
@@ -947,7 +979,7 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
                 if abs(beats[index] - value) <= 0.3 * float(np.median(np.diff(beats))) \
                         and (not indices or indices[-1] < index):
                     indices.append(index)
-        meter = downbeat_meter(indices, timing["beatConfidence"])
+        meter = downbeat_meter(indices, timing["beatConfidence"], timing.get("downbeatActivation"))
         timeline = beat_timeline(beats, meter.pop("anchor"), duration)
         tempo_map, bpm, pickup = timeline["tempoMap"], timeline["bpm"], timeline["pickup"]
         total_beats = timeline["totalBeats"]

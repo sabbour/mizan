@@ -47,26 +47,29 @@ def build_bar_map(total_beats: float, changes: list[dict], pickup: float = 0.0) 
     """
     if not _finite(pickup) or pickup < 0:
         raise ValueError("A pickup must be a finite, non-negative beat count.")
-    if pickup > 1e-9:
+    if pickup > 0:
         if not changes or changes[0].get("startBeat") != 0:
             raise ValueError("The bar map's first meter must start at beat zero.")
         if pickup >= total_beats:
             raise ValueError("A pickup must end before the bar map does.")
         first = changes[0]
         nominal = signature_beats(first["numerator"], first["denominator"])
-        partial = pickup % nominal
-        if math.isclose(partial, nominal, abs_tol=1e-6) or partial < 1e-6:
-            partial = 0.0
+        whole = math.floor(pickup / nominal)
+        partial = pickup - whole * nominal
+        if partial < 0:
+            whole -= 1
+            partial += nominal
         lead = ([{"startBeat": 0.0, "beats": partial, "numerator": first["numerator"],
                   "denominator": first["denominator"], "status": first.get("status", "explicit"),
-                  "partial": True}] if partial else [])
-        start = partial
-        while start < pickup - 1e-6:
-            lead.append({"startBeat": start, "beats": nominal, "numerator": first["numerator"],
-                         "denominator": first["denominator"], "status": first.get("status", "explicit")})
-            start += nominal
-        rest = build_bar_map(total_beats - pickup, changes)
-        return validate_bar_map(lead + [{**bar, "startBeat": bar["startBeat"] + pickup} for bar in rest])
+                  "partial": True}] if partial > 0 else [])
+        lead.extend({"startBeat": pickup - (whole - index) * nominal, "beats": nominal,
+                     "numerator": first["numerator"], "denominator": first["denominator"],
+                     "status": first.get("status", "explicit")} for index in range(whole))
+        # Bars from the first downbeat onward start exactly at the pickup and end exactly at the extent.
+        shifted = [{**change, "startBeat": change["startBeat"] + pickup} for change in changes]
+        rest = [bar for bar in build_bar_map(total_beats, [{**first, "startBeat": 0.0}, *shifted])
+                if bar["startBeat"] >= pickup]
+        return validate_bar_map(lead + rest)
     if not _finite(total_beats) or total_beats <= 0 or not changes:
         raise ValueError("A bar map requires a positive duration and a starting meter.")
     points = []

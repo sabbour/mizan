@@ -418,18 +418,12 @@ function group(items: { pos: number; dur: number; head: Head }[]): Event[] {
     const e = map.get(it.pos)
     if (e) {
       e.dur = Math.max(e.dur, it.dur)
-      if (!it.head.xml.startsWith('<unpitched>') || !e.heads.some((head) => head.xml === it.head.xml))
-        e.heads.push(it.head)
+      e.heads.push(it.head)
     } else map.set(it.pos, { pos: it.pos, dur: it.dur, heads: [it.head] })
   }
   return [...map.values()]
 }
 
-/** Give each event the gap to the next onset as its written length (drum notation convention). */
-function toGaps(events: Event[], barDivs: number): Event[] {
-  const sorted = [...events].sort((a, b) => a.pos - b.pos)
-  return sorted.map((e, i) => ({ ...e, dur: (sorted[i + 1]?.pos ?? barDivs) - e.pos }))
-}
 
 function wrap(partName: string, measures: string[], gmProgram?: number): string {
   const instrument = gmProgram != null && gmProgram >= 0 && gmProgram <= 127
@@ -469,7 +463,7 @@ function harmony(symbol: string): string {
 }
 
 /** Chord symbols and (bar 1) tempo, written before the notes; mid-bar chords are placed with forward/backup. Section names are drawn by the score overlay. */
-function annotations(song: Song, bar: number, chords: boolean): string {
+function annotations(song: Song, bar: number, chords: boolean, scale = 1): string {
   const grid = notationGrid(song)
   const span = grid.bars[bar - 1]
   let xml = ''
@@ -478,8 +472,8 @@ function annotations(song: Song, bar: number, chords: boolean): string {
   }
   let cursor = 0
   for (const c of song.chords) {
-    const pos = grid.toDiv(c.startBeat) - span.startDiv
-    if (!chords || pos < 0 || pos >= span.endDiv - span.startDiv || c.symbol === null) continue
+    const pos = (grid.toDiv(c.startBeat) - span.startDiv) * scale
+    if (!chords || pos < 0 || pos >= (span.endDiv - span.startDiv) * scale || c.symbol === null) continue
     const h = harmony(c.symbol)
     if (!h) continue
     if (pos > cursor) xml += `<forward><duration>${pos - cursor}</duration></forward>`
@@ -703,30 +697,121 @@ function drumHead(lane: DrumLane): string {
   return `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>${head ? `<notehead>${head}</notehead>` : ''}`
 }
 
+type Piece = { length: number; type?: string; dot: boolean; triplet: boolean }
+
+/** Standard values for a span, split at beats when needed; 3:2 triplets where exact (matches the host export). */
+function spanPieces(start: number, end: number, division: number): Piece[] {
+  const standard = TYPES.map(([value, type, dot]) => [value * division / DIV, type, dot] as const)
+    .filter(([value]) => Number.isInteger(value))
+  const out: Piece[] = []
+  let left = end - start
+  while (left > 0) {
+    const match = standard.find(([value]) => value <= left)
+    if (!match) break
+    out.push({ length: match[0], type: match[1], dot: match[2], triplet: false })
+    left -= match[0]
+  }
+  if (!left) return out
+  const boundary = (Math.floor(start / division) + 1) * division
+  if (start < boundary && boundary < end) return [...spanPieces(start, boundary, division), ...spanPieces(boundary, end, division)]
+  const triplet = standard.find(([value]) => value * 2 === (end - start) * 3)
+  return triplet ? [{ length: end - start, type: triplet[1], dot: triplet[2], triplet: true }] : [...out, { length: left, dot: false, triplet: false }]
+}
+
+const pieceXml = (piece: Piece, division: number) => piece.type
+  ? `<type>${piece.type}</type>${piece.dot ? '<dot/>' : ''}${piece.triplet ? '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>' : ''}`
+  : typeOf(piece.length, division)
+
+/** Hands or feet voice: chorded simultaneous lanes; each written length reaches the next attack. */
+function drumVoice(attacks: Map<number, DrumLane[]>, voiceNo: number, stem: string, barDivs: number, division: number): string {
+  const positions = [...attacks.keys()].filter((pos) => pos >= 0 && pos < barDivs).sort((a, b) => a - b)
+  if (!positions.length) return `<note><rest measure="yes"/><duration>${barDivs}</duration><voice>${voiceNo}</voice><staff>1</staff></note>`
+  const items: { piece: Piece; lanes?: DrumLane[] }[] = []
+  let cursor = 0
+  const rest = (from: number, to: number) => { for (const piece of spanPieces(from, to, division)) items.push({ piece }) }
+  positions.forEach((pos, index) => {
+    if (pos > cursor) rest(cursor, pos)
+    const head = spanPieces(pos, positions[index + 1] ?? barDivs, division)[0]
+    items.push({ piece: head, lanes: attacks.get(pos)! })
+    cursor = pos + head.length
+  })
+  if (cursor < barDivs) rest(cursor, barDivs)
+  // Bracket each complete 3:2 group (three triplet units, notes or rests) so the renderer draws it.
+  const brackets = items.map(() => '')
+  for (let first = 0; first < items.length; first++) {
+    if (!items[first].piece.triplet) continue
+    const unit = items[first].piece.length
+    let filled = 0
+    let last = first
+    while (last < items.length && items[last].piece.triplet && filled < unit * 3) filled += items[last++].piece.length
+    if (filled !== unit * 3) continue
+    brackets[first] = '<tuplet type="start"/>'
+    brackets[last - 1] += '<tuplet type="stop"/>'
+    first = last - 1
+  }
+  return items.map(({ piece, lanes }, index) => {
+    const notations = brackets[index] ? `<notations>${brackets[index]}</notations>` : ''
+    if (!lanes) return `<note><rest/><duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<staff>1</staff>${notations}</note>`
+    return lanes.map((lane, chord) =>
+      `<note>${chord ? '<chord/>' : ''}${drumHead(lane)}<duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<stem>${stem}</stem><staff>1</staff>${chord ? '' : notations}</note>`).join('')
+  }).join('')
+}
+
+const FINE_UNITS = [1 / 16, 1 / 12]
+
+/** The 64th or 16th-triplet grid that a recurring fine figure fits, if any. */
+function fineUnit(gap: number): number | undefined {
+  let best: [number, number] | undefined
+  for (const unit of FINE_UNITS) {
+    const steps = Math.floor(gap / unit + 0.5)
+    const error = Math.abs(gap / unit - steps)
+    if (steps >= 1 && error <= 0.15 && (!best || error < best[1] - 1e-9)) best = [unit, error]
+  }
+  return best?.[0]
+}
+
 /**
- * Written beat for each drum hit. Automatic hits move to their bar's sixteenth grid. Consecutive
- * same-lane hits 0.1–0.2 beat apart are a genuine fast figure and keep their source beats; closer
- * ones are one written hit. Imported hits keep their rhythm; playback keeps the source `startBeat`.
+ * Written beat for each drum hit, identical to the host MusicXML export; playback keeps the
+ * source `startBeat`. Automatic hits (with `confidence`) move to their bar's sixteenth grid,
+ * removing timing jitter. A same-lane fine figure is kept instead: three or more hits with
+ * consistent spacing of 0.05–0.2 beat or off the sixteenth grid (64th rolls, triplets), or an
+ * isolated pair 0.1–0.2 beat apart, whose spacing fits the 64th or 16th-triplet grid; its hits snap
+ * to that grid. Spacing that fits neither is jitter; closer isolated hits are one written hit;
+ * imports are unchanged.
  */
 export function drumNotationBeats(song: Song): number[] {
   const bars = meterMeasures(song)
-  const written = song.drums.map((hit) => {
-    if (!Number.isFinite(hit.confidence)) return hit.startBeat
-    const bar = bars[measureIndex(song, hit.startBeat)]
-    const snapped = bar.startBeat + Math.round((hit.startBeat - bar.startBeat) * 4) / 4
-    return snapped >= bar.startBeat && snapped < bar.startBeat + bar.beats - 1e-9 ? snapped : hit.startBeat
-  })
+  const barSnap = (beat: number, unit: number) => {
+    const bar = bars[measureIndex(song, beat)]
+    const snapped = bar.startBeat + Math.floor((beat - bar.startBeat) / unit + 0.5) * unit
+    return snapped >= bar.startBeat && snapped < bar.startBeat + bar.beats - 1e-9 ? snapped : beat
+  }
+  const automatic = song.drums.map((hit) => Number.isFinite(hit.confidence))
+  const written = song.drums.map((hit, index) => automatic[index] ? barSnap(hit.startBeat, 0.25) : hit.startBeat)
   const lanes = new Map<string, number[]>()
   song.drums.forEach((hit, index) => {
+    if (!automatic[index]) return
     const key = `${hit.trackId ?? ''}:${hit.lane}`
     lanes.set(key, [...(lanes.get(key) ?? []), index])
   })
   for (const indexes of lanes.values()) {
     indexes.sort((a, b) => song.drums[a].startBeat - song.drums[b].startBeat)
-    for (let i = 1; i < indexes.length; i++) {
-      const [left, right] = [indexes[i - 1], indexes[i]]
-      const gap = song.drums[right].startBeat - song.drums[left].startBeat
-      if (gap >= 0.1 && gap < 0.2) [written[left], written[right]] = [song.drums[left].startBeat, song.drums[right].startBeat]
+    const beats = indexes.map((index) => song.drums[index].startBeat)
+    let start = 0
+    while (start < indexes.length - 1) {
+      const firstGap = beats[start + 1] - beats[start]
+      let stop = start + 1
+      while (stop + 1 < indexes.length && Math.abs(beats[stop + 1] - beats[stop] - firstGap) <= Math.max(0.2 * firstGap, 0.03)) stop++
+      const gap = (beats[stop] - beats[start]) / (stop - start)
+      const count = stop - start + 1
+      const offGrid = Math.abs(gap - Math.floor(gap * 4 + 0.5) / 4) > 0.05
+      const unit = gap >= 0.05 ? fineUnit(gap) : undefined
+      if (unit && ((count >= 3 && (gap < 0.2 || offGrid)) || (count === 2 && gap >= 0.1 && gap < 0.2))) {
+        let positions = beats.slice(start, stop + 1).map((beat) => barSnap(beat, unit))
+        if (positions.some((value, step) => step > 0 && value <= positions[step - 1])) positions = beats.slice(start, stop + 1)
+        positions.forEach((value, step) => { written[indexes[start + step]] = value })
+        start = stop + 1
+      } else start = Math.max(count >= 3 ? stop : start + 1, start + 1)
     }
   }
   const groups = new Map<string, number[]>()
@@ -743,8 +828,10 @@ export function drumNotationBeats(song: Song): number[] {
 
 export function drumXml(song: Song, chords = true): string {
   const grid = notationGrid(song)
-  const DIV = grid.division
-  const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<clef><sign>percussion</sign></clef></attributes>`
+  // Three times the shared grid so sixteenth-triplet figures have exact written positions.
+  const division = grid.division * 3
+  const attrs = `<attributes><divisions>${division}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<clef><sign>percussion</sign></clef></attributes>`
+  const spans = meterMeasures(song)
   const measures: string[] = []
   const written = drumNotationBeats(song)
   const hitsByBar = new Map<number, { lane: DrumLane; beat: number }[]>()
@@ -753,20 +840,27 @@ export function drumXml(song: Song, chords = true): string {
     hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { lane: hit.lane, beat: written[index] }])
   })
   for (let bar = 1; bar <= song.bars; bar++) {
-    const { startDiv, endDiv } = grid.bars[bar - 1]
-    const barDivs = endDiv - startDiv
-    const hits = hitsByBar.get(bar - 1) ?? []
-    const events = (feet: boolean) =>
-      toGaps(
-        group(hits.filter((h) => (h.lane === 'kick') === feet).map((h) => ({ pos: grid.toDiv(h.beat) - startDiv, dur: 0, head: { xml: drumHead(h.lane) } }))),
-        barDivs,
-      )
+    const { startDiv, endDiv, points } = grid.bars[bar - 1]
+    const span = spans[bar - 1]
+    const barDivs = (endDiv - startDiv) * 3
+    const position = (beat: number) => points.length
+      ? (grid.toDiv(beat) - startDiv) * 3 : Math.round((beat - span.startBeat) * division)
+    const attacks = (feet: boolean) => {
+      const map = new Map<number, DrumLane[]>()
+      for (const hit of hitsByBar.get(bar - 1) ?? []) {
+        if ((hit.lane === 'kick') !== feet) continue
+        const lanes = map.get(position(hit.beat)) ?? []
+        if (!lanes.includes(hit.lane)) lanes.push(hit.lane)
+        map.set(position(hit.beat), lanes)
+      }
+      return map
+    }
     measures.push(
       measureOpen(bar, attrs, song) +
-        annotations(song, bar, chords) +
-        voice(events(false), 1, 1, 'up', barDivs, DIV) +
+        annotations(song, bar, chords, 3) +
+        drumVoice(attacks(false), 1, 'up', barDivs, division) +
         `<backup><duration>${barDivs}</duration></backup>` +
-        voice(events(true), 2, 1, 'down', barDivs, DIV) +
+        drumVoice(attacks(true), 2, 'down', barDivs, division) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )

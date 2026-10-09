@@ -590,18 +590,26 @@ Linked MIDI/MusicXML recordings continue to use the separate alignment path.
 Meter from tracked audio counts whole beats between Beat This! downbeats
 (`tracked-downbeat-beat-count-v1`). Isolated missed or spurious downbeats do not
 create signatures; a sustained phase shift leaves an unverified partial bar;
-only sustained or alternating different groups become signature changes. Any
-phase shift, halved long group or many missing downbeats marks the bars
-`unverified`. The count gives a grouping in tracked beats, not a written
-denominator or tempo octave (the same song can track at 92 or 184 BPM).
+sustained or alternating different groups become signature changes, including
+long groups such as 9 or 13 beats. Inside an interval spanning several primary
+bars, a beat whose downbeat activation exceeds the song's ordinary beats (90th
+percentile) is an observed weak downbeat; without that evidence a sustained
+multiple group (3 to 6, 4 to 8) stays one longer `unverified` bar rather than
+being split. Any phase shift, ambiguous multiple or shorter run, or many missing
+downbeats marks the bars `unverified`. The count gives a grouping in tracked
+beats, not a written denominator or tempo octave (the same song can track at 92
+or 184 BPM).
 Drum notation writes automatic hits on the bar's sixteenth grid (UI score and
-MusicXML export share the rule) except consecutive same-lane hits 0.1-0.2 beat
-apart, which keep their source position; playback uses the source beat.
+MusicXML export share the rule). A same-lane fine figure whose spacing fits the
+64th or sixteenth-triplet grid (three or more consistent hits, or an isolated
+pair 0.1-0.2 beat apart) is written on that grid, with 3:2 triplet values; other
+spacing is treated as jitter. Imported hits keep their rhythm and playback uses
+the source beat.
 
 Remaining limits: Beat This! cannot distinguish 3/4 from 6/8 or a tempo octave;
 without downbeat evidence analysis retains 4/4. MIDI/MusicXML imports
-preserve explicit meters such as 6/8; changing meters within a file are
-rejected rather than silently misplacing bars. There are no reliable semantic
+preserve explicit meters such as 6/8, including changes within a file, pickups
+and partial final bars. There are no reliable semantic
 verse/chorus labels or validated meter-accuracy claims; no pedal modelling, imperfect learned
 piano isolation, heuristic velocities (not measured performance MIDI velocity), and
 no validated real-music benchmark set. Long audio is not capped
