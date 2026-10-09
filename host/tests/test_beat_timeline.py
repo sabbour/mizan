@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import mido
@@ -267,15 +268,51 @@ def test_weak_off_phase_downbeats_in_a_short_run_are_half_bar_accents():
     counts = [4] * 30 + [2] * 6 + [4] * 4
     indices = np.r_[0, np.cumsum(counts)].astype(int).tolist()
     activation = np.full(indices[-1] + 1, -10.0)
-    activation[indices] = np.random.default_rng(5).uniform(2, 8, len(indices))
+    activation[indices] = 5.0
     accents = [index for index in indices[30:37] if (index - indices[30]) % 4]
-    activation[accents] = 0.1
+    activation[accents] = 1.5
     meter = downbeat_meter(indices, 0.95, activation.tolist())
     assert meter["evidence"]["suppressedWeakAccents"] == len(accents) == 3
+    assert meter["evidence"]["observedShorterGroups"] == [
+        {"startBeat": 120.0, "beats": 12, "groupBeats": 2, "reading": "half-bar accents"}]
     assert [(change["startBeat"], change["numerator"]) for change in meter["changes"]] == [(0.0, 4)]
-    assert meter["boundariesVerified"]
-    # The same run with downbeat-strength off-phase hits stays observed 2-beat bars.
-    activation[accents] = 5
+    assert meter["supported"] and not meter["boundariesVerified"]
+    # Equally strong downbeats every two beats are an observed shorter bar, kept unverified.
+    activation[accents] = 5.0
     kept = downbeat_meter(indices, 0.95, activation.tolist())
     assert [bar["beats"] for bar in build_bar_map(sum(counts), kept["changes"])] == counts
     assert not kept["boundariesVerified"]
+
+
+def test_unrelated_meter_change_with_activation_stays_supported():
+    counts = [4] * 10 + [3] * 6 + [4] * 4
+    indices = np.r_[0, np.cumsum(counts)].astype(int).tolist()
+    activation = np.full(indices[-1] + 1, -10.0)
+    activation[indices] = 5.0
+    meter = downbeat_meter(indices, 0.95, activation.tolist())
+    assert [(change["startBeat"], change["numerator"], change["status"]) for change in meter["changes"]] == [
+        (0.0, 4, "supported"), (40.0, 3, "supported"), (58.0, 4, "supported")]
+
+
+def test_tracker_half_time_section_is_a_tempo_octave_not_a_meter_change():
+    # The tracker drops to half-time for a passage, still marking every second tracked beat.
+    beats = np.r_[np.arange(0.2, 20, 0.5), np.arange(20.2, 36, 1.0), np.arange(36.2, 60, 0.5)]
+    downbeats = np.r_[np.arange(0.2, 20, 2.0), np.arange(20.2, 36, 2.0), np.arange(36.2, 60, 2.0)]
+    beat, down = logits(beats, downbeats, 61)
+    grid = activation_beat_grid(beat, down, 50.0)
+    meter = downbeat_meter(grid["downbeatIndices"], grid["confidence"], grid["downbeatActivation"])
+    assert grid["cleanup"]["inserted"] == 16
+    assert meter["beatsPerBar"] == 4 and meter["boundariesVerified"]
+    assert {change["numerator"] for change in meter["changes"]} == {4}
+
+
+def test_cached_user_labelled_four_four_song_gets_no_invented_short_signature():
+    # Haseb Haseb (user-labelled 4/4): Beat This! marks downbeats every two steady beats in two
+    # passages, with strong-weak pairing. That is not evidence of a written 2/4 change.
+    data = json.loads((Path(__file__).parent / "data" / "haseb_tracked_downbeats.json").read_text())
+    meter = downbeat_meter(data["downbeatIndices"], data["beatConfidence"], data["downbeatActivation"])
+    assert meter["supported"] and meter["beatsPerBar"] == 4 and not meter["boundariesVerified"]
+    assert {change["numerator"] for change in meter["changes"]} == {4}
+    assert [group["groupBeats"] for group in meter["evidence"]["observedShorterGroups"]] == [2, 2]
+    total = data["downbeatIndices"][-1] - data["downbeatIndices"][0] + 4
+    assert {bar["numerator"] for bar in build_bar_map(total, meter["changes"])} == {4}

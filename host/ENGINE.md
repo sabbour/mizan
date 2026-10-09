@@ -594,8 +594,10 @@ sustained or alternating different groups become signature changes, including
 long groups such as 9 or 13 beats. Inside an interval spanning several primary
 bars, a beat whose downbeat activation exceeds the song's ordinary beats (90th
 percentile) is an observed weak downbeat. Inside a sustained run of shorter
-groups, off-phase downbeats weaker than the song's 10th-percentile downbeat are
-half-bar accents. Otherwise observed longer or shorter groups, sustained (3 to 6,
+groups with a steady beat, off-phase downbeats mostly weaker than the downbeat
+before them show strong-weak pairing: they are half-bar accents, so the primary
+bar stays (`unverified`) and the passage is listed in `observedShorterGroups`
+with a warning. Otherwise observed longer or shorter groups, sustained (3 to 6,
 6 to 3) or alternating (3,6 or 4,8), are kept as `unverified` bars rather than
 split or merged into the primary bar. Any phase shift, ambiguous related group
 or many missing downbeats marks the bars `unverified`. The count gives a grouping

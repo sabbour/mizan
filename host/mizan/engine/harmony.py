@@ -404,9 +404,10 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
     and only sustained or alternating different groups become signature changes. Inside an
     interval spanning several primary bars, a beat whose downbeat ``activation`` exceeds the
     song's ordinary beats (90th percentile) is an observed weak downbeat. Inside a sustained run
-    of shorter groups, off-phase downbeats weaker than the song's 10th-percentile downbeat are
-    half-bar accents. Otherwise observed longer or shorter groups, sustained or alternating, are
-    kept as unverified bars rather than split or merged into the primary bar.
+    of shorter groups, off-phase downbeats mostly weaker than the downbeat before them are
+    half-bar accents: the primary bar stays, unverified, and the run is reported in
+    ``observedShorterGroups``. Otherwise observed longer or shorter groups, sustained or
+    alternating, are kept as unverified bars rather than split or merged into the primary bar.
     """
     indices = [int(value) for value in indices]
     counts = [int(value) for value in np.diff(indices)] if len(indices) > 1 else []
@@ -425,8 +426,8 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                 "changes": [{"startBeat": 0.0, "numerator": 4, "denominator": 4, "status": "unverified"}],
                 "evidence": {"intervals": len(counts)}, "candidates": {}}
     primary = max(sorted(usable), key=lambda value: (usable[value], -value))
-    detected = list(indices)
     recovered = suppressed = 0
+    observed = []
     if activation is not None and len(activation) > indices[-1]:
         marked = set(indices)
         middles = {index + primary * step for index, count in zip(indices, counts)
@@ -440,24 +441,28 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                 recovered = len(weak)
                 indices = sorted(marked | weak)
                 counts = [int(value) for value in np.diff(indices)]
-        if len(detected) >= 8:
-            floor = float(np.percentile([activation[index] for index in detected], 10))
-            accents = set()
-            first = 0
-            while first < len(counts):
-                stop = first
-                while stop < len(counts) and counts[stop] == counts[first]:
-                    stop += 1
-                if stop - first >= 4 and 2 <= counts[first] < primary and primary % counts[first] == 0:
-                    run = indices[first:stop + 1]
-                    off = [index for index in run if (index - run[0]) % primary]
-                    if off and float(np.median([activation[index] for index in off])) < floor:
-                        accents.update(off)
-                first = max(stop, first + 1)
-            if accents:
-                suppressed = len(accents)
-                indices = [index for index in indices if index not in accents]
-                counts = [int(value) for value in np.diff(indices)]
+        # A steady beat with downbeats at a fraction of the bar is a written change only when those
+        # downbeats are as strong as the bar's own. Off-phase downbeats that are mostly weaker than
+        # the downbeat just before them show strong-weak pairing: half-bar accents, not barlines.
+        accents = set()
+        first = 0
+        while first < len(counts):
+            stop = first
+            while stop < len(counts) and counts[stop] == counts[first]:
+                stop += 1
+            if stop - first >= 4 and 2 <= counts[first] < primary and primary % counts[first] == 0:
+                run = indices[first:stop + 1]
+                pairs = [(activation[index], activation[previous]) for previous, index in zip(run, run[1:])
+                         if (index - run[0]) % primary]
+                if pairs and sum(off < on for off, on in pairs) >= 2 * len(pairs) / 3:
+                    accents.update(index for index in run if (index - run[0]) % primary)
+                    observed.append({"startBeat": float(run[0] - indices[0]), "beats": run[-1] - run[0],
+                                     "groupBeats": counts[first], "reading": "half-bar accents"})
+            first = max(stop, first + 1)
+        if accents:
+            suppressed = len(accents)
+            indices = [index for index in indices if index not in accents]
+            counts = [int(value) for value in np.diff(indices)]
     literal, ambiguous = _literal_runs(counts, primary)
     anchor, cursor = indices[0], indices[0]
     changes = []
@@ -518,7 +523,7 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                                                "status": "unverified"}],
                 "evidence": {"intervals": len(counts), "explained": explained},
                 "candidates": {f"{value}/4": count for value, count in usable.items()}}
-    verified = not shifts and not ambiguous and missing <= max(1, len(counts) // 4)
+    verified = not shifts and not ambiguous and not suppressed and missing <= max(1, len(counts) // 4)
     if not verified:
         changes = [{**change, "status": "unverified"} for change in changes]
     return {
@@ -528,7 +533,7 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
         "evidence": {"intervals": len(counts), "explained": explained, "missingBoundaries": missing,
                      "phaseShifts": shifts, "literalGroups": len(literal),
                      "recoveredWeakDownbeats": recovered, "suppressedWeakAccents": suppressed,
-                     "ambiguousGroups": len(ambiguous)},
+                     "ambiguousGroups": len(ambiguous), "observedShorterGroups": observed},
         "candidates": {f"{value}/4": count for value, count in usable.items()},
     }
 
@@ -1068,6 +1073,9 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     meter_warning = (
         f"Measured recurring groups suggest {' then '.join(spellings)}; written denominator and tempo "
         "subdivision remain unverified. "
+        + ("Some passages had downbeats at a fraction of the bar; they are written as half-bar "
+           "accents, not signature changes. "
+           if meter.get("evidence", {}).get("observedShorterGroups") else "")
         + ("Bar boundaries are unverified; check the tentative grouping against the recording."
            if not meter.get("boundariesVerified") else
            "Check the changing signatures and bar groups against the recording.")
