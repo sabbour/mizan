@@ -8,7 +8,7 @@ const localize = (world, prims) => prims.map((p) => ({ ...p, mesh: transform(p.m
 export const ACOUSTIC_MATERIALS = (t) => ({
   shell: { name: 'MAT_Shell_BurgundyWood', set: t.shellWood, size: 2048 },
   headCoated: { name: 'MAT_DrumHead_CoatedWhite', set: t.headCoated, size: 2048 },
-  headClear: { name: 'MAT_DrumHead_Clear', set: t.headClear, size: 1024 },
+  headClear: { name: 'MAT_DrumHead_Clear', set: t.headClear, size: 2048 },
   cymbal: { name: 'MAT_Cymbal_Bronze', set: t.cymbalBronze, size: 2048 },
   chrome: { name: 'MAT_Chrome', set: t.chrome, size: 1024 },
   steel: { name: 'MAT_Steel_Brushed', set: t.steelBrushed, size: 1024 },
