@@ -472,8 +472,9 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
         for event in model_events:
             if event["instrument"] != name or event["onset"] >= audio.duration:
                 continue
-            start = quantize(event["onset"], song["bpm"], harmony["timing"]["phaseSeconds"])
-            end = quantize(min(event["offset"], audio.duration), song["bpm"], harmony["timing"]["phaseSeconds"])
+            start = quantize(event["onset"], song["bpm"], harmony["timing"]["phaseSeconds"], song.get("tempoMap"))
+            end = quantize(min(event["offset"], audio.duration), song["bpm"], harmony["timing"]["phaseSeconds"],
+                           song.get("tempoMap"))
             notes.append({
                 **event, "trackId": track_id, "sourceInstrument": name,
                 "startBeat": start, "beats": round(max(0.01, end - start), 6),

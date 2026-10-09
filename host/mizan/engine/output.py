@@ -4,7 +4,7 @@ from xml.etree import ElementTree as ET
 
 import mido
 
-from ..meter import bar_index, song_bar_map
+from ..meter import bar_index, beat_at_time, song_bar_map, time_at_beat
 from .accompaniment import generate_accompaniment
 from .drums import GM_DRUMS
 
@@ -37,7 +37,11 @@ def exportable_track(track: dict) -> bool:
             detected_gm_program(source_instrument) is not None and _resolved_gm_program(track) is not None)
 
 
-def quantize(seconds: float, bpm: float, phase: float = 0) -> float:
+def quantize(seconds: float, bpm: float, phase: float = 0, tempo_map: list[dict] | None = None) -> float:
+    if tempo_map:
+        beat = beat_at_time(tempo_map, bpm, seconds)
+        snapped = round(beat * 4) / 4
+        return round(max(0.0, snapped if abs(snapped - beat) <= 0.08 else beat), 6)
     beat = seconds * bpm / 60
     phase_beat = phase * bpm / 60
     snapped = round((beat - phase_beat) * 4) / 4 + phase_beat
@@ -51,19 +55,26 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
     beats_per_bar = harmony["beatsPerBar"]
     bar_map = song_bar_map(harmony)
     phase = harmony["timing"]["phaseSeconds"]
+    tempo_map = harmony.get("tempoMap")
     piano_output = []
     for note in piano:
-        start = quantize(note["onset"], bpm, phase)
-        end = quantize(note["offset"], bpm, phase)
+        start = quantize(note["onset"], bpm, phase, tempo_map)
+        end = quantize(note["offset"], bpm, phase, tempo_map)
         piano_output.append({**note, "startBeat": start, "beats": round(max(0.01, end - start), 6)})
-    drum_output = [{**hit, "startBeat": quantize(hit["onset"], bpm, phase)} for hit in drums]
-    vocal_output = [{**note, "startBeat": round(note["onset"] * bpm / 60, 6),
-                     "beats": round((note["offset"] - note["onset"]) * bpm / 60, 6)}
-                    for note in vocals or []]
+    drum_output = [{**hit, "startBeat": quantize(hit["onset"], bpm, phase, tempo_map)} for hit in drums]
+    vocal_output = []
+    for note in vocals or []:
+        if not tempo_map:
+            vocal_output.append({**note, "startBeat": round(note["onset"] * bpm / 60, 6),
+                                 "beats": round((note["offset"] - note["onset"]) * bpm / 60, 6)})
+            continue
+        start = max(0.0, beat_at_time(tempo_map, bpm, note["onset"]))
+        end = max(start + 0.01, beat_at_time(tempo_map, bpm, note["offset"]))
+        vocal_output.append({**note, "startBeat": round(start, 6), "beats": round(end - start, 6)})
     accompaniment = generate_accompaniment(harmony)
     for note in accompaniment:
-        note.update(onset=note["startBeat"] * 60 / bpm,
-                    offset=(note["startBeat"] + note["beats"]) * 60 / bpm)
+        note.update(onset=time_at_beat(tempo_map, bpm, note["startBeat"]),
+                    offset=time_at_beat(tempo_map, bpm, note["startBeat"] + note["beats"]))
     tracks = []
     if piano_output:
         tracks.append({"id": "piano", "instrument": "piano", "name": "Piano",
@@ -89,12 +100,14 @@ def build_song(title: str, source: str, duration: float, harmony: dict,
         return ["high" if row and sum(row) / len(row) >= 0.8 else
                 "medium" if row and sum(row) / len(row) >= 0.5 else "low" for row in values]
 
-    chords = [{**chord, "onset": chord["startBeat"] * 60 / bpm,
-               "offset": (chord["startBeat"] + chord["beats"]) * 60 / bpm} for chord in harmony["chords"]]
+    chords = [{**chord, "onset": time_at_beat(tempo_map, bpm, chord["startBeat"]),
+               "offset": time_at_beat(tempo_map, bpm, chord["startBeat"] + chord["beats"])}
+              for chord in harmony["chords"]]
     return {
         "title": title, "source": source, "bpm": bpm, "beatsPerBar": beats_per_bar,
         "beatUnit": harmony.get("beatUnit", 4), "bars": bars,
         **({"barMap": bar_map} if "barMap" in harmony else {}),
+        **({"tempoMap": tempo_map} if tempo_map else {}),
         "key": harmony["key"], "sections": harmony["sections"], "chords": chords,
         "piano": piano_output, "drums": drum_output, "vocals": vocal_output,
         "accompaniment": accompaniment, "tracks": tracks,
@@ -250,6 +263,12 @@ def export_musicxml(song: dict, path: Path) -> None:
             ET.SubElement(midi_instrument, "midi-program").text = str(program + 1)
         part = ET.SubElement(root, "part", id=part_id)
         drum = track["instrument"] == "drums"
+        drum_bars = {}
+        if drum:
+            hits = _track_events(song, track)
+            for hit, beat in zip(hits, drum_notation_beats(hits, bar_map)):
+                drum_bars.setdefault(bar_index(bar_map, beat), []).append(
+                    (max(0, round(beat * division)), hit["lane"]))
         events = [(max(0, round(event["startBeat"] * division)),
                    max(1, round((event["startBeat"] + event.get("beats", 0.1)) * division)
                        - max(0, round(event["startBeat"] * division))), event)
@@ -278,6 +297,9 @@ def export_musicxml(song: dict, path: Path) -> None:
                 direction = ET.SubElement(measure, "direction")
                 ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = "Draft transcription"
                 ET.SubElement(direction, "sound", tempo=str(song["bpm"]))
+            if drum:
+                _drum_measure(measure, drum_bars.get(bar, []), start_tick, end_tick, division)
+                continue
             cursor = 0
             for onset, length, event in sorted(events, key=lambda item: item[0]):
                 start = max(onset, start_tick)
@@ -289,21 +311,16 @@ def export_musicxml(song: dict, path: Path) -> None:
                     move = ET.SubElement(measure, "forward" if position > cursor else "backup")
                     ET.SubElement(move, "duration").text = str(abs(position - cursor))
                 note = ET.SubElement(measure, "note")
-                if drum:
-                    unpitched = ET.SubElement(note, "unpitched")
-                    ET.SubElement(unpitched, "display-step").text = "F" if event["lane"] == "kick" else "C"
-                    ET.SubElement(unpitched, "display-octave").text = "4" if event["lane"] == "kick" else "5"
-                else:
-                    pitch = ET.SubElement(note, "pitch")
-                    midi_pitch = event["midi"]
-                    base = math.ceil(midi_pitch - 0.5)
-                    step, alter = (("C", 0), ("C", 1), ("D", 0), ("D", 1), ("E", 0), ("F", 0),
-                                   ("F", 1), ("G", 0), ("G", 1), ("A", 0), ("A", 1), ("B", 0))[base % 12]
-                    alter += midi_pitch - base
-                    ET.SubElement(pitch, "step").text = step
-                    if alter:
-                        ET.SubElement(pitch, "alter").text = str(alter)
-                    ET.SubElement(pitch, "octave").text = str(base // 12 - 1)
+                pitch = ET.SubElement(note, "pitch")
+                midi_pitch = event["midi"]
+                base = math.ceil(midi_pitch - 0.5)
+                step, alter = (("C", 0), ("C", 1), ("D", 0), ("D", 1), ("E", 0), ("F", 0),
+                               ("F", 1), ("G", 0), ("G", 1), ("A", 0), ("A", 1), ("B", 0))[base % 12]
+                alter += midi_pitch - base
+                ET.SubElement(pitch, "step").text = step
+                if alter:
+                    ET.SubElement(pitch, "alter").text = str(alter)
+                ET.SubElement(pitch, "octave").text = str(base // 12 - 1)
                 ET.SubElement(note, "duration").text = str(end - start)
                 ties = ([] if onset == start else ["stop"]) + ([] if onset + length == end else ["start"])
                 for tie in ties:
@@ -318,3 +335,112 @@ def export_musicxml(song: dict, path: Path) -> None:
                 ET.SubElement(rest, "rest")
                 ET.SubElement(rest, "duration").text = str(bar_ticks - cursor)
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+DRUM_DISPLAY = {"crash": ("A", 5, "x"), "ride": ("F", 5, "x"), "hihat": ("G", 5, "x"),
+                "openhat": ("G", 5, "circle-x"), "hightom": ("E", 5, None), "snare": ("C", 5, None),
+                "floortom": ("A", 4, None), "kick": ("F", 4, None)}
+NOTE_TYPES = ((4, "whole", False), (3, "half", True), (2, "half", False), (1.5, "quarter", True),
+              (1, "quarter", False), (0.75, "eighth", True), (0.5, "eighth", False), (0.375, "16th", True),
+              (0.25, "16th", False), (0.1875, "32nd", True), (0.125, "32nd", False), (0.0625, "64th", False))
+
+
+def drum_notation_beats(hits: list[dict], bar_map: list[dict]) -> list[float]:
+    """Written beats matching the workspace drum score; source ``startBeat`` stays the playback time.
+
+    Automatic hits (those with a ``confidence``) move to their bar's sixteenth grid (halves round up,
+    like the workspace). Consecutive same-lane hits 0.1-0.2 beat apart are a genuine fast figure and
+    keep their source beats; closer ones are one written hit. Imported hits keep their rhythm.
+    """
+    written = []
+    for hit in hits:
+        beat = hit["startBeat"]
+        bar = bar_map[bar_index(bar_map, beat)]
+        snapped = bar["startBeat"] + math.floor((beat - bar["startBeat"]) * 4 + 0.5) / 4
+        written.append(snapped if isinstance(hit.get("confidence"), (int, float))
+                       and bar["startBeat"] <= snapped < bar["startBeat"] + bar["beats"] - 1e-9 else beat)
+    lanes = {}
+    for index, hit in enumerate(hits):
+        lanes.setdefault((hit.get("trackId"), hit["lane"]), []).append(index)
+    for indexes in lanes.values():
+        indexes.sort(key=lambda index: hits[index]["startBeat"])
+        for left, right in zip(indexes, indexes[1:]):
+            if 0.1 <= hits[right]["startBeat"] - hits[left]["startBeat"] < 0.2:
+                written[left], written[right] = hits[left]["startBeat"], hits[right]["startBeat"]
+    groups = {}
+    for index, hit in enumerate(hits):
+        groups.setdefault((hit.get("trackId"), hit["lane"], written[index]), []).append(index)
+    for indexes in groups.values():
+        sources = [hits[index]["startBeat"] for index in indexes]
+        if max(sources) - min(sources) >= 0.1:
+            for index in indexes:
+                written[index] = hits[index]["startBeat"]
+    return written
+
+
+def _note_pieces(ticks: int, division: int) -> list[tuple[int, str | None, bool]]:
+    pieces = []
+    while ticks > 0:
+        match = next(((round(beats * division), name, dot) for beats, name, dot in NOTE_TYPES
+                      if round(beats * division) <= ticks and beats * division == round(beats * division)), None)
+        if match is None:
+            pieces.append((ticks, None, False))
+            break
+        pieces.append(match)
+        ticks -= match[0]
+    return pieces
+
+
+def _drum_measure(measure, hits: list[tuple[int, str]], start_tick: int, end_tick: int, division: int) -> None:
+    """Hands up (voice 1) and kick down (voice 2); each written length reaches the next attack."""
+    bar_ticks = end_tick - start_tick
+    for number, feet in ((1, False), (2, True)):
+        if number == 2:
+            ET.SubElement(ET.SubElement(measure, "backup"), "duration").text = str(bar_ticks)
+        attacks = {}
+        for tick, lane in hits:
+            if (lane == "kick") == feet and start_tick <= tick < end_tick:
+                lanes = attacks.setdefault(tick - start_tick, [])
+                if lane not in lanes:
+                    lanes.append(lane)
+        positions = sorted(attacks)
+        cursor = 0
+
+        def rest(ticks):
+            pieces = [(ticks, None, False)] if ticks == bar_ticks else _note_pieces(ticks, division)
+            for length, name, dot in pieces:
+                note = ET.SubElement(measure, "note")
+                ET.SubElement(note, "rest", **({"measure": "yes"} if ticks == bar_ticks else {}))
+                ET.SubElement(note, "duration").text = str(length)
+                ET.SubElement(note, "voice").text = str(number)
+                if name:
+                    ET.SubElement(note, "type").text = name
+                    if dot:
+                        ET.SubElement(note, "dot")
+
+        for index, position in enumerate(positions):
+            if position > cursor:
+                rest(position - cursor)
+            following = positions[index + 1] if index + 1 < len(positions) else bar_ticks
+            first, *remainder = _note_pieces(following - position, division)
+            for chord, lane in enumerate(attacks[position]):
+                step, octave, head = DRUM_DISPLAY.get(lane, ("C", 5, None))
+                note = ET.SubElement(measure, "note")
+                if chord:
+                    ET.SubElement(note, "chord")
+                unpitched = ET.SubElement(note, "unpitched")
+                ET.SubElement(unpitched, "display-step").text = step
+                ET.SubElement(unpitched, "display-octave").text = str(octave)
+                ET.SubElement(note, "duration").text = str(first[0])
+                ET.SubElement(note, "voice").text = str(number)
+                if first[1]:
+                    ET.SubElement(note, "type").text = first[1]
+                    if first[2]:
+                        ET.SubElement(note, "dot")
+                ET.SubElement(note, "stem").text = "down" if feet else "up"
+                if head:
+                    ET.SubElement(note, "notehead").text = head
+            if remainder:
+                rest(sum(length for length, _, _ in remainder))
+            cursor = following
+        if cursor < bar_ticks:
+            rest(bar_ticks - cursor)

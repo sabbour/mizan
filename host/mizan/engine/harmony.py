@@ -9,7 +9,8 @@ from threading import Event
 import numpy as np
 from scipy.signal import find_peaks
 
-from ..meter import build_bar_map
+from ..errors import ModelFailed
+from ..meter import beat_at_time, build_bar_map, time_at_beat
 from .audio import Audio, spectra
 from .models import BEAT_THIS, BEAT_THIS_FRONTEND, ensure_model
 from .providers import PROVIDER_ERRORS, VerifiedModel, check_cancel
@@ -102,7 +103,7 @@ def learned_beat_grid(audio: Audio, cancelled: Event | None = None) -> tuple[dic
         feeds = {"spectrogram": spectrogram[None, start:stop]}
         output = model.run(feeds) if model else None
         if model is None:
-            model = VerifiedModel(model_path, feeds, cancelled=cancelled)
+            model = VerifiedModel(model_path, feeds, provider="cpu", cancelled=cancelled)
             output = model.first_output
         for index in range(2):
             logits[index][start:stop] += output[index][0]
@@ -110,36 +111,106 @@ def learned_beat_grid(audio: Audio, cancelled: Event | None = None) -> tuple[dic
         if stop == len(spectrogram):
             break
     beat, downbeat = (value / np.maximum(weights, 1e-8) for value in logits)
+    grid = activation_beat_grid(beat, downbeat, frontend["sample_rate"] / hop)
+    return grid, {"method": "beat-this-final0", "model": BEAT_THIS, "provider": model.report,
+                  "beatCleanup": grid.pop("cleanup")}
+
+
+def _peak_times(values: np.ndarray, peaks: np.ndarray, fps: float) -> np.ndarray:
+    """Sub-frame peak positions; the 50 fps frame grid alone aliases tempo by several percent."""
+    positions = peaks.astype(float)
+    inner = (peaks > 0) & (peaks < len(values) - 1)
+    left, middle, right = (values[peaks[inner] + offset] for offset in (-1, 0, 1))
+    divisor = left - 2 * middle + right
+    positions[inner] += np.clip(np.divide(0.5 * (left - right), divisor, out=np.zeros_like(divisor),
+                                          where=abs(divisor) > 1e-9), -0.5, 0.5)
+    return positions / fps
+
+
+def clean_beats(times) -> tuple[np.ndarray, dict]:
+    """Repair isolated missed or doubled tracker beats against the local beat period."""
+    beats = np.unique(np.asarray(times, dtype=float))
+    beats = beats[np.isfinite(beats)]
+    if len(beats) < 4:
+        return beats, {"inserted": 0, "removed": 0, "irregular": 0, "intervals": max(0, len(beats) - 1)}
+
+    def local_periods(values):
+        # Fold intervals into the song's prevailing tempo octave first, so a tracker that
+        # switches to half- or double-time for a section is repaired instead of followed.
+        intervals = np.diff(values)
+        reference = float(np.median(intervals))
+        folded = intervals / 2.0 ** np.round(np.log2(intervals / reference))
+        return np.array([np.median(folded[max(0, index - 8):index + 9]) for index in range(len(intervals))])
+
+    removed = 0
+    for _ in range(3):
+        periods = local_periods(beats)
+        intervals = np.diff(beats)
+        short = np.flatnonzero(intervals < periods * 0.6)
+        if not len(short):
+            break
+        drop = set()
+        for index in short:
+            if index in drop or index + 1 in drop:
+                continue
+            previous = beats[index - 1] + periods[index] if index else None
+            drop.add(index + 1 if previous is None or abs(beats[index] - previous)
+                     <= abs(beats[index + 1] - previous) else index)
+        removed += len(drop)
+        beats = np.delete(beats, sorted(drop))
+    periods = local_periods(beats)
+    filled = [beats[0]]
+    inserted = irregular = 0
+    for index, interval in enumerate(np.diff(beats)):
+        ratio = interval / periods[index]
+        count = max(1, round(ratio))
+        if abs(ratio - count) > 0.2 * count:
+            irregular += 1
+        if count > 1:
+            filled.extend(beats[index] + interval * np.arange(1, count) / count)
+            inserted += count - 1
+        filled.append(beats[index + 1])
+    return np.asarray(filled), {"inserted": inserted, "removed": removed, "irregular": irregular,
+                                "intervals": len(beats) - 1}
+
+
+def activation_beat_grid(beat: np.ndarray, downbeat: np.ndarray, fps: float) -> dict:
     beat_peaks, _ = find_peaks(beat, distance=7, height=0)
     downbeat_peaks, _ = find_peaks(downbeat, distance=7, height=0)
-    beat_times = beat_peaks * hop / frontend["sample_rate"]
-    downbeat_times = downbeat_peaks * hop / frontend["sample_rate"]
-    if len(beat_times):
-        downbeat_times = np.unique([beat_times[np.argmin(abs(beat_times - value))]
-                                    for value in downbeat_times])
-    intervals = np.diff(beat_times)
-    stable = intervals[(intervals >= 0.28) & (intervals <= 1.1)]
-    if len(stable) < 2:
+    raw = _peak_times(beat, beat_peaks, fps)
+    beat_times, cleanup = clean_beats(raw)
+    if len(beat_times) < 8:
         raise ModelFailed("Beat This! did not find a stable beat sequence.")
-    period = float(np.median(stable))
-    bpm = 60 / period
-    while bpm < 70:
-        bpm *= 2
-    while bpm > 190:
-        bpm /= 2
-    confidence = float(np.mean(abs(stable - np.median(stable)) < 0.08))
-    grid = {"bpm": round(bpm, 3), "confidence": confidence, "times": beat_times.tolist(),
-            "phaseSeconds": float(beat_times[0]), "downbeats": downbeat_times.tolist(),
-            "downbeatSource": "beat-this", "meterConfidence": 0.0}
-    return grid, {"method": "beat-this-final0", "model": BEAT_THIS, "provider": model.report}
+    intervals = np.diff(beat_times)
+    period = float(np.median(intervals))
+    if not 0.2 <= period <= 1.5:
+        raise ModelFailed("Beat This! did not find a stable beat sequence.")
+    downbeat_times = _peak_times(downbeat, downbeat_peaks, fps)
+    indices = []
+    for value in downbeat_times:
+        index = int(np.argmin(abs(beat_times - value)))
+        if abs(beat_times[index] - value) <= period * 0.3 and (not indices or indices[-1] != index):
+            indices.append(index)
+    repaired = (cleanup["inserted"] + cleanup["removed"]) / max(1, cleanup["intervals"])
+    local = np.array([np.median(intervals[max(0, index - 8):index + 9]) for index in range(len(intervals))])
+    unsteady = float(np.mean(abs(intervals / local - 1) > 0.12))
+    # Regularity counts tracker intervals that fit the local beat; it is not a calibrated probability.
+    confidence = (1 - cleanup["irregular"] / max(1, cleanup["intervals"]) - max(0.0, repaired - 0.25)
+                  - unsteady)
+    return {"bpm": round(60 / period, 3), "confidence": round(max(0.0, confidence), 3),
+            "times": beat_times.tolist(), "phaseSeconds": float(beat_times[0]),
+            "downbeats": beat_times[indices].tolist(), "downbeatIndices": indices,
+            "downbeatSource": "beat-this", "meterConfidence": 0.0, "beatsTracked": True,
+            "cleanup": {**cleanup, "rawBeats": len(raw), "rawDownbeats": len(downbeat_times)}}
 
 
-def _rational_span(value: float, tolerance: float = 0.04) -> float:
-    for denominator in (1, 2, 4, 8, 16):
+def _rational_span(value: float, tolerance: float = 0.04, denominators=(1, 2, 4, 8, 16),
+                   strict: bool = False) -> float | None:
+    for denominator in denominators:
         fitted = round(value * denominator) / denominator
         if fitted > 0 and abs(fitted - value) <= tolerance:
             return fitted
-    return round(value * 16) / 16
+    return None if strict else round(value * 16) / 16
 
 
 def infer_meter(timing: dict) -> dict:
@@ -287,6 +358,150 @@ def inferred_beats_per_bar(timing: dict) -> float:
     return infer_meter(timing)["beatsPerBar"]
 
 
+def _literal_runs(counts: list[int], primary: int) -> set[int]:
+    """Intervals that form sustained or alternating groups unrelated to the primary bar."""
+    def distinct(value):
+        return 2 <= value <= 12 and value % primary and primary % value
+    literal = set()
+    index = 0
+    while index < len(counts):
+        stop = index
+        while stop < len(counts) and counts[stop] == counts[index]:
+            stop += 1
+        if stop - index >= 3 and distinct(counts[index]):
+            literal.update(range(index, stop))
+        index = max(stop, index + 1)
+    for index in range(len(counts) - 5):
+        pattern = counts[index:index + 2]
+        if pattern[0] != pattern[1] and counts[index:index + 6] == pattern * 3 and any(map(distinct, pattern)):
+            stop = index + 6
+            while stop < len(counts) and counts[stop] == pattern[(stop - index) % 2]:
+                stop += 1
+            literal.update(range(index, stop))
+    return literal
+
+
+def downbeat_meter(indices: list[int], beat_confidence: float) -> dict:
+    """Bar groups from whole tracked beats between observed downbeats.
+
+    The primary group is the most frequent observed bar; isolated tracker errors do not
+    become one-off signatures, a sustained phase shift leaves an unverified partial bar,
+    and only sustained or alternating different groups become signature changes.
+    """
+    counts = [int(value) for value in np.diff(indices)] if len(indices) > 1 else []
+    usable = Counter(value for value in counts if 2 <= value <= 12)
+    base = {
+        "method": "tracked-downbeat-beat-count-v1",
+        "confidenceMeaning": "share of observed downbeat intervals explained by the bar groups; not calibrated",
+        "spellingVerified": False,
+        "spellingReason": "Downbeats count tracked beats; they do not resolve the written denominator or tempo octave.",
+    }
+    if not usable or beat_confidence < 0.65:
+        return {**base, "beatsPerBar": 4, "confidence": 0.0, "supported": False, "fallback": True,
+                "boundariesVerified": False,
+                "reason": "low_beat_grid_confidence" if usable else "insufficient_downbeats",
+                "anchor": indices[0] if len(indices) else 0,
+                "changes": [{"startBeat": 0.0, "numerator": 4, "denominator": 4, "status": "unverified"}],
+                "evidence": {"intervals": len(counts)}, "candidates": {}}
+    primary = max(sorted(usable), key=lambda value: (usable[value], -value))
+    halved = primary > 7 and any(primary % factor == 0 for factor in (2, 3))
+    if halved:
+        primary //= 2 if primary % 2 == 0 else 3
+    literal = _literal_runs(counts, primary)
+    anchor, cursor = indices[0], indices[0]
+    changes = []
+    explained = missing = shifts = subdivisions = 0
+
+    def mark(start, length, status):
+        point = {"startBeat": float(start - anchor), "numerator": length, "denominator": 4, "status": status}
+        if changes and changes[-1]["startBeat"] == point["startBeat"]:
+            changes[-1] = point
+        elif (not changes or changes[-1]["numerator"] != length or status == "unverified"
+                or changes[-1]["status"] != status or (point["startBeat"] - changes[-1]["startBeat"]) % length):
+            changes.append(point)
+
+    def shift(target):
+        length = changes[-1]["numerator"]
+        remainder = (target - cursor) % length
+        if remainder:
+            mark(target - remainder, length, "unverified")
+        return target
+
+    mark(anchor, primary, "supported")
+    for position, count in enumerate(counts):
+        start, target = indices[position], indices[position + 1]
+        if position in literal:
+            if cursor != start:
+                cursor = shift(start)
+                shifts += 1
+            mark(cursor, count, "supported")
+            cursor = target
+            explained += 1
+            continue
+        gap = target - cursor
+        if gap <= 0:
+            continue
+        if gap % primary == 0:
+            if changes[-1]["numerator"] != primary or changes[-1]["status"] != "supported":
+                mark(cursor, primary, "supported")
+            missing += gap // primary - 1
+            explained += 1
+            cursor = target
+            continue
+        # A downbeat off the running phase is spurious unless following downbeats confirm it.
+        later = indices[position + 2:position + 4]
+        if len(later) == 2 and all((value - target) % primary == 0 for value in later) \
+                and any((value - cursor) % primary for value in later):
+            cursor = shift(target)
+            shifts += 1
+            mark(cursor, primary, "supported")
+        elif primary % gap == 0 or primary % (primary - gap % primary) == 0:
+            subdivisions += 1
+    considered = len(counts) - subdivisions
+    confidence = explained / considered if considered else 0.0
+    supported = explained >= 3 and confidence >= 0.6
+    if not supported:
+        return {**base, "beatsPerBar": 4, "confidence": 0.0, "supported": False, "fallback": True,
+                "boundariesVerified": False, "reason": "downbeat_spacing_is_too_noisy",
+                "anchor": anchor, "changes": [{"startBeat": 0.0, "numerator": 4, "denominator": 4,
+                                               "status": "unverified"}],
+                "evidence": {"intervals": len(counts), "explained": explained},
+                "candidates": {f"{value}/4": count for value, count in usable.items()}}
+    verified = not halved and not shifts and missing <= max(1, len(counts) // 4)
+    if not verified:
+        changes = [{**change, "status": "unverified"} for change in changes]
+    return {
+        **base, "beatsPerBar": primary, "confidence": round(confidence, 3), "supported": True,
+        "fallback": False, "boundariesVerified": verified, "reason": "downbeat_spacing_supports_meter",
+        "anchor": anchor, "changes": changes,
+        "evidence": {"intervals": len(counts), "explained": explained, "missingBoundaries": missing,
+                     "phaseShifts": shifts, "halvedLongGroup": halved,
+                     "literalGroups": len(literal)},
+        "candidates": {f"{value}/4": count for value, count in usable.items()},
+    }
+
+
+def beat_timeline(beat_times, anchor_index: int, duration: float) -> dict:
+    """Score beat numbers for tracked beats: beat zero starts the (pickup) bar before the anchor."""
+    beats = np.asarray(beat_times, dtype=float)
+    first_period = float(np.median(np.diff(beats[:9])))
+    last_period = float(np.median(np.diff(beats[-9:])))
+    lead = max(0, math.ceil((beats[0] - 0.15 * first_period) / first_period))
+    tempo_map = []
+    if beats[0] > 1e-6:
+        tempo_map.append({"beat": round(float(lead - beats[0] / first_period), 6), "time": 0.0})
+    tempo_map.extend({"beat": float(index + lead), "time": round(float(time), 6)}
+                     for index, time in enumerate(beats) if time > 1e-6 or not tempo_map)
+    if beats[-1] < duration:
+        end = {"beat": round(float(len(beats) - 1 + lead + (duration - beats[-1]) / last_period), 6),
+               "time": round(float(duration), 6)}
+        if end["time"] > tempo_map[-1]["time"] and end["beat"] > tempo_map[-1]["beat"]:
+            tempo_map.append(end)
+    bpm = round(60 / float(np.median(np.diff(beats))), 3)
+    total = float(beat_at_time(tempo_map, bpm, duration))
+    return {"tempoMap": tempo_map, "bpm": bpm, "pickup": float(anchor_index + lead), "totalBeats": total}
+
+
 def acoustic_features(audio: Audio, cancelled: Event | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Short RMS frames retain accents that the harmonic FFT window smears together."""
     size = max(1, round(audio.rate * 0.01))
@@ -385,9 +600,9 @@ def acoustic_beat_grid(times: np.ndarray, energy: np.ndarray, duration: float,
         accent_peaks, _ = find_peaks(accent_correlations, distance=max(1, round(0.08 / step)))
         groups = []
         for index in accent_peaks:
-            length = _rational_span(index * step / period)
+            length = _rational_span(index * step / period, denominators=(1, 2), strict=True)
             score = float(accent_correlations[index])
-            if (length > 1 and abs(index * step / period - length) <= 0.08
+            if (length is not None and length > 1 and abs(index * step / period - length) <= 0.08
                     and score >= 0.08 and score - accent_correlations[pulse_index] >= 0.015):
                 groups.append((length, score, int(index)))
         group = None
@@ -522,9 +737,18 @@ def acoustic_beat_grid(times: np.ndarray, energy: np.ndarray, duration: float,
     if boundary_meter is not None:
         meter = boundary_meter
         unique = points.tolist()
+    if unique:
+        phase = float(unique[0] % period)
+    elif len(global_peaks):
+        angles = 2 * np.pi * (times[global_peaks] % period) / period
+        weights = attack[global_peaks]
+        phase = float(np.arctan2(weights @ np.sin(angles), weights @ np.cos(angles)) % (2 * np.pi)
+                      / (2 * np.pi) * period)
+    else:
+        phase = 0.0
     timing = {
         "bpm": bpm, "confidence": consistency, "beatConfidence": consistency,
-        "phaseSeconds": 0.0, "times": np.arange(0, duration, period).tolist(),
+        "phaseSeconds": phase, "times": np.arange(phase, duration, period).tolist(),
         "downbeats": unique, "downbeatSource": "acoustic-accent-recurrence",
         "meterConfidence": 0.0, "observedPulseSeconds": period, "accentMeter": meter,
     }
@@ -638,7 +862,8 @@ def contiguous_chords(chords: list[dict]) -> list[dict]:
     return smooth_chords(chords)
 
 
-def align_chord_changes(chords: list[dict], times: np.ndarray, chroma: np.ndarray, bpm: float) -> list[dict]:
+def align_chord_changes(chords: list[dict], times: np.ndarray, chroma: np.ndarray, bpm: float,
+                        tempo_map: list[dict] | None = None) -> list[dict]:
     aligned = [dict(chord) for chord in chords]
     early_window = min(0.75, 1.35 * 60 / bpm)
     late_window = min(0.3, 0.55 * 60 / bpm)
@@ -651,7 +876,7 @@ def align_chord_changes(chords: list[dict], times: np.ndarray, chroma: np.ndarra
         old_only, new_only = sorted(old - new), sorted(new - old)
         if not old_only or not new_only:
             continue
-        boundary = current["startBeat"] * 60 / bpm
+        boundary = time_at_beat(tempo_map, bpm, current["startBeat"])
         selected = (times >= boundary - early_window) & (times <= boundary + late_window)
         frames = chroma[selected]
         if len(frames) < 16 or frames.sum() < 1e-5:
@@ -667,7 +892,7 @@ def align_chord_changes(chords: list[dict], times: np.ndarray, chroma: np.ndarra
                 continue
             t = times[selected]
             onset = np.interp(0, contrast[j:j + 2], t[j:j + 2])
-            new_beat = float(onset * bpm / 60)
+            new_beat = float(beat_at_time(tempo_map, bpm, onset))
             end = current["startBeat"] + current["beats"]
             if previous["startBeat"] < new_beat < end:
                 previous["beats"] = new_beat - previous["startBeat"]
@@ -695,33 +920,82 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
         if harmonic_acoustic is not None and (acoustic is None or
                 infer_meter(harmonic_acoustic[0])["confidence"] > infer_meter(acoustic[0])["confidence"]):
             acoustic = harmonic_acoustic
+    learned_tracked = _tracked(timing)
     if acoustic is not None:
         acoustic_timing, acoustic_details = acoustic
         acoustic_meter = infer_meter(acoustic_timing)
-        learned_meter = infer_meter(timing)
         acoustic_details["alternativeBeatGrid"] = {
             "method": beat_details["method"], "bpm": timing["bpm"], "confidence": timing["confidence"],
         }
+        same_tempo = abs(acoustic_timing["bpm"] / timing["bpm"] - 1) <= 0.06
+        # A validated tracked beat sequence is preferred; distinct recurring accents at the
+        # same tempo may still replace its downbeat labels, but never its tempo octave.
         if acoustic_meter["supported"] and (
-                not learned_meter["supported"]
-                or abs(acoustic_timing["bpm"] / timing["bpm"] - 1) > 0.06
-                or acoustic_meter.get("boundariesVerified")):
+                not learned_tracked and not infer_meter(timing)["supported"]
+                or acoustic_meter.get("boundariesVerified") and (same_tempo or not learned_tracked)):
             timing, beat_details = acoustic_timing, acoustic_details
-    bpm = timing["bpm"]
-    meter = infer_meter(timing)
-    beats_per_bar = meter["beatsPerBar"]
     timing["beatConfidence"] = timing.get("confidence", 0.0)
+    duration = audio.duration
+    tempo_map = None
+    if _tracked(timing):
+        beats = np.asarray(timing["times"], dtype=float)
+        indices = timing.get("downbeatIndices")
+        if indices is None:
+            indices = []
+            for value in timing.get("downbeats", []):
+                index = int(np.argmin(abs(beats - value)))
+                if abs(beats[index] - value) <= 0.3 * float(np.median(np.diff(beats))) \
+                        and (not indices or indices[-1] < index):
+                    indices.append(index)
+        meter = downbeat_meter(indices, timing["beatConfidence"])
+        timeline = beat_timeline(beats, meter.pop("anchor"), duration)
+        tempo_map, bpm, pickup = timeline["tempoMap"], timeline["bpm"], timeline["pickup"]
+        total_beats = timeline["totalBeats"]
+        if pickup >= total_beats - 1e-6:
+            pickup = 0.0
+        timing["bpm"] = bpm
+    else:
+        meter = infer_meter(timing)
+        bpm = timing["bpm"]
+        pickup = 0.0
+        total_beats = duration * bpm / 60
+        period = 60 / bpm
+        acoustic_grid = timing.get("accentMeter") is not None
+        phase = timing.get("phaseSeconds", 0.0) % period if acoustic_grid else 0.0
+        if acoustic_grid:
+            # Align acoustic pulses with beats; meter boundaries move by the same whole-grid offset.
+            start = phase - max(0, math.ceil((phase - 0.15 * period) / period)) * period
+            tempo_map = ([{"beat": 0.0, "time": round(start, 6)}] if start >= 0 else
+                         [{"beat": round(-start / period, 6), "time": 0.0}])
+            tempo_map.append({"beat": round((duration - start) / period, 6), "time": round(duration, 6)})
+            total_beats = (duration - start) / period
+            offset = -start / period
+            changes = [{**meter["changes"][0], "startBeat": 0.0}]
+            for change in meter["changes"][1:]:
+                moved = round((change["startBeat"] + offset) * 4) / 4
+                if moved > changes[-1]["startBeat"]:
+                    changes.append({**change, "startBeat": moved})
+            meter = {**meter, "changes": changes}
+            if len(changes) == 1 and timing.get("downbeats"):
+                pickup = float(round((timing["downbeats"][0] - start) / period))
+                if pickup >= total_beats - 1e-6:
+                    pickup = 0.0
+    beats_per_bar = meter["beatsPerBar"]
     timing["meterConfidence"] = meter["confidence"]
     timing["meter"] = meter
     timing.pop("accentMeter", None)
+    timing.pop("beatsTracked", None)
     key = detect_key(chroma)
-    total_beats = audio.duration * bpm / 60
-    bar_map = build_bar_map(total_beats, meter["changes"])
+    bar_map = build_bar_map(total_beats, meter["changes"], pickup=pickup)
     bars = len(bar_map)
+
+    def seconds(beat):
+        return time_at_beat(tempo_map, bpm, beat)
+
     chords = []
     for beat in range(math.ceil(total_beats)):
         check_cancel(cancelled)
-        selected = (times >= beat * 60 / bpm) & (times < min(beat + 1, total_beats) * 60 / bpm)
+        selected = (times >= seconds(beat)) & (times < seconds(min(beat + 1, total_beats)))
         vector = chroma[selected].mean(axis=0) if selected.any() else np.zeros(12)
         strength = float(energy[selected].mean()) if selected.any() else 0.0
         chords.append({"startBeat": float(beat), "beats": min(1.0, total_beats - beat),
@@ -730,13 +1004,13 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     section_energy = []
     for first in range(0, bars, 4):
         last = min(first + 3, bars - 1)
-        selected = ((times >= bar_map[first]["startBeat"] * 60 / bpm)
-                    & (times < (bar_map[last]["startBeat"] + bar_map[last]["beats"]) * 60 / bpm))
+        selected = ((times >= seconds(bar_map[first]["startBeat"]))
+                    & (times < seconds(bar_map[last]["startBeat"] + bar_map[last]["beats"])))
         sections.append({"name": f"Bars {first + 1}-{min(first + 4, bars)}",
                          "startBar": first + 1, "bars": min(4, bars - first)})
         section_energy.append(float(energy[selected].mean()) if selected.any() else 0.0)
     maximum = max(section_energy, default=0)
-    aligned = align_chord_changes(contiguous_chords(chords), times, chroma, bpm)
+    aligned = align_chord_changes(contiguous_chords(chords), times, chroma, bpm, tempo_map)
     spellings = list(dict.fromkeys(f'{point["numerator"]}/{point["denominator"]}'
                                    for point in meter["changes"]))
     meter_warning = (
@@ -749,8 +1023,17 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None) -> dict:
     )
     return {"bpm": bpm, "beatsPerBar": beats_per_bar,
             "beatUnit": meter["changes"][0]["denominator"], "bars": bars, "barMap": bar_map, "key": key,
+            **({"tempoMap": tempo_map} if tempo_map else {}),
             "sections": sections, "chords": aligned, "timing": timing,
             "beatDetails": beat_details,
             "sectionEnergy": [value / maximum if maximum else 0 for value in section_energy],
             "warnings": [meter_warning]
             + (["Tempo is uncertain; the display uses a 120 BPM grid."] if timing["confidence"] == 0 else [])}
+
+
+def _tracked(timing: dict) -> bool:
+    """Observed beat times regular enough to define the score's beat-to-recording map."""
+    times = timing.get("times") or []
+    return (timing.get("accentMeter") is None and len(times) >= 8
+            and float(timing.get("confidence", 0.0)) >= 0.5
+            and bool(np.all(np.diff(np.asarray(times, dtype=float)) > 0)))

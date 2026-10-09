@@ -32,7 +32,8 @@ export type MelodyNote = Omit<PianoNote, 'hand'>
 
 export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'snare' | 'floortom' | 'kick'
 
-export type DrumHit = { trackId?: string; lane: DrumLane; startBeat: number; velocity: number }
+/** `confidence` is present on automatic transcriptions; imported hits omit it and keep their written rhythm. */
+export type DrumHit = { trackId?: string; lane: DrumLane; startBeat: number; velocity: number; confidence?: number }
 
 /** One transcribed part. A song lists only the parts that were actually transcribed. */
 /** `creative` tracks are generated to play along with, listed apart from the transcribed ones. */

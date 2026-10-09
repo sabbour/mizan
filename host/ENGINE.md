@@ -34,7 +34,7 @@ draft, not a performance-accurate score.
 | Vocal melody | MuScriptor on the isolated HT-Demucs vocals stem when locally audible; only labelled `voice` notes become a tentative melody | PyTorch ARM CPU |
 | Drums | MuScriptor's GM MIDI drum tokens mapped to kick, snare, closed/open hat, floor tom, high tom, ride and crash lanes | PyTorch ARM CPU |
 | Harmony | Peak chroma, major/minor/7/maj7/m7/sus4 templates, unknown vs silence, key profiles, Roman numerals/roles, smoothing/merging | CPU |
-| Rhythm/sections | Beat This! final0 ONNX beat/downbeat tracking; onset-grid fallback; numbered bar groups | DirectML + CPU |
+| Rhythm/sections | Beat This! final0 ONNX beat/downbeat tracking; onset-grid fallback; numbered bar groups | CPU |
 | Accompaniment | Deterministic root/fifth/octave LH; voice-led RH within C4-C6 and an octave span; block/arpeggio/pop from section energy | CPU |
 | Export/finalize | Beats-based JSON with original seconds, multitrack MIDI, WAV candidates, atomic cache publication and SQLite metadata | CPU |
 
@@ -178,7 +178,9 @@ Official PyPI checks and installation on this machine established:
   FFmpeg is not bundled or silently installed by this patch.
 
 `MIZAN_PROVIDER=auto` uses a measured order **per ONNX model**. HT-Demucs
-uses CPU; Beat This! uses DirectML then CPU. `qnn`/`dml` prefer just that
+uses CPU; Beat This! always uses CPU because DirectML returned finite but wrong
+logits for it (scattered 0.14-0.36 s beats and lost downbeats where CPU found a
+steady pulse on the same cached excerpts). `qnn`/`dml` prefer just that
 accelerator then CPU; `cpu` runs only CPU. The report, not the override's name,
 tells which provider executed. DSP stages always report CPU.
 
@@ -534,7 +536,11 @@ separation remains the listening-stem path regardless of note model.
   Drum events add unquantized `onset`, confidence and `possibleLanes`. All
   velocities/confidences are floats in [0, 1]. Chords retain seconds too.
 - Timing is zero-based beats, bars/section start bars are one-based, and
-  `beats` is a duration. Quarter-beat snapping occurs only within 0.08 beats;
+  `beats` is a duration. When beats were tracked, `tempoMap` (score beat to
+  recording seconds, the same piecewise map aligned imports use) follows the
+  tracked beats; beat zero begins the bar before the first observed downbeat, so
+  an anacrusis is a leading partial bar instead of shifting every barline.
+  Sixteenth-beat snapping occurs only within 0.08 beats of that map;
   raw seconds are never overwritten. Beat conversion remains tied to original
   audio time, including leading silence, rather than trimming the recording.
 - Chord `symbol: null` means uncertain; `"N.C."` means silence. Key can be null;
@@ -581,9 +587,19 @@ and normal YouTube ingestion; offline failures remain errors. Model acquisition
 and verification are unchanged, so uncached models can still require network.
 Linked MIDI/MusicXML recordings continue to use the separate alignment path.
 
-Remaining limits: constant-tempo/constant-meter notation; Beat This! can suggest
-3/4 only after several stable downbeat intervals, and cannot distinguish it
-from 6/8. Without that evidence analysis retains 4/4. MIDI/MusicXML imports
+Meter from tracked audio counts whole beats between Beat This! downbeats
+(`tracked-downbeat-beat-count-v1`). Isolated missed or spurious downbeats do not
+create signatures; a sustained phase shift leaves an unverified partial bar;
+only sustained or alternating different groups become signature changes. Any
+phase shift, halved long group or many missing downbeats marks the bars
+`unverified`. The count gives a grouping in tracked beats, not a written
+denominator or tempo octave (the same song can track at 92 or 184 BPM).
+Drum notation writes automatic hits on the bar's sixteenth grid (UI score and
+MusicXML export share the rule) except consecutive same-lane hits 0.1-0.2 beat
+apart, which keep their source position; playback uses the source beat.
+
+Remaining limits: Beat This! cannot distinguish 3/4 from 6/8 or a tempo octave;
+without downbeat evidence analysis retains 4/4. MIDI/MusicXML imports
 preserve explicit meters such as 6/8; changing meters within a file are
 rejected rather than silently misplacing bars. There are no reliable semantic
 verse/chorus labels or validated meter-accuracy claims; no pedal modelling, imperfect learned

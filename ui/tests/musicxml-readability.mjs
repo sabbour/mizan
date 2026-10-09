@@ -220,6 +220,26 @@ try {
     ?.match(/<voice>(\d+)<\/voice>/)?.[1]
   assert.equal(startVoice, '2', 'overlapping instrument notes use a stable second voice before the barline')
   assert.equal(stopVoice, startVoice, 'the instrument tie continuation stays in the same voice')
+
+  const { drumXml, drumNotationBeats } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
+  const jittered = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map((beat, index) => ({
+    lane: 'hihat', startBeat: beat + (index % 2 ? 0.06 : -0.04 * (index > 0)), velocity: 0.6, confidence: 0.4 }))
+  jittered.push({ lane: 'kick', startBeat: 0.03, velocity: 0.9, confidence: 0.4 },
+    { lane: 'snare', startBeat: 1.07, velocity: 0.9, confidence: 0.4 },
+    { lane: 'snare', startBeat: 1.07, velocity: 0.9, confidence: 0.4 })
+  const drumSong = { ...song, bars: 1, piano: [], drums: jittered }
+  const drumsBefore = structuredClone(jittered)
+  const drumScore = drumXml(drumSong, false)
+  assert.doesNotMatch(drumScore, /<type>(?:32nd|64th)<\/type>|time-modification/,
+    'timing jitter in automatic drum hits does not become tiny rests or tuplets')
+  assert.equal((drumScore.match(/<display-step>C<\/display-step>/g) ?? []).length, 1,
+    'a duplicated automatic snare hit is written as one notehead')
+  assert.deepEqual(jittered, drumsBefore, 'drum engraving keeps source playback beats')
+  assert.deepEqual(drumNotationBeats({ ...drumSong, drums: [
+    { lane: 'snare', startBeat: 2, velocity: 1, confidence: 0.4 },
+    { lane: 'snare', startBeat: 2.125, velocity: 1, confidence: 0.4 },
+    { lane: 'snare', startBeat: 3.125, velocity: 1 },
+  ] }), [2, 2.125, 3.125], 'a genuine 32nd figure and imported rhythms are not coarsened')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

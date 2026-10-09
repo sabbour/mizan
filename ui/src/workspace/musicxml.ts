@@ -418,7 +418,8 @@ function group(items: { pos: number; dur: number; head: Head }[]): Event[] {
     const e = map.get(it.pos)
     if (e) {
       e.dur = Math.max(e.dur, it.dur)
-      e.heads.push(it.head)
+      if (!it.head.xml.startsWith('<unpitched>') || !e.heads.some((head) => head.xml === it.head.xml))
+        e.heads.push(it.head)
     } else map.set(it.pos, { pos: it.pos, dur: it.dur, heads: [it.head] })
   }
   return [...map.values()]
@@ -702,20 +703,62 @@ function drumHead(lane: DrumLane): string {
   return `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>${head ? `<notehead>${head}</notehead>` : ''}`
 }
 
+/**
+ * Written beat for each drum hit. Automatic hits move to their bar's sixteenth grid. Consecutive
+ * same-lane hits 0.1–0.2 beat apart are a genuine fast figure and keep their source beats; closer
+ * ones are one written hit. Imported hits keep their rhythm; playback keeps the source `startBeat`.
+ */
+export function drumNotationBeats(song: Song): number[] {
+  const bars = meterMeasures(song)
+  const written = song.drums.map((hit) => {
+    if (!Number.isFinite(hit.confidence)) return hit.startBeat
+    const bar = bars[measureIndex(song, hit.startBeat)]
+    const snapped = bar.startBeat + Math.round((hit.startBeat - bar.startBeat) * 4) / 4
+    return snapped >= bar.startBeat && snapped < bar.startBeat + bar.beats - 1e-9 ? snapped : hit.startBeat
+  })
+  const lanes = new Map<string, number[]>()
+  song.drums.forEach((hit, index) => {
+    const key = `${hit.trackId ?? ''}:${hit.lane}`
+    lanes.set(key, [...(lanes.get(key) ?? []), index])
+  })
+  for (const indexes of lanes.values()) {
+    indexes.sort((a, b) => song.drums[a].startBeat - song.drums[b].startBeat)
+    for (let i = 1; i < indexes.length; i++) {
+      const [left, right] = [indexes[i - 1], indexes[i]]
+      const gap = song.drums[right].startBeat - song.drums[left].startBeat
+      if (gap >= 0.1 && gap < 0.2) [written[left], written[right]] = [song.drums[left].startBeat, song.drums[right].startBeat]
+    }
+  }
+  const groups = new Map<string, number[]>()
+  song.drums.forEach((hit, index) => {
+    const key = `${hit.trackId ?? ''}:${hit.lane}:${written[index]}`
+    groups.set(key, [...(groups.get(key) ?? []), index])
+  })
+  for (const indexes of groups.values()) {
+    const sources = indexes.map((index) => song.drums[index].startBeat)
+    if (Math.max(...sources) - Math.min(...sources) >= 0.1) for (const index of indexes) written[index] = song.drums[index].startBeat
+  }
+  return written
+}
+
 export function drumXml(song: Song, chords = true): string {
   const grid = notationGrid(song)
   const DIV = grid.division
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<clef><sign>percussion</sign></clef></attributes>`
   const measures: string[] = []
+  const written = drumNotationBeats(song)
+  const hitsByBar = new Map<number, { lane: DrumLane; beat: number }[]>()
+  song.drums.forEach((hit, index) => {
+    const bar = measureIndex(song, written[index])
+    hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { lane: hit.lane, beat: written[index] }])
+  })
   for (let bar = 1; bar <= song.bars; bar++) {
-    const span = meterMeasures(song)[bar - 1]
-    const start = span.startBeat
     const { startDiv, endDiv } = grid.bars[bar - 1]
     const barDivs = endDiv - startDiv
-    const hits = song.drums.filter((h) => h.startBeat >= start && h.startBeat < start + span.beats)
+    const hits = hitsByBar.get(bar - 1) ?? []
     const events = (feet: boolean) =>
       toGaps(
-        group(hits.filter((h) => (h.lane === 'kick') === feet).map((h) => ({ pos: grid.toDiv(h.startBeat) - startDiv, dur: 0, head: { xml: drumHead(h.lane) } }))),
+        group(hits.filter((h) => (h.lane === 'kick') === feet).map((h) => ({ pos: grid.toDiv(h.beat) - startDiv, dur: 0, head: { xml: drumHead(h.lane) } }))),
         barDivs,
       )
     measures.push(

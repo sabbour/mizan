@@ -39,8 +39,34 @@ def validate_bar_map(value: list[dict]) -> list[dict]:
     return value
 
 
-def build_bar_map(total_beats: float, changes: list[dict]) -> list[dict]:
-    """Quarter-note positions are immutable; a change can end a partial measure."""
+def build_bar_map(total_beats: float, changes: list[dict], pickup: float = 0.0) -> list[dict]:
+    """Quarter-note positions are immutable; a change can end a partial measure.
+
+    ``pickup`` beats before the first change are filled backwards with the first meter,
+    so an anacrusis becomes a leading partial measure instead of shifting every barline.
+    """
+    if not _finite(pickup) or pickup < 0:
+        raise ValueError("A pickup must be a finite, non-negative beat count.")
+    if pickup > 1e-9:
+        if not changes or changes[0].get("startBeat") != 0:
+            raise ValueError("The bar map's first meter must start at beat zero.")
+        if pickup >= total_beats:
+            raise ValueError("A pickup must end before the bar map does.")
+        first = changes[0]
+        nominal = signature_beats(first["numerator"], first["denominator"])
+        partial = pickup % nominal
+        if math.isclose(partial, nominal, abs_tol=1e-6) or partial < 1e-6:
+            partial = 0.0
+        lead = ([{"startBeat": 0.0, "beats": partial, "numerator": first["numerator"],
+                  "denominator": first["denominator"], "status": first.get("status", "explicit"),
+                  "partial": True}] if partial else [])
+        start = partial
+        while start < pickup - 1e-6:
+            lead.append({"startBeat": start, "beats": nominal, "numerator": first["numerator"],
+                         "denominator": first["denominator"], "status": first.get("status", "explicit")})
+            start += nominal
+        rest = build_bar_map(total_beats - pickup, changes)
+        return validate_bar_map(lead + [{**bar, "startBeat": bar["startBeat"] + pickup} for bar in rest])
     if not _finite(total_beats) or total_beats <= 0 or not changes:
         raise ValueError("A bar map requires a positive duration and a starting meter.")
     points = []
@@ -94,3 +120,27 @@ def bar_index(bars: list[dict], beat: float) -> int:
 def total_beats(song: dict) -> float:
     bars = song_bar_map(song)
     return bars[-1]["startBeat"] + bars[-1]["beats"]
+
+
+def time_at_beat(tempo_map: list[dict] | None, bpm: float, beat: float) -> float:
+    """Recording seconds for a score beat, extrapolating exactly like the workspace engine."""
+    if not tempo_map:
+        return beat * 60 / bpm
+    first = tempo_map[0]
+    if beat <= first["beat"] or len(tempo_map) == 1:
+        return first["time"] + (beat - first["beat"]) * 60 / bpm
+    index = min(len(tempo_map) - 1, max(1, bisect_right([point["beat"] for point in tempo_map], beat)))
+    left, right = tempo_map[index - 1], tempo_map[index]
+    return left["time"] + (beat - left["beat"]) / (right["beat"] - left["beat"]) * (right["time"] - left["time"])
+
+
+def beat_at_time(tempo_map: list[dict] | None, bpm: float, seconds: float) -> float:
+    """Inverse of :func:`time_at_beat`; source seconds stay authoritative."""
+    if not tempo_map:
+        return seconds * bpm / 60
+    first = tempo_map[0]
+    if seconds <= first["time"] or len(tempo_map) == 1:
+        return first["beat"] + (seconds - first["time"]) * bpm / 60
+    index = min(len(tempo_map) - 1, max(1, bisect_right([point["time"] for point in tempo_map], seconds)))
+    left, right = tempo_map[index - 1], tempo_map[index]
+    return left["beat"] + (seconds - left["time"]) / (right["time"] - left["time"]) * (right["beat"] - left["beat"])

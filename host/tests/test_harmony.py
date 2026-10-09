@@ -6,6 +6,7 @@ from mizan.engine.harmony import (
     align_chord_changes, analyze_harmony, beat_grid, classify_chord, contiguous_chords, detect_key, numeral, smooth_chords,
 )
 from mizan.engine.accompaniment import generate_accompaniment, voice_chord
+from mizan.meter import time_at_beat, total_beats
 
 
 def synth_chord(notes, seconds=2, rate=22050):
@@ -80,7 +81,8 @@ def test_synthetic_harmony_beats_and_accompaniment():
     assert {n["hand"] for n in notes} == {"left", "right"}
     assert all(60 <= n["midi"] <= 84 for n in notes if n["hand"] == "right")
     assert all(n["generated"] and n["beats"] > 0 for n in notes)
-    assert all(n["startBeat"] + n["beats"] <= 8 * harmony["bpm"] / 60 + 1e-5 for n in notes)
+    assert all(time_at_beat(harmony.get("tempoMap"), harmony["bpm"], n["startBeat"] + n["beats"]) <= 8 + 1e-5
+               and n["startBeat"] + n["beats"] <= total_beats(harmony) + 1e-5 for n in notes)
 
 
 @pytest.mark.parametrize("phase", [0.0, 0.35])
@@ -101,7 +103,7 @@ def test_chord_changes_follow_labelled_audio_onsets_not_late_bar_edges(monkeypat
     harmony = analyze_harmony(Audio(samples, rate))
     assert abs(harmony["bpm"] - 120) < 3
     for symbol, onset in (("Am", 2 + phase), ("F", 4 + phase), ("G", 6 + phase)):
-        starts = [chord["startBeat"] * 60 / harmony["bpm"]
+        starts = [time_at_beat(harmony.get("tempoMap"), harmony["bpm"], chord["startBeat"])
                   for chord in harmony["chords"] if chord["symbol"] == symbol]
         assert starts and abs(starts[0] - onset) < 0.07, (symbol, starts, onset)
 
