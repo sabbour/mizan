@@ -51,6 +51,23 @@ try {
     assert.deepEqual(ticks, beatUnit === 8
       ? [[0, true], [0.75, false], [1.5, true]]
       : [[0, true], [0.5, false], [1, false], [1.5, true]])
+    // A pickup is the end of a bar: its clicks count back from the first downbeat and none is accented.
+    const pickupEngine = new Engine({
+      ...song, bars: 2, chords: [], piano: [], vocals: [], drums: [],
+      barMap: [
+        { startBeat: 0, beats: 2.5, numerator, denominator: beatUnit, status: 'supported', partial: true },
+        { startBeat: 2.5, beats: 3, numerator, denominator: beatUnit, status: 'supported' },
+      ],
+    })
+    pickupEngine.click = true
+    const pickupTicks = []
+    pickupEngine.tick = (time, accented) => pickupTicks.push([time, accented])
+    pickupEngine.events(0, 3.5, 0, 1, false)
+    pickupEngine.events(3.5, 5.5, 3.5, 1, false)
+    assert.deepEqual(pickupTicks, beatUnit === 8
+      ? [[1, false], [2.5, true], [4, false]]
+      : [[0.5, false], [1.5, false], [2.5, true], [3.5, false], [4.5, false]],
+    'pickup clicks land on the pulses before the first downbeat, which alone is accented')
   }
   const odd = new Engine({ ...buildSong(), beatsPerBar: 2.5, beatUnit: 8, chords: [], piano: [], vocals: [], drums: [] })
   const oddScore = { ...odd.song, bars: 1 }

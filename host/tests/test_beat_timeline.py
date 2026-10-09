@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from mizan.engine.audio import Audio
-from mizan.engine.harmony import activation_beat_grid, analyze_harmony, clean_beats, compound_reading, downbeat_meter
+from mizan.engine.harmony import (activation_beat_grid, analyze_harmony, clean_beats, compound_reading,
+                                  doubled_triple_reading, downbeat_meter)
 from mizan.engine.models import BEAT_THIS
 from mizan.engine.output import build_song, drum_notation_beats, export_midi, export_musicxml, quantize
 from mizan.meter import beat_at_time, build_bar_map, song_bar_map, time_at_beat
@@ -326,6 +327,100 @@ def sectioned_onsets(beats, sections):
             onsets.extend(beats[index] + period * step / parts for step in range(parts))
         bar += count
     return onsets
+
+
+def accent_envelope(bar_map, tempo_map, profiles, step=0.01, duration=None):
+    """A detrend-friendly flux curve with one impulse per eighth slot of every full 3/4 bar."""
+    end = duration or tempo_map[-1]["time"] + 1
+    times = np.arange(0, end, step)
+    flux = np.zeros(len(times))
+    full = [bar for bar in bar_map if not bar.get("partial")]
+    for index, bar in enumerate(full):
+        for slot, value in enumerate(profiles(index)):
+            when = time_at_beat(tempo_map, 0, bar["startBeat"] + slot / 2)
+            flux[int(round(when / step))] += value
+    return times, flux
+
+
+def triple_grid(bars=24, pickup=1.0, trailing=0.0, period=0.8):
+    total = pickup + bars * 3 + trailing
+    tempo_map = [{"beat": float(beat), "time": round(beat * period, 6)} for beat in range(int(np.ceil(total)) + 1)]
+    bar_map = build_bar_map(total, [{"startBeat": 0, "numerator": 3, "denominator": 4, "status": "supported"}],
+                            pickup=pickup)
+    return bar_map, tempo_map
+
+
+FELT_DOUBLE = [1.0, 0.6, 0.6, 0.9, 0.6, 0.6]
+
+
+def test_tracked_half_tempo_triple_becomes_two_bars_per_group_with_unchanged_seconds():
+    bar_map, tempo_map = triple_grid()
+    converted, mapped, evidence = doubled_triple_reading(
+        bar_map, tempo_map, 75, *accent_envelope(bar_map, tempo_map, lambda _: FELT_DOUBLE))
+    assert evidence["bars"] == 24 and evidence["midBarAccentShare"] == 1.0
+    assert [point["time"] for point in mapped] == [point["time"] for point in tempo_map]
+    assert [point["beat"] for point in mapped] == [point["beat"] * 2 for point in tempo_map]
+    assert converted[0] == {**converted[0], "startBeat": 0.0, "beats": 2.0, "partial": True}
+    assert [bar["beats"] for bar in converted[1:]] == [3.0] * 48
+    assert {(bar["numerator"], bar["denominator"]) for bar in converted} == {(3, 4)}
+    # Observed downbeats keep their status; every inserted mid-group barline is unverified.
+    assert [bar["status"] for bar in converted[1:5]] == ["supported", "unverified"] * 2
+    # Each tracked downbeat and each mid-group eighth is now a bar start at its original second.
+    starts = [time_at_beat(mapped, 0, bar["startBeat"]) for bar in converted[1:5]]
+    assert starts == pytest.approx([0.8, 2.0, 3.2, 4.4])
+
+
+@pytest.mark.parametrize("profile", [
+    [1.0, 0.2, 0.7, 0.3, 0.7, 0.2],  # true triple: beats two and three lead
+    [1.0, 0.2, 0.6, 0.9, 0.6, 0.2],  # waltz with a syncopated "and of two": other off-beats stay weak
+])
+def test_true_and_syncopated_triple_bars_keep_their_tempo(profile):
+    bar_map, tempo_map = triple_grid()
+    assert doubled_triple_reading(bar_map, tempo_map, 75, *accent_envelope(bar_map, tempo_map, lambda _: profile)) is None
+
+
+def test_doubled_triple_needs_every_passage_and_a_single_triple_meter():
+    bar_map, tempo_map = triple_grid()
+    waltz_start = accent_envelope(bar_map, tempo_map,
+                                  lambda index: [1.0, 0.2, 0.7, 0.3, 0.7, 0.2] if index < 7 else FELT_DOUBLE)
+    assert doubled_triple_reading(bar_map, tempo_map, 75, *waltz_start) is None
+    mixed = [*bar_map[:5], {**bar_map[5], "numerator": 4, "beats": 4.0}]
+    cursor = mixed[-1]["startBeat"] + 4
+    mixed += [{**bar, "startBeat": cursor + 3 * offset} for offset, bar in enumerate(bar_map[6:])]
+    assert doubled_triple_reading(mixed, tempo_map, 75, *accent_envelope(mixed, tempo_map, lambda _: FELT_DOUBLE)) is None
+    assert doubled_triple_reading(bar_map[:8], tempo_map, 75,
+                                  *accent_envelope(bar_map[:8], tempo_map, lambda _: FELT_DOUBLE)) is None
+
+
+def test_doubled_triple_splits_pickups_and_endings_at_their_true_edges():
+    bar_map, tempo_map = triple_grid(pickup=2.0, trailing=2.0)
+    converted, _, _ = doubled_triple_reading(
+        bar_map, tempo_map, 75, *accent_envelope(bar_map, tempo_map, lambda _: FELT_DOUBLE))
+    # A two-beat pickup is four felt beats: a one-beat pickup then a whole bar ending on the downbeat.
+    assert [(bar["beats"], bool(bar.get("partial"))) for bar in converted[:2]] == [(1.0, True), (3.0, False)]
+    # A two-beat ending is a whole bar then a one-beat remainder.
+    assert [(bar["beats"], bool(bar.get("partial"))) for bar in converted[-2:]] == [(3.0, False), (1.0, True)]
+    assert converted[2]["startBeat"] == 4.0
+
+
+def test_doubled_triple_reaches_analysis_with_recording_accents(monkeypatch):
+    period, rate = 0.8, 11025
+    beats = np.arange(0.4, 0.4 + 61 * period, period)
+    tracked(monkeypatch, beats, beats[1::3])
+    samples = np.zeros(int((beats[-1] + 1) * rate), dtype=np.float32)
+    burst = (np.random.default_rng(3).standard_normal(200) * np.hanning(200)).astype(np.float32)
+    for downbeat in beats[1:-3:3]:
+        for slot, level in enumerate(FELT_DOUBLE):
+            at = int(round((downbeat + slot * period / 2) * rate))
+            samples[at:at + 200] += 0.5 * level * burst
+    harmony = analyze_harmony(Audio(samples, rate))
+    evidence = harmony["timing"]["meter"]["evidence"].get("doubledTriple")
+    assert evidence and evidence["midBarAccentShare"] >= 0.5 and min(evidence["passageShares"]) >= 0.4
+    assert harmony["bpm"] == pytest.approx(150, rel=0.02)
+    assert {(bar["numerator"], bar["denominator"]) for bar in harmony["barMap"]} == {(3, 4)}
+    assert "two felt beats" in harmony["warnings"][0]
+    for point in harmony["tempoMap"]:
+        assert any(abs(point["time"] - time) < 1e-6 for time in [0.0, *beats, len(samples) / rate])
 
 
 def test_triple_subdivided_passages_become_compound_bars_with_unchanged_seconds():

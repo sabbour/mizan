@@ -609,6 +609,17 @@ numbers each such tracked beat as 1.5 quarter beats; recording seconds do not
 change. One differing bar between agreeing neighbours follows them. Without
 onset evidence (imports, DSP-only analysis) bars keep simple time. 12/8 and a
 triple-feel 6/4 have the same bar length and cannot be told apart from onsets.
+When every bar is a tracked 3/4 group and the recording's own attacks (log
+spectral flux below 5.5 kHz, ±45 ms) put the mid-group eighth above tracked
+beats two and three in at least half of the bars and in every quarter of the
+song, while the other between-beat eighths are as strong as the tracked beats
+(at least 0.85 of them), the tracker followed every other felt beat of a fast
+triple meter: the tempo is doubled and each group is written as two 3/4 bars
+(pickups and endings split at their true edges), the inserted barlines are
+`unverified`, and recording seconds do not change. A true triple bar accents
+beats two and three, and a waltz with a syncopated "and of two" keeps its other
+off-beats weak, so neither is re-read. Playback clicks count a leading pickup
+back from the first downbeat and do not accent its first pulse.
 The count gives a grouping
 in tracked beats, not a written denominator or tempo octave (the same song can
 track at 92 or 184 BPM).

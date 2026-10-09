@@ -23,7 +23,7 @@ from .youtube import parse_video_id
 STAGES = ("inspect", "download", "decode", "detect", "separate", "transcribe",
           "chords", "notation", "finalize")
 ALL_STAGES = (*STAGES[:-1], "align", "finalize")
-PIPELINE_VERSION = "0.3.0-" + VERSION
+PIPELINE_VERSION = "0.3.1-" + VERSION
 TRANSCRIPTION_MODELS = ("muscriptor-small", "muscriptor-medium", "muscriptor-large")
 Job = dict[str, Any]
 Pipeline = Callable[[Job, Callable[[str, float], None], Event], dict | None]

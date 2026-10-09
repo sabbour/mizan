@@ -511,10 +511,14 @@ export class Engine {
         const span = bars[index]
         const pulse = pulseBeats(span)
         const end = Math.min(to, span.startBeat + span.beats)
-        for (let number = Math.max(0, Math.ceil((from - span.startBeat) / pulse)); ; number++) {
-          const beat = span.startBeat + number * pulse
+        // A leading pickup is the end of a bar: count its pulses back from the first downbeat.
+        const pickup = index === 0 && span.partial
+        const phase = pickup ? ((span.beats % pulse) + pulse) % pulse : 0
+        const first = span.startBeat + (phase > 1e-6 && pulse - phase > 1e-6 ? phase : 0)
+        for (let number = Math.max(0, Math.ceil((from - first) / pulse - 1e-9)); ; number++) {
+          const beat = first + number * pulse
           if (beat >= end) break
-          this.tick(at(beat), number === 0, 0.6)
+          this.tick(at(beat), number === 0 && !pickup, 0.6)
         }
       }
     }

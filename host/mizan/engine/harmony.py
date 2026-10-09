@@ -1052,15 +1052,23 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None, onsets=None) -
         total_beats = bar_map[-1]["startBeat"] + bar_map[-1]["beats"]
         spans = np.diff([point["beat"] for point in tempo_map])
         bpm = timing["bpm"] = round(60 / float(np.median(np.diff([point["time"] for point in tempo_map]) / spans)), 3)
-        changes = []
-        for bar in bar_map:
-            if not changes or any(changes[-1][key] != bar[key] for key in ("numerator", "denominator", "status")):
-                changes.append({key: bar[key] for key in ("startBeat", "numerator", "denominator", "status")})
+        changes = _meter_changes(bar_map)
         nominal = Counter(bar["numerator"] * 4 / bar["denominator"] for bar in bar_map if not bar.get("partial"))
         meter = {**meter, "changes": changes, "beatsPerBar": nominal.most_common(1)[0][0],
                  "evidence": {**meter.get("evidence", {}), "compoundBars": compound_bars}}
         timing["meter"] = meter
         beats_per_bar = meter["beatsPerBar"]
+    doubled = (doubled_triple_reading(bar_map, tempo_map, bpm, *accent_flux(audio, cancelled))
+               if tracked and not compound and all(bar["numerator"] == 3 and bar["denominator"] == 4 for bar in bar_map)
+               else None)
+    if doubled:
+        bar_map, tempo_map, evidence = doubled
+        total_beats = bar_map[-1]["startBeat"] + bar_map[-1]["beats"]
+        bpm = timing["bpm"] = round(bpm * 2, 3)
+        meter = {**meter, "changes": _meter_changes(bar_map), "beatsPerBar": 3, "boundariesVerified": False,
+                 "evidence": {**meter.get("evidence", {}), "doubledTriple": evidence}}
+        timing["meter"] = meter
+        beats_per_bar = 3
     bars = len(bar_map)
 
     def seconds(beat):
@@ -1092,6 +1100,9 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None, onsets=None) -
         "subdivision remain unverified. "
         + ("Note onsets divide the tracked beat in thirds in some passages; those bars are written "
            "in compound x/8 time. " if meter.get("evidence", {}).get("compoundBars") else "")
+        + ("The recording accents the middle of each tracked three-beat group like a new bar, so the "
+           "tracked beat is read as two felt beats: tempo doubled, each group written as two 3/4 bars. "
+           if meter.get("evidence", {}).get("doubledTriple") else "")
         + ("Some passages had downbeats at a fraction of the bar; they are written as half-bar "
            "accents, not signature changes. "
            if meter.get("evidence", {}).get("observedShorterGroups") else "")
@@ -1108,6 +1119,94 @@ def analyze_harmony(audio: Audio, cancelled: Event | None = None, onsets=None) -
             "sectionEnergy": [value / maximum if maximum else 0 for value in section_energy],
             "warnings": [meter_warning]
             + (["Tempo is uncertain; the display uses a 120 BPM grid."] if timing["confidence"] == 0 else [])}
+
+
+def accent_flux(audio: Audio, cancelled: Event | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Log-compressed spectral flux below 5.5 kHz: attack strength, not loudness, at ~12 ms steps."""
+    low = audio.resampled(11025)
+    times, flux, previous = [], [], None
+    for seconds, magnitude in spectra(low, 1024, 128, cancelled):
+        compressed = np.log1p(100 * magnitude)
+        rises = np.maximum(0, np.diff(compressed, axis=0, prepend=compressed[:1] if previous is None else previous[None]))
+        flux.extend(rises.sum(axis=1).tolist())
+        times.extend(seconds)
+        previous = compressed[-1]
+    return np.asarray(times), np.asarray(flux)
+
+
+def _meter_changes(bar_map: list[dict]) -> list[dict]:
+    changes = []
+    for bar in bar_map:
+        if not changes or any(changes[-1][key] != bar[key] for key in ("numerator", "denominator", "status")):
+            changes.append({key: bar[key] for key in ("startBeat", "numerator", "denominator", "status")})
+    return changes
+
+
+def doubled_triple_reading(bar_map: list[dict], tempo_map: list[dict], bpm: float,
+                           times, flux) -> tuple | None:
+    """Re-read tracked 3/4 bars as two felt 3/4 bars when the tracker locked onto every other beat.
+
+    In a fast triple meter a beat tracker can follow every second felt beat, so each tracked
+    "bar" of three beats spans two felt bars. The recording then accents the mid-bar eighth (the
+    second felt downbeat) above tracked beats two and three, and the eighths between tracked beats
+    are as strong as the tracked beats themselves. A waltz with a syncopated "and of two" keeps
+    its other off-beats weak, and a true triple bar accents beats two and three, so neither
+    qualifies. All three tests must hold across the song. Recording seconds are unchanged; score
+    beats double and every inserted barline is marked unverified.
+    """
+    if not tempo_map or not len(times) or len(times) != len(flux):
+        return None
+    edges = (0, len(bar_map) - 1)
+    if any(bar["numerator"] != 3 or bar["denominator"] != 4
+           or bar.get("partial") and index not in edges for index, bar in enumerate(bar_map)):
+        return None
+    full = [bar for bar in bar_map if not bar.get("partial")]
+    if len(full) < 16:
+        return None
+    times, flux = np.asarray(times, dtype=float), np.asarray(flux, dtype=float)
+    step = float(np.median(np.diff(times)))
+    window = max(1, round(1.0 / step))
+    # Expressive eighths drift; ±45 ms is about a tenth of an eighth at the doubled tempo.
+    reach = max(1, round(0.045 / step))
+    accent = np.clip(flux - np.convolve(flux, np.ones(window) / window, "same"), 0, None)
+
+    def strength(beat):
+        index = int(np.searchsorted(times, time_at_beat(tempo_map, bpm, beat)))
+        return float(accent[max(0, index - reach):index + reach + 1].max(initial=0.0))
+
+    slots = np.array([[strength(bar["startBeat"] + k / 2) for k in range(6)] for bar in full])
+    beats = slots[:, 2].sum() + slots[:, 4].sum()
+    if beats <= 0:
+        return None
+    mid = slots[:, 3] > np.maximum(slots[:, 2], slots[:, 4])
+    passages = [float(part.mean()) for part in np.array_split(mid, 4)]
+    evenness = float((slots[:, 1].sum() + slots[:, 5].sum()) / beats)
+    if mid.mean() < 0.5 or min(passages) < 0.4 or evenness < 0.85:
+        return None
+    converted, cursor = [], 0.0
+    for index, bar in enumerate(bar_map):
+        length = bar["beats"] * 2
+        signature = {"numerator": 3, "denominator": 4}
+        if not bar.get("partial"):
+            pieces = [(3.0, bar["status"]), (3.0, "unverified")]
+        elif index == 0:
+            # A pickup ends on a tracked downbeat, so any whole felt bar sits at its end.
+            pieces = [(length - 3, "unverified"), (3.0, "unverified")] if length > 3 + 1e-6 else [(length, bar["status"])]
+        else:
+            pieces = [(3.0, bar["status"]), (length - 3, "unverified")] if length > 3 + 1e-6 else [(length, bar["status"])]
+        for beats_in_piece, status in pieces:
+            if beats_in_piece <= 1e-6:
+                continue
+            item = {**bar, **signature, "startBeat": cursor, "beats": beats_in_piece, "status": status}
+            item.pop("partial", None)
+            if beats_in_piece < 3 - 1e-6:
+                item["partial"] = True
+            converted.append(item)
+            cursor += beats_in_piece
+    mapped = [{"beat": round(point["beat"] * 2, 6), "time": point["time"]} for point in tempo_map]
+    evidence = {"bars": len(full), "midBarAccentShare": round(float(mid.mean()), 3),
+                "passageShares": [round(value, 3) for value in passages], "offBeatEvenness": round(evenness, 3)}
+    return validate_bar_map(converted), mapped, evidence
 
 
 def compound_reading(bar_map: list[dict], tempo_map: list[dict], bpm: float, onsets) -> tuple | None:
