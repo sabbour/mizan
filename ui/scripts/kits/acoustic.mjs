@@ -37,6 +37,34 @@ export const ACOUSTIC_LAYOUT = {
 /** Hi-hat top-cymbal travel along the pull rod from its exported rest height (metres). */
 export const HAT_STATES = { fullyOpen: 0.02, partiallyOpen: 0, closed: -0.013, pedalClosed: -0.0152 }
 
+/** Remove collapsed strips and repair seam normals; leave intentional membrane and playable-zone boundaries open. */
+function finishCymbal(mesh) {
+  const indices = []
+  for (let i = 0; i < mesh.idx.length; i += 3) {
+    const a = mesh.idx[i] * 3, b = mesh.idx[i + 1] * 3, c = mesh.idx[i + 2] * 3
+    const ab = [mesh.p[b] - mesh.p[a], mesh.p[b + 1] - mesh.p[a + 1], mesh.p[b + 2] - mesh.p[a + 2]]
+    const ac = [mesh.p[c] - mesh.p[a], mesh.p[c + 1] - mesh.p[a + 1], mesh.p[c + 2] - mesh.p[a + 2]]
+    if (v.len(v.cross(ab, ac)) >= 1e-12) indices.push(mesh.idx[i], mesh.idx[i + 1], mesh.idx[i + 2])
+  }
+  mesh.idx = indices
+  const key = (i) => mesh.p.slice(i * 3, i * 3 + 3).join(',')
+  const normals = new Map()
+  for (let i = 0; i < mesh.n.length; i += 3) {
+    const length = Math.hypot(mesh.n[i], mesh.n[i + 1], mesh.n[i + 2])
+    if (length < 1e-9) continue
+    const normal = [mesh.n[i] / length, mesh.n[i + 1] / length, mesh.n[i + 2] / length]
+    const index = i / 3
+    normals.set(key(index), normal)
+    mesh.n[i] = normal[0]; mesh.n[i + 1] = normal[1]; mesh.n[i + 2] = normal[2]
+  }
+  for (let i = 0; i < mesh.n.length; i += 3) {
+    if (Math.hypot(mesh.n[i], mesh.n[i + 1], mesh.n[i + 2]) >= 1e-9) continue
+    const normal = normals.get(key(i / 3)) ?? [0, 1, 0]
+    mesh.n[i] = normal[0]; mesh.n[i + 1] = normal[1]; mesh.n[i + 2] = normal[2]
+  }
+  return mesh
+}
+
 /** Builds one level of detail of the acoustic kit under a new root; returns the root node index. */
 export function buildAcoustic(kit, q, rootExtras) {
   const S = (n, min = 6) => seg(n, q, min)
@@ -152,7 +180,7 @@ export function buildAcoustic(kit, q, rootExtras) {
       [P(transform(chainBetween([0.03, toe[1], toe[2]], [0.03, axle[1] - 0.012, axle[2] + 0.02]), M.t(-0.03, -toe[1], -toe[2])), 'metalBlack', 'hardware')])
     kit.part('KickPedal_Cam', M.mul(pedalWorld, M.t(...axle)), pedal,
       [P(transform(lathe([[0.0001, -0.007], [0.022, -0.007], [0.024, -0.005], [0.024, 0.005], [0.022, 0.007], [0.0001, 0.007]], S(24, 8)), M.chain(M.t(0.03, 0, 0), M.rz(Math.PI / 2))), 'metalBlack', 'hardware')])
-    kit.part('KickPedal_Spring', M.mul(pedalWorld, M.t(0.075, 0.04, 0.06)), pedal, [P(spring(0.007, 0.075, 9, 0.0012, q), 'steel', 'hardware')])
+    kit.part('KickPedal_Spring', M.mul(pedalWorld, M.t(0.075, 0.04, 0.06)), pedal, [P(spring(0.007, 0.075, 9, 0.0012, q === 2 ? 1 : q), 'steel', 'hardware')])
     const beaterTip = [0, 0.27, kick.center[2] + kick.H / 2 + 0.032 - frontZ]
     const shaftLen = v.len(v.sub(beaterTip, axle))
     const shaftWorld = M.mul(pedalWorld, M.aim(axle, beaterTip))
@@ -270,9 +298,9 @@ export function buildAcoustic(kit, q, rootExtras) {
       else kit.instance(`HiHat_Leg_0${i + 1}`, w, legs, firstLeg)
     })
     const opts = { bellR: h.R * 0.24, bellH: 0.03, bow: 0.012, thick: 0.0018, rings: [26, 12, 5][q], segments: cymbalSegments(128) }
-    kit.part('HiHat_BottomCymbal', M.chain(standWorld, M.t(0, h.height, 0), M.rx(Math.PI)), node, [P(cymbal(h.R, opts), 'cymbal', 'cymbal', 'HiHat')], { pivot: 'centre shaft' })
+    kit.part('HiHat_BottomCymbal', M.chain(standWorld, M.t(0, h.height, 0), M.rx(Math.PI)), node, [P(finishCymbal(cymbal(h.R, opts)), 'cymbal', 'cymbal', 'HiHat')], { pivot: 'centre shaft' })
     const restY = h.height + 0.015
-    kit.part('HiHat_TopCymbal', M.mul(standWorld, M.t(0, restY, 0)), node, [P(cymbal(h.R, opts), 'cymbal', 'cymbal', 'HiHat', 'surface')],
+    kit.part('HiHat_TopCymbal', M.mul(standWorld, M.t(0, restY, 0)), node, [P(finishCymbal(cymbal(h.R, opts)), 'cymbal', 'cymbal', 'HiHat', 'surface')],
       { pivot: 'centre shaft', travelAxis: [0, 1, 0], states: HAT_STATES })
     kit.part('HiHat_Clutch', M.mul(standWorld, M.t(0, restY + 0.03, 0)), node, [P(merge(
       lathe([[0.0001, -0.024], [0.014, -0.024], [0.014, -0.004], [0.022, -0.004], [0.022, 0.004], [0.0001, 0.004]], S(20, 8)),
@@ -325,13 +353,13 @@ export function buildAcoustic(kit, q, rootExtras) {
       ? { bellR: c.R * 0.2, bellH: 0.03, bow: 0.028, thick: 0.0014, rings: [28, 12, 5][q], segments: cymbalSegments(144) }
       : { bellR: c.R * 0.22, bellH: 0.034, bow: 0.026, thick: 0.0018, rings: [30, 12, 5][q], segments: cymbalSegments(144) }
     if (name === 'Crash') {
-      const cym = kit.part('Crash_Cymbal', cymWorld, node, [P(cymbal(c.R, opts), 'cymbal', 'cymbal', 'Crash', 'surface')], { pivot: 'centre mounting hole', wobbleAxis: 'local X and Z' })
+      const cym = kit.part('Crash_Cymbal', cymWorld, node, [P(finishCymbal(cymbal(c.R, opts)), 'cymbal', 'cymbal', 'Crash', 'surface')], { pivot: 'centre mounting hole', wobbleAxis: 'local X and Z' })
       kit.collider('COL_Crash', cymWorld, cym, { type: 'cylinder', axis: 'y', radius: c.R, height: 0.03 }, 'Crash_Cymbal')
     } else {
       const cym = kit.part('Ride_Cymbal', cymWorld, node, [], { pivot: 'centre mounting hole', wobbleAxis: 'local X and Z', zones: { bell: [0, opts.bellR], bow: [opts.bellR, c.R * 0.86], edge: [c.R * 0.86, c.R] } })
-      kit.part('Ride_Bell', cymWorld, cym, [P(cymbalZone(c.R, 0, opts.bellR, opts), 'cymbal', 'cymbal', 'Ride', 'surface')])
-      kit.part('Ride_Bow', cymWorld, cym, [P(cymbalZone(c.R, opts.bellR, c.R * 0.86, opts), 'cymbal', 'cymbal', 'Ride', 'surface')])
-      kit.part('Ride_Edge', cymWorld, cym, [P(cymbalZone(c.R, c.R * 0.86, c.R, opts), 'cymbal', 'cymbal', 'Ride', 'surface')])
+      kit.part('Ride_Bell', cymWorld, cym, [P(finishCymbal(cymbalZone(c.R, 0, opts.bellR, opts)), 'cymbal', 'cymbal', 'Ride', 'surface')])
+      kit.part('Ride_Bow', cymWorld, cym, [P(finishCymbal(cymbalZone(c.R, opts.bellR, c.R * 0.86, opts)), 'cymbal', 'cymbal', 'Ride', 'surface')])
+      kit.part('Ride_Edge', cymWorld, cym, [P(finishCymbal(cymbalZone(c.R, c.R * 0.86, c.R, opts)), 'cymbal', 'cymbal', 'Ride', 'surface')])
       kit.collider('COL_RideBell', cymWorld, cym, { type: 'cylinder', axis: 'y', radius: opts.bellR, height: 0.05 }, 'Ride_Bell')
       kit.collider('COL_RideBow', cymWorld, cym, { type: 'ring', axis: 'y', innerRadius: opts.bellR, outerRadius: c.R * 0.86, height: 0.03 }, 'Ride_Bow')
       kit.collider('COL_RideEdge', cymWorld, cym, { type: 'ring', axis: 'y', innerRadius: c.R * 0.86, outerRadius: c.R, height: 0.03 }, 'Ride_Edge')
