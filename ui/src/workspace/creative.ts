@@ -153,22 +153,152 @@ function movingChords(song: Song, rhythm: readonly number[], slots: readonly num
   }
   return {
     id: 'colour', instrument: 'piano', group: 'creative', chordal: true, name: 'Colour chords',
-    detail: 'Meter-aware chord choices supported by the melody',
-    chords: merged, piano: sustainedPattern(sustainedChords(merged), rhythm),
+    detail: 'Melody-supported chord colours, played with phrase-shaped rhythm, a walking bass and resolving suspensions',
+    chords: merged, piano: sustainedPattern(song, sustainedChords(merged), rhythm),
   }
 }
 
-/** Follow the source attacks with connected voicings and a held bass. */
-function sustainedPattern(chords: Chord[], rhythm: readonly number[]): PianoNote[] {
+/** How busy each bar of the recording is (source attacks), ranked 0..1 within the song; flat when nothing is transcribed. */
+function barEnergy(song: Song): number[] {
+  const counts = measures(song).map(() => 0)
+  const add = (beat: number) => {
+    if (Number.isFinite(beat) && beat >= 0 && beat < songBeats(song)) counts[barAt(song, beat)]++
+  }
+  for (const hit of song.drums) if (hit.velocity > 0) add(hit.startBeat)
+  for (const note of [...song.piano, ...song.vocals, ...Object.values(song.instrumentNotes ?? {}).flat()]) add(note.startBeat)
+  const sorted = [...counts].sort((a, b) => a - b)
+  if (sorted[0] === sorted.at(-1)) return counts.map(() => 0.5)
+  return counts.map((count) => {
+    const below = sorted.findIndex((value) => value >= count)
+    const through = sorted.length - 1 - [...sorted].reverse().findIndex((value) => value <= count)
+    return (below + through) / 2 / (sorted.length - 1)
+  })
+}
+
+/** Each bar's place in its phrase: sections, split into four-bar phrases when longer than eight bars. */
+function phrasePositions(song: Song): { index: number; length: number }[] {
+  const count = measures(song).length
+  const out = Array.from({ length: count }, (_, bar) => ({ index: bar % 4, length: 4 }))
+  for (const section of song.sections) {
+    const start = section.startBar - 1
+    const length = Math.min(section.bars, count - start)
+    const size = length > 8 ? 4 : length
+    for (let offset = 0; offset < length; offset++) {
+      const phraseStart = Math.floor(offset / size) * size
+      out[start + offset] = { index: offset - phraseStart, length: Math.min(size, length - phraseStart) }
+    }
+  }
+  return out
+}
+
+const pc = (midi: number) => ((Math.round(midi) % 12) + 12) % 12
+
+type Texture = 'broken' | 'comp' | 'drive' | 'hold'
+
+/**
+ * A play-along part that breathes with the song instead of repeating one block-chord pattern:
+ * - texture follows how busy the recording is: arpeggiated in quiet bars, the source accents in
+ *   moderate ones, added off-beat stabs and a moving bass in busy ones, and a held chord to release
+ *   each phrase's cadence;
+ * - the right hand keeps the nearest inversion (common tones held, other voices by step) and
+ *   alternates a full and a lighter voicing;
+ * - the bass alternates root and fifth and walks into the next chord by a step;
+ * - velocities shape the meter (downbeat, strong pulses, off-beats) and arch over each phrase;
+ * - with `suspensions`, a dominant resolving down a fifth starts as sus4 and resolves to its third.
+ * Every right-hand pitch class comes from its chord except a labelled suspension's fourth.
+ */
+function accompany(song: Song, chords: Chord[], rhythm: readonly number[], suspensions = false): PianoNote[] {
+  const bars = measures(song)
+  const energy = barEnergy(song)
+  const phrases = phrasePositions(song)
+  const tonic = song.key ? (NAMES.includes(song.key.tonic) ? NAMES.indexOf(song.key.tonic) : SHARPS.indexOf(song.key.tonic)) : -1
+  const scale = tonic >= 0 ? SCALE[song.key!.mode].map((step) => (step + tonic) % 12) : null
+  const inversions = smoothInversions(chords)
   const piano: PianoNote[] = []
-  chords.forEach((chord) => {
+  const push = (midi: number, startBeat: number, beats: number, hand: 'left' | 'right', velocity: number) => {
+    if (beats > 1e-6) piano.push({ midi, startBeat, beats, hand, velocity: Math.round(Math.min(0.85, Math.max(0.35, velocity)) * 100) / 100 })
+  }
+  chords.forEach((chord, index) => {
     if (!chord.tones.length) return
-    piano.push({ midi: chord.tones[0] - 24, startBeat: chord.startBeat, beats: chord.beats, hand: 'left', velocity: 0.66 })
-    for (const { startBeat, beats } of chordRhythm(chord, rhythm)) {
-      chord.tones.forEach((midi) => piano.push({ midi, startBeat, beats, hand: 'right', velocity: 0.62 }))
+    const voiced = invert(chord.tones, inversions[index])
+    const light = voiced.length > 3 ? voiced.filter((_, i) => i !== 1) : voiced.slice(1)
+    const root = chord.tones[0] - 24
+    const fifth = chord.tones.find((tone) => pc(tone - chord.tones[0]) === 7)
+    const next = chords[index + 1]
+    const end = chord.startBeat + chord.beats
+    const resolvesDownAFifth = next && next.startBeat === end && next.tones.length &&
+      pc(next.tones[0] - chord.tones[0]) === 5 && chord.tones.some((tone) => pc(tone - chord.tones[0]) === 4)
+    const sus = suspensions && resolvesDownAFifth
+      ? voiced.map((tone) => (pc(tone - chord.tones[0]) === 4 ? tone + 1 : tone)) : null
+    const suspendUntil = chord.startBeat + chord.beats / 2
+    for (let bar = barAt(song, chord.startBeat); bar < bars.length && bars[bar].startBeat < end; bar++) {
+      const measure = bars[bar]
+      const start = Math.max(chord.startBeat, measure.startBeat)
+      const stop = Math.min(end, measure.startBeat + measure.beats)
+      if (stop - start <= 1e-6) continue
+      const pulse = pulseBeats(measure)
+      const { index: position, length } = phrases[bar]
+      const cadence = position === length - 1 && stop >= end - 1e-6
+      const level = energy[bar]
+      const texture: Texture = cadence && level < 0.67 ? 'hold' : level < 0.34 ? 'broken' : level > 0.67 ? 'drive' : 'comp'
+      const arch = 0.05 * Math.sin(Math.PI * (position + 0.5) / length) + (level - 0.5) * 0.12
+      const accent = (beat: number) => {
+        const local = beat - measure.startBeat
+        if (local < 1e-6) return 0.7
+        return Math.abs(local / pulse - Math.round(local / pulse)) < 1e-6 ? 0.6 : 0.5
+      }
+      const tonesAt = (beat: number, full: boolean) => (sus && beat < suspendUntil - 1e-6 ? sus : full ? voiced : light)
+      // Right hand.
+      if (texture === 'hold') {
+        for (const tone of tonesAt(start, true)) push(tone, start, stop - start, 'right', 0.56 + arch)
+      } else if (texture === 'broken') {
+        const step = pulse === 1.5 ? 0.5 : pulse
+        // Alternate the arpeggio's contour from bar to bar within the phrase.
+        const order = voiced.length >= 3 ? (position % 2 ? [0, 1, 2, 1] : [0, 2, 1, 2]) : [0, 1]
+        for (let beat = start, k = 0; beat < stop - 1e-6; beat += step, k++) {
+          const tones = tonesAt(beat, true)
+          push(tones[order[k % order.length] % tones.length], beat, Math.min(step, stop - beat), 'right', accent(beat) - 0.08 + arch)
+        }
+      } else {
+        const attacks = chordRhythm({ startBeat: start, beats: stop - start }, rhythm)
+        const stabs = new Set(attacks.map((attack) => attack.startBeat))
+        if (texture === 'drive') {
+          // Off-beat stabs; every other bar keeps only the backbeat ones so the groove answers itself.
+          for (let beat = measure.startBeat + pulse / 2, k = 0; beat < stop - 1e-6; beat += pulse, k++)
+            if (beat > start && (position % 2 === 0 || k % 2 === 1)) stabs.add(beat)
+        } else if (position % 2 === 1 && stop - start >= 2 * pulse - 1e-6) {
+          // A syncopated push on the last off-beat leans into the next bar.
+          stabs.add(stop - pulse / 2)
+        }
+        const sorted = [...stabs].sort((a, b) => a - b)
+        attacks.splice(0, attacks.length, ...sorted.map((beat, i) => ({ startBeat: beat, beats: (sorted[i + 1] ?? stop) - beat })))
+        attacks.forEach(({ startBeat, beats }, k) => {
+          for (const tone of tonesAt(startBeat, k % 2 === 0)) push(tone, startBeat, beats, 'right', accent(startBeat) + arch)
+        })
+      }
+      // Left hand: root, the fifth on the second strong pulse, and a step into the next chord.
+      const approach = next && next.startBeat === end && stop >= end - 1e-6 && next.tones.length &&
+        pc(next.tones[0] - chord.tones[0]) !== 0 && stop - start >= 2 * pulse - 1e-6
+      const nextRoot = approach ? next.tones[0] - 24 : 0
+      const below = scale ? [1, 2].map((d) => nextRoot - d).find((m) => scale.includes(pc(m))) ?? nextRoot - 1 : nextRoot - 1
+      const lead = approach ? stop - pulse : stop
+      if (texture === 'drive') {
+        for (let beat = start, k = 0; beat < lead - 1e-6; beat += pulse, k++)
+          push(k % 2 && fifth !== undefined ? fifth - 24 : root, beat, Math.min(pulse, lead - beat), 'left', accent(beat) + arch)
+      } else if (texture === 'comp' && fifth !== undefined && lead - start >= 2 * pulse - 1e-6) {
+        const middle = start + Math.floor((lead - start) / pulse / 2) * pulse
+        push(root, start, middle - start, 'left', accent(start) + arch)
+        push(fifth - 24, middle, lead - middle, 'left', accent(middle) - 0.05 + arch)
+      } else push(root, start, lead - start, 'left', accent(start) + arch)
+      if (approach) push(below, lead, stop - lead, 'left', 0.55 + arch)
     }
   })
-  return piano
+  return piano.sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)
+}
+
+/** Follow the source attacks with connected voicings and a held bass. */
+function sustainedPattern(song: Song, chords: Chord[], rhythm: readonly number[]): PianoNote[] {
+  return accompany(song, chords, rhythm, true)
 }
 
 export type HarmonyOptions = { source: 'melody' | 'chords'; above: boolean; interval: 3 | 6 | 10; sparse: boolean }
@@ -225,17 +355,39 @@ function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOpt
       if (candidate) selected.set(candidate.startBeat, candidate)
     }
     const chosen = [...selected.values()].sort((a, b) => a.startBeat - b.startBeat)
-    for (const m of chosen) {
+    const phrases = phrasePositions(song)
+    let previousPitch: number | undefined
+    for (const [i, m] of chosen.entries()) {
       const next = melody.find((note) => note.startBeat > m.startBeat)
       const chord = song.chords[chordAt(song, m.startBeat)]
       const chordPcs = chord?.symbol && chord.symbol !== 'N.C.' ? chord.tones.map((tone) => tone % 12) : []
+      const bar = barAt(song, m.startBeat)
+      const measure = measures(song)[bar]
+      const pulse = pulseBeats(measure)
+      const local = (m.startBeat - measure.startBeat) / pulse
+      const strong = Math.abs(local - Math.round(local)) < 0.02
       const aimed = target(m.midi)
-      const chordPitch = chordPcs.length ? nearest(aimed, chordPcs) : undefined
-      const pitch = (chordPitch !== undefined && Math.abs(chordPitch - aimed) <= 1 ? chordPitch : undefined)
-        ?? (scale ? nearest(aimed, scale) : aimed)
+      // Strong beats lean on chord tones; weaker ones may pass through the scale. Both prefer small steps.
+      const chordPitch = chordPcs.length ? nearest(aimed, chordPcs, m.midi, previousPitch) : undefined
+      let pitch = (chordPitch !== undefined && Math.abs(chordPitch - aimed) <= (strong ? 2 : 1) ? chordPitch : undefined)
+        ?? (scale ? nearest(aimed, scale, m.midi, previousPitch) : aimed) ?? aimed
+      const following = chosen[i + 1]
+      const ending = !following || following.startBeat - (m.startBeat + m.beats) >= 1 ||
+        (phrases[bar].index === phrases[bar].length - 1 && barAt(song, following.startBeat) !== bar)
+      // A phrase ends at rest on a chord tone.
+      if (ending && chordPcs.length) pitch = nearest(pitch, chordPcs, m.midi, previousPitch) ?? pitch
       if (pitch === m.midi) continue
       const beats = Math.min(m.beats, (next?.startBeat ?? Infinity) - m.startBeat)
-      if (beats > 0) piano.push({ ...m, midi: pitch, beats, hand: !above && interval === 10 ? 'left' : 'right', velocity: 0.8 })
+      if (!(beats > 0)) continue
+      const last = piano.at(-1)
+      // Oblique motion: where the melody repeats over the same harmony note, hold it instead of re-striking.
+      if (last && last.midi === pitch && Math.abs(last.startBeat + last.beats - m.startBeat) < 1e-6) {
+        last.beats += beats
+        continue
+      }
+      piano.push({ ...m, midi: pitch, beats, hand: !above && interval === 10 ? 'left' : 'right',
+        velocity: ending ? 0.7 : strong ? 0.78 : 0.64 })
+      previousPitch = pitch
     }
   }
   const name = { 3: '3rds', 6: '6ths', 10: '10ths' }[interval]
@@ -246,23 +398,12 @@ function harmonyLine(song: Song, { source, above, interval, sparse }: HarmonyOpt
   }
 }
 
-/** Follow the groove with nearby inversions over a held root. */
+/** The detected chords with nearby inversions, a texture that follows the song's energy and a walking bass. */
 function smoothComping(song: Song, rhythm: readonly number[]): CreativeTrack {
-  const chords = sustainedChords(song.chords)
-  const inv = smoothInversions(chords)
-  const piano: PianoNote[] = []
-  chords.forEach((c, i) => {
-    if (!c.tones.length) return
-    const tones = invert(c.tones, inv[i])
-    piano.push({ midi: c.tones[0] - 24, startBeat: c.startBeat, beats: c.beats, hand: 'left' })
-    for (const { startBeat, beats } of chordRhythm(c, rhythm)) {
-      for (const m of tones) piano.push({ midi: m, startBeat, beats, hand: 'right' })
-    }
-  })
   return {
     id: 'comping', instrument: 'piano', group: 'creative', chordal: true, name: 'Smooth comping',
-    detail: 'Chords that barely move your hand, following the song rhythm',
-    chords: song.chords, piano,
+    detail: 'The detected chords in nearby inversions: arpeggios when quiet, the song’s accents when moderate, off-beat drive when busy',
+    chords: song.chords, piano: accompany(song, sustainedChords(song.chords), rhythm),
   }
 }
 

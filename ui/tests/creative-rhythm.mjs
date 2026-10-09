@@ -73,7 +73,7 @@ const drums = backbeat.map((startBeat, i) => ({
   lane: i % 3 ? 'snare' : 'kick', startBeat, velocity: 0.8,
 }))
 
-test('dense source rhythms are capped to two beat-aware comping attacks per bar', () => {
+test('dense source rhythms keep bounded, beat-aware comping density', () => {
   const song = fixture({ drums: [
     ...drums,
     ...Array.from({ length: 18 }, (_, i) => ({ lane: 'hihat', startBeat: i / 2, velocity: 0.4 })),
@@ -82,11 +82,9 @@ test('dense source rhythms are capped to two beat-aware comping attacks per bar'
   const snapshot = structuredClone(song)
   const restrained = [0, 2, 3, 5, 6, 8]
   assert.deepEqual(Array.from(accompanimentRhythm(song)), restrained)
-  assert.deepEqual(starts(part(song, 'comping').piano, 'right'), restrained)
   assert.deepEqual(starts(part(song, 'harmony-line', { ...HARMONY_DEFAULT, source: 'chords' }).piano), [0],
     'chord harmony holds through drum-driven comping attacks')
   const colour = part(song, 'colour')
-  assert.deepEqual(starts(colour.piano, 'right'), restrained)
   assert.ok(colour.chords.length <= song.chords.length, 'Colour does not add passing or substitute chords')
   assert.deepEqual(song, snapshot, 'Generation must not rewrite source notes, meter, chords, or tempo map')
   for (const track of creativeTracks(song)) {
@@ -94,12 +92,14 @@ test('dense source rhythms are capped to two beat-aware comping attacks per bar'
       assert.ok(Number.isFinite(note.startBeat) && Number.isFinite(note.beats) && note.beats > 0)
       assert.ok(note.startBeat >= 0 && note.startBeat + note.beats <= 9)
     }
+    const attacks = starts(track.piano, 'right')
+    if (track.chordal) assert.ok(attacks.includes(0), `${track.id} sounds the chord on its downbeat`)
     for (let bar = 0; bar < song.bars; bar++) {
-      const attacks = new Set(track.piano.filter((note) =>
-        note.startBeat >= bar * song.beatsPerBar && note.startBeat < (bar + 1) * song.beatsPerBar)
-        .map((note) => note.startBeat))
-      assert.ok(attacks.size <= 2, `${track.id} stays within two attacks in bar ${bar + 1}`)
+      const inBar = attacks.filter((beat) => beat >= bar * song.beatsPerBar && beat < (bar + 1) * song.beatsPerBar)
+      assert.ok(inBar.length <= 2 * song.beatsPerBar, `${track.id} stays within eighth-note density in bar ${bar + 1}`)
     }
+    // Attacks off the eighth grid only ever come from the recording's own accents.
+    if (track.chordal) for (const beat of attacks) assert.ok(Number.isInteger(beat * 2) || restrained.includes(beat), `${track.id} invented ${beat}`)
   }
 })
 
@@ -133,7 +133,10 @@ test('bar-local percussion and pitched onsets preserve swing without copying ano
     instrumentNotes: { strings: [{ midi: 60, startBeat: 5.5, beats: 0.5 }] },
   })
   assert.deepEqual(Array.from(accompanimentRhythm(song)), [0.125, 1.625, 3.25, 4.625, 6, 8])
-  assert.deepEqual(starts(part(song, 'comping').piano, 'right'), [0, 0.125, 1.625, 3.25, 4.625, 6, 8])
+  // Swung accents are kept where the comping follows the source, and no off-grid swing is invented.
+  const comping = starts(part(song, 'comping').piano, 'right')
+  assert.ok(comping.some((beat) => !Number.isInteger(beat * 2)), 'some swung source accents survive')
+  for (const beat of comping) assert.ok(Number.isInteger(beat * 2) || [0.125, 1.625, 3.25, 4.625].includes(beat), `invented ${beat}`)
 })
 
 test('meter fallback bounds attacks in simple, compound, odd, and half-note bars', () => {
@@ -301,8 +304,10 @@ test('source beat attacks schedule on the actual engine clock at 1x and half spe
         }
         if (engine.timer === -1) break
       }
-      assert.deepEqual([...new Set(sounded.map(({ note }) => Math.max(begin, note.startBeat)))], [3.25, 5, 6, 8])
-      assert.ok(sounded.filter(({ note }) => note.startBeat === 3).every(({ duration }) => duration > 0), 'Resume carries the held chord')
+      const expected = [...new Set(Array.from(notes).filter((note) => note.startBeat + note.beats > begin)
+        .map((note) => Math.max(begin, note.startBeat)))].sort((a, b) => a - b)
+      assert.deepEqual([...new Set(sounded.map(({ note }) => Math.max(begin, note.startBeat)))], expected)
+      assert.ok(sounded.filter(({ note }) => note.startBeat < begin).every(({ duration }) => duration > 0), 'Resume carries the held notes')
       const beforeLoop = sounded.length
       engine.loop = { startBar: 2, endBar: 2 }
       engine.seek(5.75)
@@ -310,7 +315,8 @@ test('source beat attacks schedule on the actual engine clock at 1x and half spe
       engine.ctx.currentTime = loopAt
       engine.schedule()
       assert.ok(Math.abs(engine.read().beat - 3) < 1e-7)
-      assert.equal(sounded.slice(beforeLoop).filter(({ note }) => note.startBeat === 3).length, 3, 'Loop starts the existing voicing once')
+      assert.equal(sounded.slice(beforeLoop).filter(({ note }) => note.startBeat === 3).length,
+        Array.from(notes).filter((note) => note.startBeat === 3).length, 'Loop starts the existing voicing once')
     } finally {
       engine.halt()
     }
@@ -327,4 +333,62 @@ test('creative source passes semantic type checking without emitting build artif
   assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCanonicalFileName: (file) => file, getCurrentDirectory: () => process.cwd(), getNewLine: () => '\n',
   }))
+})
+
+test('accompaniment follows energy and phrases with voice leading, a walking bass and resolving suspensions', () => {
+  const tones = { C: [60, 64, 67], F: [65, 69, 72], G: [55, 59, 62] }
+  const progression = ['C', 'C', 'G', 'C', 'F', 'G', 'C', 'C']
+  const melody = [[64, 64], [67, 64], [62, 59], [60], [69, 65], [59, 62], [64, 67], [60]]
+  const song = fixture({
+    bars: 8, beatsPerBar: 4, beatUnit: 4, tempoMap: undefined, bpm: 120, key: { tonic: 'C', mode: 'major' },
+    sections: [{ name: 'Verse', startBar: 1, bars: 4 }, { name: 'Chorus', startBar: 5, bars: 4 }],
+    chords: progression.map((symbol, bar) => ({ startBeat: bar * 4, beats: 4, symbol, numeral: null, role: null,
+      tones: tones[symbol], flats: false, confidence: 1 })),
+    piano: [],
+    vocals: melody.flatMap((pitches, bar) => pitches.map((midi, i) =>
+      ({ midi, startBeat: bar * 4 + i * (4 / pitches.length), beats: 4 / pitches.length }))),
+    // The chorus is busy: eighth-note hats with kick and snare. The verse has only its melody.
+    drums: Array.from({ length: 32 }, (_, i) => ({ lane: i % 4 === 0 ? 'kick' : i % 4 === 2 ? 'snare' : 'hihat',
+      startBeat: 16 + i / 2, velocity: 0.7 })),
+  })
+  const snapshot = structuredClone(song)
+  const comping = part(song, 'comping').piano
+  const right = (from, to, notes = comping) => notes.filter((n) => n.hand === 'right' && n.startBeat >= from && n.startBeat < to)
+  const pcs = (notes) => new Set(notes.map((n) => ((n.midi % 12) + 12) % 12))
+  for (const note of comping.filter((n) => n.hand === 'right')) {
+    const chord = song.chords.find((c) => c.startBeat <= note.startBeat && note.startBeat < c.startBeat + c.beats)
+    assert.ok(chord.tones.some((t) => (t - note.midi) % 12 === 0), `Smooth comping keeps detected chord tones (${note.midi} at ${note.startBeat})`)
+  }
+  // Quiet verse: arpeggiated, one note per pulse; its cadence bar is held to release the phrase.
+  for (const beat of starts(right(0, 12))) assert.equal(right(beat, beat + 1e-9).length, 1, `verse beat ${beat} is a broken chord`)
+  assert.deepEqual(starts(right(12, 16)), [12], 'the verse cadence holds')
+  assert.ok(right(12, 16).length >= 3 && right(12, 16).every((n) => n.beats === 4))
+  // Busy chorus: off-beat stabs drive it, and the downbeat is louder than the off-beats.
+  assert.ok(starts(right(16, 28)).some((beat) => beat % 1 === 0.5), 'the chorus adds off-beat stabs')
+  const downbeat = right(16, 16 + 1e-9)[0].velocity
+  assert.ok(right(16, 20).filter((n) => n.startBeat % 1 === 0.5).every((n) => n.velocity < downbeat))
+  assert.ok(new Set(comping.map((n) => n.velocity)).size >= 3, 'dynamics vary with meter and phrase')
+  // Voice leading: the top notes of consecutive chord voicings move by small steps.
+  const tops = starts(comping, 'right').filter((beat) => right(beat, beat + 1e-9).length > 1).map((beat) => Math.max(...right(beat, beat + 1e-9).map((n) => n.midi)))
+  assert.ok(tops.slice(1).every((top, i) => Math.abs(top - tops[i]) <= 7), 'the top voice never leaps beyond a fifth')
+  // Walking bass: the last pulse before C -> G steps down to it from F, the scale tone below.
+  const approach = comping.find((n) => n.hand === 'left' && n.startBeat === 7)
+  assert.equal(approach?.midi % 12, 5, 'the bass walks into G from F')
+  // Colour chords: G resolving to C starts as Gsus4 and resolves to its third halfway.
+  const colour = part(song, 'colour')
+  assert.equal(colour.chords.find((c) => c.startBeat === 8).symbol, 'G', 'the chord label stays G; the suspension is texture')
+  const before = pcs(right(8, 10, colour.piano))
+  const after = pcs(right(10, 12, colour.piano))
+  assert.ok(!before.has(11) && [...before].every((p) => [7, 0, 2].includes(p)), `Gsus4 before resolving: ${[...before]}`)
+  assert.ok([...after].every((p) => [7, 11, 2].includes(p)), `G after resolving: ${[...after]}`)
+  assert.ok([...pcs(right(8, 10))].every((p) => [7, 11, 2].includes(p)), 'Smooth comping does not suspend')
+  // Harmony line: oblique hold over a repeated melody note, no unisons, and phrase ends on chord tones.
+  const line = part(song, 'harmony-line').piano
+  assert.deepEqual(JSON.parse(JSON.stringify(line.filter((n) => n.startBeat < 4).map((n) => [n.startBeat, n.beats, n.midi]))), [[0, 4, 60]],
+    'the repeated E is answered by one held C')
+  for (const note of line) assert.ok(!song.vocals.some((m) => m.startBeat === note.startBeat && m.midi === note.midi))
+  const ending = line.find((n) => n.startBeat <= 12 && 12 < n.startBeat + n.beats)
+  assert.ok(ending && [0, 4, 7].includes(ending.midi % 12), 'the verse ends on a C-major chord tone')
+  assert.ok(new Set(line.map((n) => n.velocity)).size >= 2)
+  assert.deepEqual(song, snapshot, 'nothing in the song is rewritten')
 })
