@@ -404,6 +404,44 @@
   pointer-events: none;
 }
 
+/* Floats over the score once it is scrolled; the negative margin keeps the sheet from shifting. */
+.score-start {
+  position: sticky;
+  top: 12px;
+  z-index: 3;
+  flex: none;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 12px 16px -48px 0;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgb(17 17 17 / 0.1);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease), color 140ms var(--ease);
+}
+
+.score-start svg {
+  width: 16px;
+  height: 16px;
+}
+
+.score-start:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.ws .score:focus-visible {
+  outline: none;
+}
+
 .score-bar {
   position: absolute;
   padding: 0;

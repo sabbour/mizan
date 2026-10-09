@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { OpenSheetMusicDisplay, VexFlowGraphicalNote } from 'opensheetmusicdisplay'
+import { ArrowUpToLine } from 'lucide-react'
 import type { Engine } from './engine'
 import { displaySymbol, sustainedChords, type Confidence, type Instrument, type Song } from './song'
 import { barAt, barStart, measures } from './meter'
 import { useFrame, useReducedMotion, useSize } from './hooks'
 import { Guide } from './Guide'
+import { centerDelta, usableSpan } from './follow'
 import { notationGrid, notationNotes } from './musicxml'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
@@ -277,6 +279,11 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+  const [scrolled, setScrolled] = useState(false)
+  // Set by Scroll to start: following waits until the active line is on screen, playback restarts,
+  // or the playhead jumps (go to, bar pick, loop wrap) instead of advancing one bar.
+  const browsing = useRef(false)
+  const previousBar = useRef(bar)
 
   const clearHighlights = useCallback(() => {
     for (const el of lit.current) el.classList.remove('score-head-active')
@@ -385,25 +392,32 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
   })
 
   useEffect(() => {
+    if (playing) browsing.current = false
+  }, [playing])
+
+  useEffect(() => {
     const el = viewport.current
     const target = activeBar.current
+    const jumped = bar !== previousBar.current && bar !== previousBar.current + 1
+    previousBar.current = bar
     if (!el || !target || !layout || status !== 'ready') return
-    const viewportRect = el.getBoundingClientRect()
+    const usable = usableSpan(el)
     const barRect = target.getBoundingClientRect()
-    const margin = Math.min(24, Math.max(0, (viewportRect.height - barRect.height) / 2))
-    const safeTop = viewportRect.top + margin
-    const safeBottom = viewportRect.bottom - margin
-    let delta = 0
-    if (barRect.height > viewportRect.height) {
-      const top = viewportRect.top + Math.min(12, viewportRect.height / 2)
-      delta = barRect.top - top
-    } else if (barRect.top < safeTop) {
-      delta = barRect.top - safeTop
-    } else if (barRect.bottom > safeBottom) {
-      delta = barRect.bottom - safeBottom
+    if (browsing.current) {
+      if (!jumped && (barRect.bottom <= usable.top || barRect.top >= usable.bottom)) return
+      browsing.current = false
     }
+    const delta = centerDelta(usable, barRect)
     if (Math.abs(delta) > 1) el.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' })
-  }, [bar, layout, reduced, status, viewport])
+  }, [bar, layout, playing, reduced, status, viewport])
+
+  const scrollToStart = () => {
+    const el = viewport.current
+    if (!el) return
+    browsing.current = true
+    el.focus({ preventScroll: true })
+    el.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' })
+  }
 
   const sectionStarts = new Map(song.sections.map((s) => [s.startBar, s.name]))
   const uniformlyLow = confidence.length >= song.bars && confidence.slice(0, song.bars).every((value) => value === 'low')
@@ -417,7 +431,20 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
   }
 
   return (
-    <section className="score" aria-label="Draft score" aria-busy={status === 'loading'} ref={viewport}>
+    <section
+      className="score"
+      aria-label="Draft score"
+      aria-busy={status === 'loading'}
+      ref={viewport}
+      tabIndex={-1}
+      onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)}
+    >
+      {scrolled && status === 'ready' && (
+        <button type="button" className="score-start" onClick={scrollToStart} aria-label="Scroll to start of song" title="Scroll to the start of the song without moving playback">
+          <ArrowUpToLine aria-hidden="true" />
+          <span>Start</span>
+        </button>
+      )}
       <div className="score-sheet">
         <div
           ref={host}

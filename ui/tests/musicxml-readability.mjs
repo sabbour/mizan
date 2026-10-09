@@ -274,6 +274,13 @@ try {
   assert.deepEqual(marks(drumXml(eighths, false)), [
     { dotted: true, shown: 80, sound: 120 }, { dotted: false, shown: 120, sound: 120 },
   ], 'a change of displayed beat unit at the same quarter tempo gets its own marking')
+
+  const { centerDelta } = await vite.ssrLoadModule('/src/workspace/follow.ts')
+  assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 900, bottom: 1100 }), 600,
+    'the active line centre moves to the usable viewport centre')
+  assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 350, bottom: 450 }), 0, 'a centred line does not scroll')
+  assert.equal(centerDelta({ top: 100, bottom: 500 }, { top: 300, bottom: 1000 }), 188,
+    'a line taller than the viewport is aligned near its top')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()
