@@ -36,10 +36,18 @@ const EMPTY_STEMS: Stem[] = []
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
+  // A position saved before re-analysis can name bars this song no longer has (a 158-bar 4/4
+  // reading re-analysed as 89 bars of 6/4); resume within this song's bars instead.
+  const start = useMemo(() => saved && {
+    ...saved,
+    bar: Math.min(Math.max(1, saved.bar), song.bars),
+    loop: saved.loop && saved.loop.startBar >= 1 && saved.loop.startBar <= saved.loop.endBar &&
+      saved.loop.endBar <= song.bars ? saved.loop : null,
+  }, [saved, song.bars])
 
   const [trackId, setTrackId] = useState(() => start?.trackId ?? song.tracks[0]?.id ?? '')
   const [rate, setRate] = useState(start?.rate ?? 1)
@@ -202,7 +210,7 @@ export function Workspace({
       setAudioLoading(loading)
       if (loading) setAudioError(null)
     }
-    if (start) engine.seek(barStart(song, Math.min(song.bars, start.bar) - 1))
+    if (start) engine.seek(barStart(song, start.bar - 1))
     return () => {
       engine.onLoading = null
       engine.onError = null

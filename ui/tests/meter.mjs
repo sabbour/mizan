@@ -301,9 +301,22 @@ export async function browserMeterChecks() {
     mount.querySelector('.score-bar[aria-label="Bar 4"]').click()
     await wait(() => Math.abs(engine.read().beat - barStart(song, 3)) < 1e-6, 'The partial fourth bar has its own seek target')
     check(JSON.stringify(song) === snapshot, 'Rendered score and navigation never mutate source data')
-    return 'Browser meter checks passed: changing meters, tiny partial engraving and source-bound head highlighting, boundary-safe projection, resume, bar picks, live signatures and source immutability.'
-  } finally {
     root.unmount()
+    // A position saved before re-analysis can name bars the new analysis no longer has.
+    const errors = []
+    const stale = ReactDOM.createRoot(mount, { onUncaughtError: (error) => errors.push(error.message) })
+    engine = undefined
+    stale.render(React.createElement(Workspace, {
+      song, onBack: () => {}, start: { bar: 157, trackId: 'piano', loop: { startBar: 150, endBar: 158 }, rate: 1, muted: [], solo: [] },
+    }))
+    await wait(() => engine && mount.querySelector('.ws-where'), 'Workspace did not open with a stale saved position')
+    check(!errors.length, `A stale saved bar or loop must not crash the workspace: ${errors.join('; ')}`)
+    check(mount.querySelector('.ws-where').textContent.includes(`Bar ${song.bars}`), 'A saved bar past the end resumes at the last bar')
+    check(Math.abs(engine.read().beat - barStart(song, song.bars - 1)) < 1e-6 && engine.loop === null,
+      'The stale position seeks inside the song and drops a loop outside it')
+    stale.unmount()
+    return 'Browser meter checks passed: changing meters, tiny partial engraving and source-bound head highlighting, boundary-safe projection, resume, stale saved positions, bar picks, live signatures and source immutability.'
+  } finally {
     mount.remove()
     Engine.prototype.seek = originalSeek
     Engine.prototype.dispose = originalDispose

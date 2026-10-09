@@ -416,10 +416,15 @@ async function scrollFollowChecks() {
         })
         check(nextSystem, 'The large fixture keeps a later system visible without scrolling')
         const nextBar = Number(nextSystem.getAttribute('aria-label').slice(4))
-        const before = scrollport.scrollTop
         render(nextBar, true)
-        await new Promise((resolve) => setTimeout(resolve, 100))
-        check(Math.abs(scrollport.scrollTop - before) < 1, 'A fully visible later system does not trigger an unnecessary jump')
+        const centred = () => {
+          const rect = barButton(nextBar).getBoundingClientRect()
+          const view = scrollport.getBoundingClientRect()
+          const error = (rect.top + rect.bottom) / 2 - (view.top + view.bottom) / 2
+          const max = scrollport.scrollHeight - scrollport.clientHeight
+          return Math.abs(error) <= 2 || (error < 0 && scrollport.scrollTop <= 1) || (error > 0 && scrollport.scrollTop >= max - 1)
+        }
+        await waitFor(centred, () => `A later system is centred unless the score is at its start or end (${JSON.stringify(describe(nextBar))})`)
       }
 
       render(pair.first, true)
@@ -471,7 +476,7 @@ async function scrollFollowChecks() {
       mount.remove()
     }
   }
-  return 'Playback-follow checks passed: nested header/transport boundaries, visible-system no-op, same-system follow after manual scrolling, and start/end seeks at compact and tall viewports.'
+  return 'Playback-follow checks passed: nested header/transport boundaries, centred later system, same-system follow after manual scrolling, and start/end seeks at compact and tall viewports.'
 }
 
 async function activeHeadChecks() {
