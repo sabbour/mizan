@@ -253,6 +253,27 @@ try {
   assert.match(fineScore, /<type>64th<\/type>/, 'the roll is written with 64th values')
   assert.doesNotMatch(fineScore, /<actual-notes>(?!3<)/, 'no irregular tuplet ratios are invented')
   assert.deepEqual(fineSong.drums, fineBefore, 'fine-figure engraving keeps source playback beats')
+
+  const marks = (xml) => xml.split('<measure ').slice(1).map((measure) => {
+    const metronome = /<metronome><beat-unit>quarter<\/beat-unit>(<beat-unit-dot\/>)?<per-minute>(\d+)<\/per-minute><\/metronome><\/direction-type><sound tempo="([\d.]+)"/.exec(measure)
+    return metronome ? { dotted: !!metronome[1], shown: Number(metronome[2]), sound: Number(metronome[3]) } : null
+  })
+  const blank = { ...song, chords: [], piano: [], vocals: [], drums: [] }
+  const mixed = { ...blank, bpm: 150, bars: 3, beatsPerBar: 4, barMap: [
+    { startBeat: 0, beats: 4, numerator: 4, denominator: 4 },
+    { startBeat: 4, beats: 6, numerator: 12, denominator: 8 },
+    { startBeat: 10, beats: 4, numerator: 4, denominator: 4 },
+  ], tempoMap: [{ beat: 0, time: 0 }, { beat: 4, time: 1.6 }, { beat: 10, time: 3.2 }, { beat: 14, time: 4.8 }] }
+  assert.deepEqual(marks(drumXml(mixed, false)), [
+    { dotted: false, shown: 150, sound: 150 }, { dotted: true, shown: 150, sound: 225 }, { dotted: false, shown: 150, sound: 150 },
+  ], 'a steady pulse across 4/4 and 12/8 is marked as quarter, dotted quarter and quarter at their real quarter tempos')
+  const eighths = { ...blank, bpm: 120, bars: 2, beatsPerBar: 3, barMap: [
+    { startBeat: 0, beats: 3, numerator: 6, denominator: 8 },
+    { startBeat: 3, beats: 1.5, numerator: 3, denominator: 8 },
+  ] }
+  assert.deepEqual(marks(drumXml(eighths, false)), [
+    { dotted: true, shown: 80, sound: 120 }, { dotted: false, shown: 120, sound: 120 },
+  ], 'a change of displayed beat unit at the same quarter tempo gets its own marking')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()
