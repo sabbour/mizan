@@ -42,7 +42,8 @@ export function kitStrike(hit: DrumHit): KitStrike {
     case 'crash': return { pieces: ['crash'], specified: true, foot: false, label: 'Crash' }
     case 'hightom':
     case 'floortom':
-      if (tom && (hit.lane === 'hightom' ? tom !== 'floor1' && tom !== 'floor2' : true))
+      // Trust a GM tom only on its own lane, as playback tuning and exports do; otherwise the family stays generic.
+      if (tom && (hit.lane === 'hightom' ? ['tom1', 'tom2', 'tom3'] : ['tom4', 'floor1', 'floor2']).includes(tom))
         return { pieces: [tom], specified: true, foot: false, label: label(tom) }
       return hit.lane === 'hightom'
         ? { pieces: RACK, specified: false, foot: false, label: 'Rack tom (which one is unspecified)' }

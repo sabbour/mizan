@@ -392,3 +392,34 @@ test('accompaniment follows energy and phrases with voice leading, a walking bas
   assert.ok(new Set(line.map((n) => n.velocity)).size >= 2)
   assert.deepEqual(song, snapshot, 'nothing in the song is rewritten')
 })
+
+test('a suspension resolves at its midpoint even inside a held cadence or a sustained attack', () => {
+  const tones = { C: [60, 64, 67], G: [55, 59, 62] }
+  const progression = ['C', 'G', 'C', 'G', 'C']
+  // Equal activity in every bar: moderate comping, and the phrase's last bar (a dominant) is held.
+  const song = fixture({
+    bars: 5, beatsPerBar: 4, beatUnit: 4, tempoMap: undefined, bpm: 100, key: { tonic: 'C', mode: 'major' },
+    sections: [{ name: 'Verse', startBar: 1, bars: 4 }, { name: 'End', startBar: 5, bars: 1 }],
+    chords: progression.map((symbol, bar) => ({ startBeat: bar * 4, beats: 4, symbol, numeral: null, role: null,
+      tones: tones[symbol], flats: false, confidence: 1 })),
+    piano: [], drums: [],
+    vocals: progression.map((symbol, bar) => ({ midi: symbol === 'C' ? 72 : 74, startBeat: bar * 4, beats: 4 })),
+  })
+  const colour = part(song, 'colour')
+  assert.deepEqual(Array.from(colour.chords, (c) => c.symbol), progression, 'labels stay as detected')
+  const right = Array.from(colour.piano).filter((n) => n.hand === 'right')
+  const pcOf = (n) => ((n.midi % 12) + 12) % 12
+  for (const [start, mid, what] of [[4, 6, 'a sustained comping attack'], [12, 14, 'the held phrase cadence']]) {
+    const inChord = right.filter((n) => n.startBeat >= start && n.startBeat < start + 4)
+    const fourths = inChord.filter((n) => pcOf(n) === 0)
+    const thirds = inChord.filter((n) => pcOf(n) === 11)
+    assert.ok(fourths.length && fourths.every((n) => n.startBeat < mid && n.startBeat + n.beats <= mid + 1e-9),
+      `${what}: the suspended C sounds only before the midpoint`)
+    assert.ok(thirds.some((n) => Math.abs(n.startBeat - mid) < 1e-9) && thirds.every((n) => n.startBeat >= mid - 1e-9),
+      `${what}: B resolves exactly at the midpoint`)
+    assert.ok(inChord.some((n) => n.startBeat < mid && n.startBeat + n.beats > mid && [7, 2].includes(pcOf(n))),
+      `${what}: the common tones keep sounding through the resolution`)
+  }
+  assert.ok(right.filter((n) => n.startBeat >= 12 && n.startBeat < 14).length >= 2 &&
+    right.some((n) => n.startBeat === 12 && n.beats === 4), 'the cadence is a held chord, not re-struck')
+})

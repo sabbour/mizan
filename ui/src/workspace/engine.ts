@@ -671,10 +671,11 @@ export class Engine {
   }
 
   private drum(time: number, hit: DrumHit, id: string): void {
-    const buffer = this.drumSamples.get(hit.lane)
+    const half = hit.articulation === 'half-open' && (hit.lane === 'hihat' || hit.lane === 'openhat')
+    // An explicit half-open hat sounds the open-hat sample, cut short, on either hat lane.
+    const buffer = this.drumSamples.get(half ? 'openhat' : hit.lane)
     if (!buffer) return
     const pedal = hit.lane === 'hihat' && hit.sourceMidi === 44
-    const half = hit.articulation === 'half-open'
     if (hit.lane === 'hihat') {
       for (const open of this.openHats) {
         try {

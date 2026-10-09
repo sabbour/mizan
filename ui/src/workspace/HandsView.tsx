@@ -28,6 +28,12 @@ export function HandsView({ song, engine }: Props) {
     return { low, high }
   }, [notes])
   const lastActive = useRef('')
+  const lastDrawn = useRef('')
+  const described = useRef<HTMLParagraphElement>(null)
+  // A new song (new notes, fingers or key range) always redraws.
+  useEffect(() => {
+    lastDrawn.current = ''
+  }, [notes])
 
   useEffect(() => {
     const element = canvas.current
@@ -36,6 +42,8 @@ export function HandsView({ song, engine }: Props) {
       const ratio = window.devicePixelRatio || 1
       element.width = Math.round(element.clientWidth * ratio)
       element.height = Math.round(element.clientHeight * ratio)
+      // Resizing clears the canvas.
+      lastDrawn.current = ''
     })
     observer.observe(element)
     return () => observer.disconnect()
@@ -45,11 +53,6 @@ export function HandsView({ song, engine }: Props) {
     const element = canvas.current
     const context = element?.getContext('2d')
     if (!element || !context) return
-    const ratio = window.devicePixelRatio || 1
-    const width = element.width / ratio
-    const height = element.height / ratio
-    context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    context.clearRect(0, 0, width, height)
 
     // Notes sounding now, from the same transport beat that drives the score and audio.
     const active: PianoNote[] = []
@@ -66,6 +69,17 @@ export function HandsView({ song, engine }: Props) {
     }
     const pressed = new Map<number, { note: PianoNote; finger?: Finger }>()
     for (const note of active) pressed.set(keyOf(note.midi), { note, finger: fingers.get(note) })
+    // Redraw only when what is shown changes; a paused or steady transport costs nothing per frame.
+    const state = [...pressed].sort(([a], [b]) => a - b)
+      .map(([key, { note, finger }]) => `${key}:${note.hand}:${finger?.finger ?? ''}:${Math.round((note.midi - key) * 100)}`).join(',')
+    const signature = `${element.width}x${element.height}|${range.low}-${range.high}|${state}`
+    if (signature === lastDrawn.current) return
+    lastDrawn.current = signature
+    const ratio = window.devicePixelRatio || 1
+    const width = element.width / ratio
+    const height = element.height / ratio
+    context.setTransform(ratio, 0, 0, ratio, 0, 0)
+    context.clearRect(0, 0, width, height)
 
     const whites: number[] = []
     for (let key = range.low; key <= range.high; key++) if (!BLACK.has(key % 12)) whites.push(key)
@@ -139,17 +153,24 @@ export function HandsView({ song, engine }: Props) {
       context.fillText(hand === 'left' ? 'L' : 'R', (from + to) / 2, 9)
     }
 
-    const summary = [...pressed].sort(([a], [b]) => a - b)
+    const sounding = [...pressed].sort(([a], [b]) => a - b)
+    const summary = sounding
       .map(([, { note, finger }]) => `${noteName(note.midi)}${note.hand === 'left' ? ' L' : ' R'}${finger ? finger.finger : ''}`).join(', ')
     if (summary !== lastActive.current && section.current) {
       lastActive.current = summary
       section.current.dataset.active = summary
+      // Readable on demand by assistive technology, without announcing every change while playing.
+      if (described.current) described.current.textContent = sounding.length
+        ? `Sounding now: ${sounding.map(([, { note, finger }]) =>
+          `${noteName(note.midi)}, ${note.hand === 'left' ? 'left' : 'right'} hand${finger ? `, finger ${finger.finger}` : ''}`).join('; ')}.`
+        : 'No keys sounding.'
     }
   })
 
   return (
     <section ref={section} className="practice-view practice-hands" aria-label="Hands and keys: the keys sounding now, by hand, with estimated finger numbers">
       <canvas ref={canvas} className="practice-canvas" aria-hidden="true" />
+      <p ref={described} className="visually-hidden">No keys sounding.</p>
       <p className="practice-legend">
         <span className="legend-key legend-right" aria-hidden="true" /> right hand
         <span className="legend-key legend-left" aria-hidden="true" /> left hand

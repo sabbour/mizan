@@ -96,9 +96,58 @@ try {
   }
   const toms = lessonHits(lesson('tom-fill')).filter((hit) => hit.lane === 'hightom' || hit.lane === 'floortom').map((hit) => hit.sourceMidi)
   assert.deepEqual(toms, [50, 50, 48, 48, 47, 47, 43, 41], 'the fill moves from the high tom to the low floor tom')
+  // Copy matches the authored patterns.
+  for (const item of LESSONS) {
+    const used = new Set()
+    for (const lessonBar of item.bars) {
+      for (const token of lessonBar.sticking?.split(' ') ?? []) for (const hand of token.split('+')) used.add(hand)
+      if (lessonBar.notes.bd?.match(/[^-]/)) used.add('right foot')
+      if (lessonBar.notes.hp?.match(/[^-]/)) used.add('left foot')
+    }
+    const text = [item.goal, item.limbs, ...item.steps].join(' ')
+    const claimed = /\b(three|four)-limb\b/.exec(text)?.[1]
+    if (claimed) assert.equal(used.size, claimed === 'three' ? 3 : 4, `${item.id} says ${claimed} limbs and uses ${[...used]}`)
+  }
+  assert.ok(/three-limb/.test(lesson('ride-and-hat-foot').goal), 'the ride lesson is a three-limb pattern')
+  const fill = lesson('tom-fill').bars[3]
+  const fillHands = fill.sticking.split(' ').slice(-8)
+  const fillDrums = Array.from({ length: 8 }, (_, i) => ['t1', 't2', 't3', 'f1', 'f2'].find((voice) => fill.notes[voice][8 + i] !== '-'))
+  fillDrums.forEach((drum, i) => {
+    if (drum !== fillDrums[i - 1]) assert.equal(fill.notes[drum][8 + i], 'X', `the first note on ${drum} is accented`)
+  })
+  assert.deepEqual([fillHands[0], fillHands[2], fillHands[4], fillHands[6], fillHands[7]], ['R', 'R', 'R', 'R', 'L'],
+    'rack-tom pairs lead with the right; the floor toms are right then left')
+  assert.match(lesson('tom-fill').steps.join(' '), /right on the high floor tom and left on the low one/)
+  const hatSteps = lesson('hi-hat-states').steps.join(' ')
+  assert.ok(/pedal/.test(hatSteps) && /pressure/.test(hatSteps) && !/heel/.test(hatSteps), 'opening the hat is taught as easing pedal pressure')
   // Meters: simple and compound, counted correctly.
   assert.deepEqual([...new Set(LESSONS.map((item) => `${item.meter.numerator}/${item.meter.denominator}`))].sort(), ['3/4', '4/4', '6/8'])
   assert.equal(lessonSong(lesson('six-eight')).bpm, 90, '6/8 at 60 dotted quarters is 90 quarter notes per minute')
+  {
+    const { lessonPosition, saveLessonPosition } = await vite.ssrLoadModule('/src/course/state.ts')
+    const store = new Map()
+    globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) }
+    const warnings = []
+    const warn = console.warn
+    console.warn = (...args) => warnings.push(args[0])
+    try {
+      const fill = lesson('snare-fill')
+      for (const rate of [0.25, 0.7, 1]) {
+        const saved = { bar: 3, loop: { startBar: 2, endBar: 4 }, loopName: null, rate, trackId: 'drums', muted: [], solo: [] }
+        saveLessonPosition(fill, saved)
+        assert.deepEqual(lessonPosition(fill), saved, `a saved lesson at ${rate * 100}% speed round-trips`)
+      }
+      assert.equal(warnings.length, 0)
+      for (const stored of ['{not json', '{"bar":9,"loop":null,"rate":0.7,"muted":[],"solo":[]}', '{"bar":1,"loop":null,"rate":1.25,"muted":[],"solo":[]}']) {
+        store.set('mizan:course:position:snare-fill', stored)
+        assert.deepEqual(lessonPosition(fill), freshPosition(fill), `unusable saved state starts fresh: ${stored}`)
+      }
+      assert.equal(warnings.length, 3, 'each unusable saved position is reported, not silently replaced')
+    } finally {
+      console.warn = warn
+      delete globalThis.localStorage
+    }
+  }
   console.log(`Drum course checks passed: ${LESSONS.length} distinct lessons in ${LEVELS.length} levels; bar bounds, counts, stickings, rests, dynamics, articulations, meters and notation.`)
 } finally {
   await vite.close()

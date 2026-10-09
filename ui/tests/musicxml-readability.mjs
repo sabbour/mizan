@@ -296,6 +296,15 @@ try {
   assert.equal(holding.get(heldLow).finger, 1)
   assert.equal(holding.get(farAbove), undefined, 'a note out of reach of a held note gets no impossible suggestion')
   assert.ok(holding.get(nearAbove).finger > 1, 'a note within reach of a held thumb takes another finger')
+  const cluster = [60, 62, 64, 65, 67, 69].map((midi) => ({ midi, startBeat: 0, beats: 2, hand: 'right' }))
+  const wide = [48, 63].map((midi) => ({ midi, startBeat: 2, beats: 2, hand: 'left' }))
+  const octave = [60, 64, 72].map((midi) => ({ midi, startBeat: 4, beats: 1, hand: 'right' }))
+  const after = { midi: 64, startBeat: 1, beats: 1, hand: 'right' }
+  const limits = suggestFingers([...cluster, ...wide, ...octave, after])
+  assert.ok(cluster.every((note) => !limits.has(note)), 'six keys in one hand get no finger suggestion')
+  assert.ok(wide.every((note) => !limits.has(note)), 'a chord wider than an octave gets no finger suggestion')
+  assert.deepEqual(octave.map((note) => limits.get(note).finger), [1, 3, 5], 'an octave-wide triad is still fingered')
+  assert.equal(limits.get(after), undefined, 'a note under an unfingered held chord is not guessed and does not throw')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 900, bottom: 1100 }), 600,
     'the active line centre moves to the usable viewport centre')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 350, bottom: 450 }), 0, 'a centred line does not scroll')
@@ -342,6 +351,45 @@ try {
   assert.deepEqual(strike({ lane: 'hightom' }), { pieces: ['tom1', 'tom2', 'tom3', 'tom4'], specified: false, foot: false,
     label: 'Rack tom (which one is unspecified)' }, 'a generic tom stays unspecified instead of naming a drum')
   assert.equal(strike({ lane: 'hightom', sourceMidi: 41 }).specified, false, 'a floor-tom pitch on the rack lane is not trusted')
+  for (const [lane, sourceMidi] of [['hightom', 45], ['hightom', 43], ['floortom', 50], ['floortom', 47]]) {
+    assert.equal(strike({ lane, sourceMidi }).specified, false, `${lane} with GM ${sourceMidi} stays a generic ${lane}`)
+    assert.equal(tomRate({ lane, sourceMidi }), 1, `${lane} with GM ${sourceMidi} keeps the lane's own pitch`)
+  }
+  {
+    const { Engine } = await vite.ssrLoadModule('/src/workspace/engine.ts')
+    const engine = new Engine({ ...buildSong(), drums: [] })
+    const started = []
+    const node = () => ({ connect: (next) => next ?? node(), gain: { value: 1 } })
+    engine.ctx = {
+      createBufferSource: () => {
+        const source = { ...node(), playbackRate: { value: 1 }, buffer: null,
+          start(at) { started.push({ source, at }) }, stop(at) { source.stoppedAt = Math.min(source.stoppedAt ?? Infinity, at) } }
+        return source
+      },
+      createGain: node,
+    }
+    engine.bus = () => node()
+    engine.track = (source, start, stop) => { source.start(start); source.stop(stop); return source }
+    engine.drumSamples = new Map(['hihat', 'openhat'].map((lane) => [lane, { duration: 2, lane }]))
+    const play = (time, hit) => { engine.drum(time, { startBeat: 0, velocity: 0.7, ...hit }, 'drums'); return started.at(-1).source }
+    const open = play(0, { lane: 'openhat', sourceMidi: 46 })
+    const halfOnHat = play(1, { lane: 'hihat', sourceMidi: 42, articulation: 'half-open' })
+    assert.equal(halfOnHat.buffer.lane, 'openhat', 'a half-open hit on the hi-hat lane sounds the open-hat sample')
+    assert.ok(open.stoppedAt <= 1.03, 'it chokes the ringing open hat, as any hi-hat lane hit does')
+    assert.ok(halfOnHat.stoppedAt - 1 < 0.4, 'and rings short')
+    const pedal = play(1.2, { lane: 'hihat', sourceMidi: 44 })
+    assert.equal(pedal.buffer.lane, 'hihat')
+    assert.ok(halfOnHat.stoppedAt <= 1.23, 'the pedal closes the half-open hat')
+    const halfOnOpen = play(2, { lane: 'openhat', sourceMidi: 46, articulation: 'half-open' })
+    assert.equal(halfOnOpen.buffer.lane, 'openhat')
+    assert.ok(halfOnOpen.stoppedAt - 2 < 0.4, 'a half-open hit on the open-hat lane rings short too')
+    const closed = play(2.1, { lane: 'hihat', sourceMidi: 42 })
+    assert.equal(closed.buffer.lane, 'hihat', 'ordinary closed hits keep the closed sample')
+    assert.ok(halfOnOpen.stoppedAt <= 2.13, 'and close the half-open hat')
+    const generic = play(3, { lane: 'hihat' })
+    assert.equal(generic.buffer.lane, 'hihat', 'a generic hi-hat hit is unchanged')
+    assert.ok(generic.stoppedAt - 3 > 1.5, 'and keeps its natural length')
+  }
   assert.deepEqual(['hihat:42', 'openhat:46', 'hihat:44', 'hihat:'].map((key) => {
     const [lane, midi] = key.split(':')
     return strike({ lane, ...(midi ? { sourceMidi: Number(midi) } : {}) }).hat ?? 'unspecified'

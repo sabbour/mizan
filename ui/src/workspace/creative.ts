@@ -228,8 +228,7 @@ function accompany(song: Song, chords: Chord[], rhythm: readonly number[], suspe
     const end = chord.startBeat + chord.beats
     const resolvesDownAFifth = next && next.startBeat === end && next.tones.length &&
       pc(next.tones[0] - chord.tones[0]) === 5 && chord.tones.some((tone) => pc(tone - chord.tones[0]) === 4)
-    const sus = suspensions && resolvesDownAFifth
-      ? voiced.map((tone) => (pc(tone - chord.tones[0]) === 4 ? tone + 1 : tone)) : null
+    const sus = !!(suspensions && resolvesDownAFifth)
     const suspendUntil = chord.startBeat + chord.beats / 2
     for (let bar = barAt(song, chord.startBeat); bar < bars.length && bars[bar].startBeat < end; bar++) {
       const measure = bars[bar]
@@ -247,17 +246,23 @@ function accompany(song: Song, chords: Chord[], rhythm: readonly number[], suspe
         if (local < 1e-6) return 0.7
         return Math.abs(local / pulse - Math.round(local / pulse)) < 1e-6 ? 0.6 : 0.5
       }
-      const tonesAt = (beat: number, full: boolean) => (sus && beat < suspendUntil - 1e-6 ? sus : full ? voiced : light)
+      // The suspension lives in the third: sounded as the fourth until the chord's midpoint, then resolved there even
+      // when no new attack falls on it (a held or spanning note is split); the other voices keep sounding.
+      const strike = (tone: number, at: number, beats: number, velocity: number) => {
+        if (!sus || pc(tone - chord.tones[0]) !== 4 || at >= suspendUntil - 1e-6) return push(tone, at, beats, 'right', velocity)
+        if (at + beats <= suspendUntil + 1e-6) return push(tone + 1, at, beats, 'right', velocity)
+        push(tone + 1, at, suspendUntil - at, 'right', velocity)
+        push(tone, suspendUntil, at + beats - suspendUntil, 'right', velocity - 0.06)
+      }
       // Right hand.
       if (texture === 'hold') {
-        for (const tone of tonesAt(start, true)) push(tone, start, stop - start, 'right', 0.56 + arch)
+        for (const tone of voiced) strike(tone, start, stop - start, 0.56 + arch)
       } else if (texture === 'broken') {
         const step = pulse === 1.5 ? 0.5 : pulse
         // Alternate the arpeggio's contour from bar to bar within the phrase.
         const order = voiced.length >= 3 ? (position % 2 ? [0, 1, 2, 1] : [0, 2, 1, 2]) : [0, 1]
         for (let beat = start, k = 0; beat < stop - 1e-6; beat += step, k++) {
-          const tones = tonesAt(beat, true)
-          push(tones[order[k % order.length] % tones.length], beat, Math.min(step, stop - beat), 'right', accent(beat) - 0.08 + arch)
+          strike(voiced[order[k % order.length] % voiced.length], beat, Math.min(step, stop - beat), accent(beat) - 0.08 + arch)
         }
       } else {
         const attacks = chordRhythm({ startBeat: start, beats: stop - start }, rhythm)
@@ -273,7 +278,7 @@ function accompany(song: Song, chords: Chord[], rhythm: readonly number[], suspe
         const sorted = [...stabs].sort((a, b) => a - b)
         attacks.splice(0, attacks.length, ...sorted.map((beat, i) => ({ startBeat: beat, beats: (sorted[i + 1] ?? stop) - beat })))
         attacks.forEach(({ startBeat, beats }, k) => {
-          for (const tone of tonesAt(startBeat, k % 2 === 0)) push(tone, startBeat, beats, 'right', accent(startBeat) + arch)
+          for (const tone of k % 2 === 0 ? voiced : light) strike(tone, startBeat, beats, accent(startBeat) + arch)
         })
       }
       // Left hand: root, the fifth on the second strong pulse, and a step into the next chord.

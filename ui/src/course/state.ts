@@ -12,21 +12,32 @@ export function freshPosition(lesson: Lesson): Position {
   }
 }
 
+/** The saved setup for a lesson, or a fresh start with a console warning when what is stored cannot be used. */
 export function lessonPosition(lesson: Lesson): Position {
+  const fresh = freshPosition(lesson)
+  let value: unknown
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(key(lesson.id)) ?? 'null')
-    if (!value || typeof value !== 'object') return freshPosition(lesson)
-    const saved = value as Partial<Position>
-    const bars = lesson.bars.length
-    const bar = Number.isInteger(saved.bar) && saved.bar! >= 1 && saved.bar! <= bars ? saved.bar! : 1
-    const loop = saved.loop && Number.isInteger(saved.loop.startBar) && Number.isInteger(saved.loop.endBar) &&
-      saved.loop.startBar >= 1 && saved.loop.startBar <= saved.loop.endBar && saved.loop.endBar <= bars ? saved.loop : null
-    const rate = typeof saved.rate === 'number' && saved.rate >= 0.25 && saved.rate <= 1 ? saved.rate : freshPosition(lesson).rate
-    const list = (items: unknown) => Array.isArray(items) ? items.filter((item): item is string => typeof item === 'string') : []
-    return { bar, loop, loopName: null, rate, trackId: 'drums', muted: list(saved.muted), solo: list(saved.solo) }
-  } catch {
-    return freshPosition(lesson)
+    value = JSON.parse(localStorage.getItem(key(lesson.id)) ?? 'null')
+  } catch (error) {
+    console.warn('Could not restore the lesson practice position; starting the lesson fresh.', error)
+    return fresh
   }
+  if (value === null) return fresh
+  const bars = lesson.bars.length
+  const saved = (typeof value === 'object' ? value : {}) as Partial<Position>
+  const loop = saved.loop
+  // Bounds follow the workspace controls: bars of this lesson, and Speed from 25% to 100%.
+  const valid = typeof value === 'object' && !Array.isArray(value) &&
+    Number.isInteger(saved.bar) && saved.bar! >= 1 && saved.bar! <= bars &&
+    (loop === null || (!!loop && Number.isInteger(loop.startBar) && Number.isInteger(loop.endBar) &&
+      loop.startBar >= 1 && loop.startBar <= loop.endBar && loop.endBar <= bars)) &&
+    typeof saved.rate === 'number' && saved.rate >= 0.25 && saved.rate <= 1 &&
+    [saved.muted, saved.solo].every((list) => Array.isArray(list) && list.every((item) => typeof item === 'string'))
+  if (!valid) {
+    console.warn('Could not restore the lesson practice position; starting the lesson fresh.', new Error(`Invalid saved position for ${lesson.id}`))
+    return fresh
+  }
+  return { bar: saved.bar!, loop: loop ?? null, loopName: null, rate: saved.rate!, trackId: 'drums', muted: saved.muted!, solo: saved.solo! }
 }
 
 export function saveLessonPosition(lesson: Lesson, position: Position): void {

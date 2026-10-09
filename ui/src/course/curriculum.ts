@@ -180,8 +180,8 @@ export const LESSONS: Lesson[] = [
     id: 'hi-hat-states', level: 4, title: 'Open, half-open and closed hi-hat', meter: { numerator: 4, denominator: 4 },
     goal: 'Control the hi-hat with your foot: open it on "4 &", a little on "2 &", and close it with the pedal on 1.',
     tempo: { start: 70, target: 100 }, limbs: 'Right hand: hi-hat · Left hand: snare · Right foot: kick · Left foot: hi-hat pedal',
-    steps: ['On "4 &" lift your left heel to open the hi-hat (circled note), then press the pedal on 1 to close it.',
-      'Bar 2 adds a half-open "slosh" on "2 &": lift the foot only slightly. This half-open sound is written into the lesson, not detected.',
+    steps: ['On "4 &" ease the pressure off the hi-hat pedal with your left foot to open it (circled note), then press the pedal down on 1 to close it.',
+      'Bar 2 adds a half-open "slosh" on "2 &": release the pedal pressure only slightly. This half-open sound is written into the lesson, not detected.',
       'The closing pedal and the next hand stroke land together.'],
     bars: [
       { ...ROCK, notes: { ...ROCK.notes, hh: 'xxxxxxxo', hp: 'x-------' } },
@@ -190,7 +190,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     id: 'ride-and-hat-foot', level: 4, title: 'Ride with the hi-hat foot', meter: { numerator: 4, denominator: 4 },
-    goal: 'A four-limb pattern: ride on the right, hi-hat pedal on 2 and 4, a soft kick on 1 and 3.',
+    goal: 'A three-limb pattern: ride with the right hand, hi-hat pedal on 2 and 4, a soft kick on 1 and 3.',
     tempo: { start: 70, target: 100 }, limbs: 'Right hand: ride · Left foot: hi-hat pedal · Right foot: kick (soft)',
     steps: ['Ride: 1, 2, "2 &", 3, 4, "4 &". Play it straight first; it can swing later.',
       'Close the hi-hat with the left foot on 2 and 4: a crisp "chick".', 'Keep the kick very soft on 1 and 3, felt more than heard.'],
@@ -212,11 +212,11 @@ export const LESSONS: Lesson[] = [
     goal: 'Move the fill from the high tom down to the floor toms, then back to the groove with a crash.',
     tempo: { start: 65, target: 100 }, limbs: 'Groove as the rock beat; the fill alternates hands from high to low',
     steps: ['The fill on beats 3 and 4 goes: high tom, high-mid tom, low-mid tom, then the two floor toms.',
-      'Keep the sticking R L R L as you move; lead each new drum with the right hand.',
+      'Keep the sticking R L R L as you move: the right hand leads each rack-tom pair, then right on the high floor tom and left on the low one.',
       'Accent the first note on each new drum so the descent is clear.', 'Land the crash and kick together on the next 1.'],
     bars: [CRASH_IN, ROCK, ROCK, { steps: 4, count: SIXTEENS, sticking: 'R R R+L R R L R L R L R L',
       notes: { hh: 'x-x-x-x---------', sn: '----X-----------', bd: 'x---------------',
-        t1: '--------Xx------', t2: '----------Xx----', t3: '------------Xx--', f1: '--------------X-', f2: '---------------x' } }],
+        t1: '--------Xx------', t2: '----------Xx----', t3: '------------Xx--', f1: '--------------X-', f2: '---------------X' } }],
     sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
   },
   {
