@@ -91,7 +91,20 @@
   transition: background-color 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease);
 }
 .kit-pill[data-lit] { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
-.practice-kit .kit-style { width: fit-content; margin: 6px auto 0; }
+.practice-kit { position: relative; }
+/* The kit look is a small control in the stage's corner, out of the way of the kit and its legend. */
+.kit-toolbar { position: absolute; top: 6px; right: 8px; z-index: 1; }
+.kit-style { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.kit-style select {
+  padding: 3px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.9);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.kit-style select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kit-hand { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
 .kit-hand b { font-weight: 800; }
 .kit-hand[data-hand='left'] b { color: var(--hand-left); }

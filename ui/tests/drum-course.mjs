@@ -298,7 +298,7 @@ try {
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: false, sticking: false })
       savePref('click', true)
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false }, 'saving one keeps the others')
-      for (const style of ['acoustic', 'illustrated', 'electronic']) {
+      for (const style of ['studio', 'acoustic', 'illustrated', 'electronic']) {
         savePref('kitStyle', style)
         assert.equal(loadPrefs().kitStyle, style, `the ${style} kit style is remembered`)
       }

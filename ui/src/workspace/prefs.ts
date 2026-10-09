@@ -2,8 +2,8 @@
  * Choices that follow the player across songs, lessons and restarts: count-in, speed, click, the sticking letters
  * and the drum kit's look. Each is stored only when the player changes it, so an absent value keeps the default.
  */
-export type KitStyle = 'electronic' | 'acoustic' | 'illustrated'
-export const KIT_STYLES: KitStyle[] = ['electronic', 'acoustic', 'illustrated']
+export type KitStyle = 'electronic' | 'studio' | 'acoustic' | 'illustrated'
+export const KIT_STYLES: KitStyle[] = ['electronic', 'studio', 'acoustic', 'illustrated']
 export type PracticePrefs = { countIn?: boolean; rate?: number; click?: boolean; sticking?: boolean; kitStyle?: KitStyle }
 
 const KEY = 'mizan:practice'

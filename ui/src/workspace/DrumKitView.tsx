@@ -5,6 +5,7 @@ import { HAT_LABEL, KIT_PIECES, kitStrike, type HatState, type KitPiece } from '
 import type { Song } from './song'
 import type { Hand, Sticking } from './sticking'
 import { KIT_STYLES, type KitStyle } from './prefs'
+import { buildKit, FRAGMENT, KIT_STYLE_LABEL, multiply, normalize, translate, VERTEX, type Target } from './kitScene'
 
 type Props = {
   song: Song; engine: Engine
@@ -14,10 +15,6 @@ type Props = {
   style: KitStyle
   onStyle: (style: KitStyle) => void
 }
-/** Glow targets: kit pieces plus the hi-hat foot pedal (the kick pedal follows the kick). */
-type Target = KitPiece | 'hatPedal'
-type Material = { color: [number, number, number]; spec: number; shine: number }
-type Part = { target: Target | null; mesh: Float32Array; model: Float32Array; material: Material; hatTop?: boolean; shadow?: number }
 type Strike = { beat: number; velocity: number; specified: boolean; hand?: Hand | 'both' }
 
 /** A hit glows for half a beat, fading; reduced motion shows a steady quarter-beat mark instead. */
@@ -31,39 +28,12 @@ const TINT: Record<Hand | 'both' | 'none', [number, number, number]> = {
 }
 const HAT_LIFT: Record<HatState, number> = { closed: 0, pedal: 0, 'half-open': 0.024, open: 0.06 }
 
-// Column-major 4x4 matrices.
-const multiply = (a: Float32Array, b: Float32Array) => {
-  const out = new Float32Array(16)
-  for (let col = 0; col < 4; col++)
-    for (let row = 0; row < 4; row++)
-      for (let k = 0; k < 4; k++) out[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k]
-  return out
-}
-const chain = (...matrices: Float32Array[]) => matrices.reduce(multiply)
-const identity = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
-const translate = (x: number, y: number, z: number) => { const m = identity(); m[12] = x; m[13] = y; m[14] = z; return m }
-const rotateX = (angle: number) => {
-  const m = identity(); const c = Math.cos(angle); const s = Math.sin(angle)
-  m[5] = c; m[6] = s; m[9] = -s; m[10] = c
-  return m
-}
-const rotateY = (angle: number) => {
-  const m = identity(); const c = Math.cos(angle); const s = Math.sin(angle)
-  m[0] = c; m[2] = -s; m[8] = s; m[10] = c
-  return m
-}
-const rotateZ = (angle: number) => {
-  const m = identity(); const c = Math.cos(angle); const s = Math.sin(angle)
-  m[0] = c; m[1] = s; m[4] = -s; m[5] = c
-  return m
-}
 const perspective = (fov: number, aspect: number, near: number, far: number) => {
   const f = 1 / Math.tan(fov / 2)
   const m = new Float32Array(16)
   m[0] = f / aspect; m[5] = f; m[10] = (far + near) / (near - far); m[11] = -1; m[14] = 2 * far * near / (near - far)
   return m
 }
-const normalize = (v: number[]) => { const l = Math.hypot(...v); return v.map((value) => value / l) }
 const lookAt = (eye: number[], target: number[]) => {
   const sub = (a: number[], b: number[]) => a.map((value, index) => value - b[index])
   const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
@@ -73,223 +43,13 @@ const lookAt = (eye: number[], target: number[]) => {
   const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
   return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1])
 }
-
-/**
- * Turns a (radius, height) profile around the Y axis into triangles with interleaved position and normal.
- * Normals are perpendicular to each profile segment, so shells, heads, rims and cymbal bells all shade correctly.
- */
-function lathe(profile: [number, number][], segments = 48): Float32Array {
-  const out: number[] = []
-  for (let k = 0; k + 1 < profile.length; k++) {
-    const [r0, y0] = profile[k]
-    const [r1, y1] = profile[k + 1]
-    const [nr, ny] = normalize([y1 - y0, -(r1 - r0)])
-    for (let i = 0; i < segments; i++) {
-      const a = (i / segments) * Math.PI * 2
-      const b = ((i + 1) / segments) * Math.PI * 2
-      const point = (r: number, y: number, angle: number) =>
-        out.push(r * Math.cos(angle), y, r * Math.sin(angle), nr * Math.cos(angle), ny, nr * Math.sin(angle))
-      point(r0, y0, a); point(r0, y0, b); point(r1, y1, b)
-      point(r0, y0, a); point(r1, y1, b); point(r1, y1, a)
-    }
-  }
-  return new Float32Array(out)
-}
-const ring = (radius: number, y: number, tube: number) =>
-  lathe(Array.from({ length: 9 }, (_, i) => {
-    const angle = (i / 8) * Math.PI * 2
-    return [radius + tube * Math.cos(angle), y + tube * Math.sin(angle)] as [number, number]
-  }), 48)
-const rod = (radius: number, length: number) => lathe([[radius, 0], [radius, length]], 12)
-const disc = (radius: number, y = 0) => lathe([[0, y], [radius, y]], 48)
-
-
-type Palette = { shell: Material; head: Material; resonant: Material; hoop: Material; cymbal: Material; metal: Material }
-const PALETTES: Record<KitStyle, Palette> = {
-  // Wood shells, coated heads, bronze cymbals and chrome hardware.
-  acoustic: {
-    shell: { color: [0.46, 0.21, 0.1], spec: 0.55, shine: 48 }, head: { color: [0.93, 0.92, 0.88], spec: 0.08, shine: 8 },
-    resonant: { color: [0.62, 0.6, 0.56], spec: 0.05, shine: 8 }, hoop: { color: [0.66, 0.68, 0.71], spec: 0.9, shine: 64 },
-    cymbal: { color: [0.74, 0.58, 0.28], spec: 0.75, shine: 36 }, metal: { color: [0.66, 0.68, 0.71], spec: 0.9, shine: 64 },
-  },
-  // Shallow pads with light mesh heads and rubber hoops, black rubber cymbals, a black tubular rack.
-  electronic: {
-    shell: { color: [0.1, 0.1, 0.11], spec: 0.25, shine: 24 }, head: { color: [0.86, 0.87, 0.87], spec: 0.03, shine: 4 },
-    resonant: { color: [0.1, 0.1, 0.11], spec: 0.1, shine: 8 }, hoop: { color: [0.14, 0.14, 0.15], spec: 0.2, shine: 16 },
-    cymbal: { color: [0.11, 0.11, 0.12], spec: 0.3, shine: 20 }, metal: { color: [0.17, 0.17, 0.18], spec: 0.55, shine: 32 },
-  },
-  // The acoustic kit drawn like an illustration: warm painted finishes, faceted shapes, banded light and dark outlines.
-  illustrated: {
-    shell: { color: [0.78, 0.4, 0.17], spec: 0.15, shine: 8 }, head: { color: [0.97, 0.93, 0.82], spec: 0.05, shine: 8 },
-    resonant: { color: [0.82, 0.72, 0.58], spec: 0.05, shine: 8 }, hoop: { color: [0.78, 0.75, 0.7], spec: 0.3, shine: 16 },
-    cymbal: { color: [0.93, 0.72, 0.3], spec: 0.3, shine: 16 }, metal: { color: [0.64, 0.62, 0.6], spec: 0.3, shine: 16 },
-  },
-}
-const STYLE_LABEL: Record<KitStyle, string> = { electronic: 'Electronic', acoustic: 'Acoustic', illustrated: 'Illustrated acoustic' }
 /** Outline width for the illustrated style, in kit units. */
 const INK = 0.006
-const CHROME: Material = { color: [0.66, 0.68, 0.71], spec: 0.9, shine: 64 }
-const RUBBER: Material = { color: [0.12, 0.12, 0.13], spec: 0.1, shine: 8 }
-const SCREEN: Material = { color: [0.24, 0.48, 0.86], spec: 0.4, shine: 32 }
-
-/**
- * Code-generated five-piece kit seen from behind the throne: two rack toms, one floor tom, pedals and stands. Both styles
- * place every piece in the same spot, so a hit lights the same surface whichever look is chosen.
- */
-function kitParts(style: KitStyle): Part[] {
-  const electronic = style === 'electronic'
-  // Fewer sides give the illustrated kit its faceted, hand-drawn look.
-  const sides = style === 'illustrated' ? 16 : 48
-  const { shell, head, resonant, hoop, cymbal: bronze, metal } = PALETTES[style]
-  const parts: Part[] = []
-  const add = (target: Target | null, mesh: Float32Array, model: Float32Array, material: Material, extra: Partial<Part> = {}) =>
-    parts.push({ target, mesh, model, material, ...extra })
-  const shadow = (x: number, z: number, radius: number) =>
-    add(null, disc(radius, 0.002), translate(x, 0, z), RUBBER, { shadow: radius })
-  const legs = (x: number, z: number, top: number, spread = 0.22) => {
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2 + 0.5
-      const tilt = Math.atan2(spread, top)
-      add(null, rod(0.007, Math.hypot(spread, top)), chain(translate(x, 0, z), rotateY(angle), translate(spread, 0, 0), rotateZ(tilt)), metal)
-    }
-  }
-  /** A bar from (x0, y, z) to (x1, y, z). */
-  const bar = (x0: number, x1: number, y: number, z: number) => add(null, rod(0.016, x1 - x0), chain(translate(x0, y, z), rotateZ(-Math.PI / 2)), metal)
-  const drum = (target: KitPiece, radius: number, depth: number, at: [number, number, number], pose: Float32Array) => {
-    const model = chain(translate(...at), pose)
-    // Pads are shallow; acoustic shells keep their depth.
-    const half = (electronic ? Math.min(depth, 0.07) : depth) / 2
-    add(target, lathe([[radius, -half], [radius, half]], sides), model, shell)
-    add(target, lathe([[0, half + 0.002], [radius * 0.99, half + 0.002]], sides), model, head)
-    add(target, lathe([[0, -half - 0.002], [radius * 0.99, -half - 0.002]], sides), model, resonant)
-    add(target, ring(radius + 0.004, half, electronic ? 0.012 : 0.007), model, hoop)
-    if (!electronic) add(target, ring(radius + 0.004, -half, 0.007), model, hoop)
-    return model
-  }
-  const cymbal = (target: KitPiece, radius: number, at: [number, number, number], pose: Float32Array, extra: Partial<Part> = {}) => {
-    // Rubber cymbal pads are flatter than bronze.
-    const rise = electronic ? 0.5 : 1
-    const top: [number, number][] = [[0, 0.03 * rise], [radius * 0.1, 0.03 * rise], [radius * 0.2, 0.012 * rise], [radius, -0.01 * rise]]
-    const model = chain(translate(...at), pose)
-    add(target, lathe(top, sides), model, bronze, extra)
-    add(target, lathe(top.map(([r, y]) => [r, y - 0.006] as [number, number]).reverse(), sides), model, bronze, extra)
-  }
-  const cymbalStand = (x: number, z: number, height: number) => {
-    add(null, rod(0.009, height), translate(x, 0, z), metal)
-    if (!electronic) legs(x, z, 0.26)
-    shadow(x, z, 0.3)
-  }
-
-  if (electronic) {
-    // Tubular rack: two side posts and a front bar carry the pads and cymbals.
-    for (const [x, z] of [[-0.5, 0.06], [0.78, 0.06], [-0.5, -0.24], [0.78, -0.24]]) {
-      add(null, rod(0.016, 0.82), translate(x, 0, z), metal)
-      shadow(x, z, 0.12)
-    }
-    bar(-0.5, 0.78, 0.72, 0.06)
-    bar(-0.5, 0.78, 0.72, -0.24)
-    // Drum module on the left post, angled toward the player.
-    const module = chain(translate(-0.56, 0.86, 0.14), rotateY(0.5), rotateX(1.15))
-    add(null, lathe([[0.001, -0.012], [0.1, -0.012], [0.1, 0.012], [0.001, 0.012]], 4), chain(module, rotateY(Math.PI / 4)), RUBBER)
-    add(null, lathe([[0.001, 0.013], [0.045, 0.013]], 4), chain(module, translate(0, 0, -0.02), rotateY(Math.PI / 4)), SCREEN)
-  }
-  // Kick: an acoustic bass drum on its side, or a small pad on a tower; either way a pedal and beater in front.
-  const kickFront = electronic ? 0.07 : 0.2
-  if (electronic) {
-    drum('kick', 0.13, 0.05, [0.02, 0.3, 0.03], rotateX(Math.PI / 2))
-    for (const x of [-0.07, 0.11]) add(null, rod(0.012, 0.3), translate(x, 0, 0.03), metal)
-    add(null, lathe([[0.16, 0], [0.16, 0.02], [0, 0.02]], 4), chain(translate(0.02, 0, 0.03), rotateY(Math.PI / 4)), metal)
-  } else drum('kick', 0.28, 0.4, [0.02, 0.3, 0.0], rotateX(Math.PI / 2))
-  shadow(0.02, 0.0, electronic ? 0.22 : 0.42)
-  add('kick', lathe([[0.06, 0], [0.06, 0.012], [0, 0.012]], 16), chain(translate(0.02, 0.012, kickFront + 0.22), rotateX(-0.25)), CHROME)
-  add('kick', rod(0.005, 0.24), chain(translate(0.02, 0.06, kickFront + 0.12), rotateX(-0.5)), CHROME)
-  add('kick', lathe([[0.001, -0.025], [0.025, -0.012], [0.025, 0.012], [0.001, 0.025]], 16), chain(translate(0.02, 0.27, kickFront + 0.015), rotateX(Math.PI / 2)), RUBBER)
-  // Snare on its stand, tilted toward the player.
-  drum('snare', 0.18, 0.14, [-0.34, 0.62, 0.36], rotateX(0.1))
-  add(null, rod(0.008, 0.55), translate(-0.34, 0, 0.36), metal)
-  legs(-0.34, 0.36, 0.2, 0.18)
-  shadow(-0.34, 0.36, 0.28)
-  // Two rack toms over the kick, the smaller one at the player's left.
-  const racks: [KitPiece, number, number, [number, number, number], number][] = [
-    ['tom1', 0.13, 0.16, [-0.16, 0.88, -0.02], 0.45],
-    ['tom2', 0.145, 0.17, [0.18, 0.88, -0.02], 0.4],
-  ]
-  for (const [piece, radius, depth, at, tilt] of racks) {
-    drum(piece, radius, depth, at, chain(rotateY(-at[0] * 0.5), rotateX(tilt)))
-    if (electronic) add(null, rod(0.01, at[1] - 0.72), translate(at[0], 0.72, -0.02), metal)
-    else add(null, rod(0.008, at[1] - 0.52), translate(at[0] * 0.75 + 0.01, 0.52, at[2] * 0.5), metal)
-  }
-  // One floor tom at the player's right: on legs, or held by the rack.
-  for (const [piece, radius, depth, x, z] of [['floor', 0.2, 0.31, 0.6, 0.42]] as const) {
-    drum(piece, radius, depth, [x, 0.48, z], rotateX(electronic ? 0.25 : 0.04))
-    if (electronic) {
-      add(null, rod(0.01, 0.38), translate(x, 0.1, z - 0.04), metal)
-      add(null, rod(0.01, 0.4), chain(translate(x, 0.48, z - 0.04), rotateX(-Math.PI / 2 - 0.2)), metal)
-    } else {
-      for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * Math.PI * 2 + 0.3
-        add(null, rod(0.008, 0.36), chain(translate(x + Math.cos(angle) * (radius + 0.03), 0, z + Math.sin(angle) * (radius + 0.03)), rotateZ(Math.cos(angle) * 0.08)), metal)
-      }
-    }
-    shadow(x, z, radius + 0.12)
-  }
-  // Hi-hat: fixed bottom cymbal, top cymbal on the clutch (lifted by the hat state), foot pedal.
-  const hat: [number, number, number] = [-0.72, 0.9, 0.3]
-  add(null, rod(0.009, hat[1] + 0.12), translate(hat[0], 0, hat[2]), metal)
-  legs(hat[0], hat[2], 0.24)
-  shadow(hat[0], hat[2], 0.3)
-  cymbal('hihat', 0.17, hat, rotateX(Math.PI))
-  cymbal('hihat', 0.17, [hat[0], hat[1] + 0.012, hat[2]], identity(), { hatTop: true })
-  add('hatPedal', lathe([[0.07, 0], [0.07, 0.012], [0, 0.012]], 16), chain(translate(hat[0], 0.012, hat[2] + 0.2), rotateX(-0.22)), CHROME)
-  add(null, rod(0.005, 0.2), chain(translate(hat[0], 0.02, hat[2] + 0.14), rotateX(-1.1)), CHROME)
-  // Crash and ride on their stands.
-  cymbalStand(-0.6, -0.24, 1.12)
-  cymbal('crash', 0.23, [-0.6, 1.16, -0.24], chain(rotateZ(0.14), rotateX(0.3)))
-  cymbalStand(0.92, -0.06, 0.98)
-  cymbal('ride', 0.27, [0.92, 1.02, -0.06], chain(rotateZ(-0.16), rotateX(0.24)))
-  return parts
-}
-
-const VERTEX = `attribute vec3 p; attribute vec3 n; uniform mat4 m; uniform mat4 vp;
-varying vec3 vn; varying vec3 wp; varying vec3 lp;
-uniform float grow;
-void main() { vec4 w = m * vec4(p + n * grow, 1.0); wp = w.xyz; lp = p; vn = mat3(m) * n; gl_Position = vp * w; }`
-const FRAGMENT = `precision mediump float;
-uniform vec3 color; uniform vec3 tint; uniform float glow; uniform float ink; uniform float toon; uniform float spec; uniform float shine; uniform float shadow; uniform vec3 eye;
-varying vec3 vn; varying vec3 wp; varying vec3 lp;
-void main() {
-  if (shadow > 0.0) {
-    float a = 0.22 * (1.0 - smoothstep(0.25, 1.0, length(lp.xz) / shadow));
-    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
-    return;
-  }
-  vec3 N = normalize(vn);
-  vec3 V = normalize(eye - wp);
-  // Outline pass: only the grown shell's far side shows, as a dark rim around each shape.
-  if (ink > 0.0) {
-    if (dot(N, V) > 0.0) discard;
-    gl_FragColor = vec4(0.17, 0.1, 0.05, 1.0);
-    return;
-  }
-  // Two-sided: every surface is lit on the side the viewer sees.
-  if (dot(N, V) < 0.0) N = -N;
-  vec3 key = normalize(vec3(0.35, 1.0, 0.65));
-  vec3 fill = normalize(vec3(-0.7, 0.45, -0.2));
-  float hemi = 0.5 + 0.5 * N.y;
-  vec3 ambient = mix(vec3(0.36, 0.35, 0.34), vec3(0.8, 0.82, 0.85), hemi) * 0.5;
-  float diffuse = max(dot(N, key), 0.0) * 0.72 + max(dot(N, fill), 0.0) * 0.22;
-  float highlight = pow(max(dot(N, normalize(key + V)), 0.0), shine) * spec
-    + pow(max(dot(N, normalize(fill + V)), 0.0), shine) * spec * 0.3;
-  if (toon > 0.0) {
-    diffuse = floor(diffuse * 3.0 + 0.5) / 3.0;
-    highlight = step(0.35, highlight) * 0.3;
-  }
-  vec3 base = color * (ambient + diffuse) + vec3(highlight);
-  vec3 lit = tint * (0.6 + 0.4 * diffuse) + 0.1 + vec3(highlight) * 0.5;
-  gl_FragColor = vec4(clamp(mix(base, lit, glow), 0.0, 1.0), 1.0);
-}`
+/** Soft planar shadows: a few light directions around an almost overhead key light. */
+const SUNS = [[0.22, 1, 0.12], [0.3, 1, 0.2], [0.14, 1, 0.22]].map(normalize)
 
 /** Where the kit sits in the scene; the camera keeps this sphere in frame at any panel shape. */
+const identity4 = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
 const CENTER = [0.08, 0.6, 0.06]
 const RADIUS = 1.08
 
@@ -335,7 +95,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
   useEffect(() => {
     const element = canvas.current
     if (!element) return
-    const gl = element.getContext('webgl', { antialias: true, preserveDrawingBuffer: false })
+    const gl = element.getContext('webgl', { antialias: true, stencil: true, preserveDrawingBuffer: false })
     if (!gl) {
       setFailure('The 3D kit needs WebGL, which this device has turned off. The highlighted names below follow the same hits.')
       return
@@ -348,26 +108,27 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       return shader
     }
     const program = gl.createProgram()!
-    gl.attachShader(program, compile(gl.VERTEX_SHADER, VERTEX))
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAGMENT))
+    const shaders = [compile(gl.VERTEX_SHADER, VERTEX), compile(gl.FRAGMENT_SHADER, FRAGMENT)]
+    for (const shader of shaders) gl.attachShader(program, shader)
     gl.linkProgram(program)
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       setFailure('The 3D kit could not start its renderer. The highlighted names below follow the same hits.')
       return
     }
     gl.useProgram(program)
-    const position = gl.getAttribLocation(program, 'p')
-    const normal = gl.getAttribLocation(program, 'n')
-    const uniform = (name: string) => gl.getUniformLocation(program, name)
-    const [modelAt, viewAt, colorAt, glowAt, specAt, shineAt, shadowAt, eyeAt, tintAt, growAt, inkAt, toonAt] =
-      ['m', 'vp', 'color', 'glow', 'spec', 'shine', 'shadow', 'eye', 'tint', 'grow', 'ink', 'toon'].map(uniform)
+    const attributes = ['p', 'n', 'q'].map((name) => gl.getAttribLocation(program, name))
+    const at = Object.fromEntries(['m', 'vp', 'color', 'tint', 'eye', 'metal', 'rough', 'pattern', 'glow', 'ink', 'toon', 'grow', 'sun', 'flatten',
+      'blob', 'shadowAlpha'].map((name) => [name, gl.getUniformLocation(program, name)]))
     const illustrated = style === 'illustrated'
-    const parts = kitParts(style).map((part) => {
+    // Built once per style and kept in GPU buffers; each frame only changes uniforms.
+    const kit = buildKit(style)
+    const batches = kit.batches.map((batch) => {
       const buffer = gl.createBuffer()
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-      gl.bufferData(gl.ARRAY_BUFFER, part.mesh, gl.STATIC_DRAW)
-      return { ...part, buffer, count: part.mesh.length / 6 }
+      gl.bufferData(gl.ARRAY_BUFFER, batch.data, gl.STATIC_DRAW)
+      return { ...batch, buffer }
     })
+    const still = identity4()
     gl.enable(gl.DEPTH_TEST)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     let view = new Float32Array(16)
@@ -394,8 +155,8 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       const placed: { piece: KitPiece; text: string; x: number; y: number }[] = []
       // A compact stage cannot fit a label per piece; the legend below names and lights them instead.
       for (const { piece, label } of height < 220 ? [] : plan.used) {
-        const part = parts.find((item) => item.target === piece)!
-        const anchor = project(part.model[12], part.model[13] + 0.12, part.model[14])
+        const [x, y, z] = kit.anchors.get(piece) ?? [0, 0, 0]
+        const anchor = project(x, y + 0.12, z)
         const text = label
         const half = text.length * 3.3 + 8
         const clash = () => placed.some((other) =>
@@ -409,37 +170,78 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       setLabels(placed)
       lastSignature.current = ''
     }
+    const bind = (batch: (typeof batches)[number]) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, batch.buffer)
+      attributes.forEach((location, index) => {
+        gl.enableVertexAttribArray(location)
+        gl.vertexAttribPointer(location, 3, gl.FLOAT, false, 36, index * 12)
+      })
+    }
     draw.current = (glow, hatState) => {
       gl.clearColor(1, 1, 1, 1)
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-      gl.uniformMatrix4fv(viewAt, false, view)
-      gl.uniform3fv(eyeAt, eye)
+      gl.clearStencil(0)
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT)
+      gl.uniformMatrix4fv(at.vp, false, view)
+      gl.uniform3fv(at.eye, eye)
+      gl.uniform1f(at.toon, illustrated ? 1 : 0)
       const lift = translate(0, HAT_LIFT[hatState], 0)
-      gl.uniform1f(toonAt, illustrated ? 1 : 0)
-      for (const pass of illustrated ? ['solid', 'ink', 'shadow'] as const : ['solid', 'shadow'] as const) {
-        if (pass === 'shadow') { gl.enable(gl.BLEND); gl.depthMask(false) }
-        gl.uniform1f(growAt, pass === 'ink' ? INK : 0)
-        gl.uniform1f(inkAt, pass === 'ink' ? 1 : 0)
-        for (const part of parts) {
-          if ((pass === 'shadow') !== !!part.shadow) continue
-          gl.bindBuffer(gl.ARRAY_BUFFER, part.buffer)
-          gl.enableVertexAttribArray(position)
-          gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 24, 0)
-          gl.enableVertexAttribArray(normal)
-          gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 24, 12)
-          gl.uniformMatrix4fv(modelAt, false, part.hatTop ? multiply(lift, part.model) : part.model)
-          gl.uniform3fv(colorAt, part.material.color)
-          gl.uniform1f(specAt, part.material.spec)
-          gl.uniform1f(shineAt, part.material.shine)
-          gl.uniform1f(shadowAt, part.shadow ?? 0)
-          const lit = part.target ? glow.get(part.target) : undefined
-          gl.uniform1f(glowAt, lit?.value ?? 0)
-          gl.uniform3fv(tintAt, TINT[lit?.hand ?? 'none'])
-          gl.drawArrays(gl.TRIANGLES, 0, part.count)
-        }
+      const reset = () => {
+        for (const name of ['ink', 'grow', 'flatten', 'blob', 'glow']) gl.uniform1f(at[name], 0)
       }
+      const solid = (batch: (typeof batches)[number]) => {
+        bind(batch)
+        gl.uniformMatrix4fv(at.m, false, batch.hatTop ? lift : still)
+        gl.uniform3fv(at.color, batch.material.color)
+        gl.uniform1f(at.metal, batch.material.metal)
+        gl.uniform1f(at.rough, batch.material.rough)
+        gl.uniform1f(at.pattern, batch.material.pattern)
+        gl.drawArrays(gl.TRIANGLES, 0, batch.count)
+      }
+      reset()
+      // 1. The floor, as a backdrop: nothing is below it, so it never needs to hide anything.
+      gl.depthMask(false)
+      for (const batch of batches) if (batch.kind === 'floor') solid(batch)
+      // 2. Soft shadows: each light direction shades a floor pixel at most once (stencil), and the passes add up.
+      gl.enable(gl.BLEND)
+      gl.depthMask(false)
+      gl.enable(gl.STENCIL_TEST)
+      gl.uniform1f(at.flatten, 1)
+      gl.uniform1f(at.shadowAlpha, illustrated ? 0.09 : 0.075)
+      SUNS.forEach((sun, index) => {
+        if (index) gl.clear(gl.STENCIL_BUFFER_BIT)
+        gl.stencilFunc(gl.EQUAL, 0, 0xff)
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR)
+        gl.uniform3fv(at.sun, sun)
+        for (const batch of batches) if (batch.kind === 'solid') {
+          bind(batch)
+          gl.uniformMatrix4fv(at.m, false, batch.hatTop ? lift : still)
+          gl.drawArrays(gl.TRIANGLES, 0, batch.count)
+        }
+      })
+      gl.disable(gl.STENCIL_TEST)
+      gl.uniform1f(at.flatten, 0)
+      // 3. Contact shadows where feet and drums meet the floor.
+      for (const batch of batches) if (batch.kind === 'blob') {
+        gl.uniform1f(at.blob, 1)
+        solid(batch)
+      }
+      gl.uniform1f(at.blob, 0)
       gl.disable(gl.BLEND)
       gl.depthMask(true)
+      // 4. The kit, then the illustrated outline.
+      for (const batch of batches) if (batch.kind === 'solid') {
+        const lit = batch.target ? glow.get(batch.target) : undefined
+        gl.uniform1f(at.glow, lit?.value ?? 0)
+        gl.uniform3fv(at.tint, TINT[lit?.hand ?? 'none'])
+        solid(batch)
+      }
+      gl.uniform1f(at.glow, 0)
+      if (illustrated) {
+        gl.uniform1f(at.ink, 1)
+        gl.uniform1f(at.grow, INK)
+        for (const batch of batches) if (batch.kind === 'solid') solid(batch)
+        reset()
+      }
     }
     const observer = new ResizeObserver(resize)
     observer.observe(element)
@@ -456,8 +258,9 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       element.removeEventListener('webglcontextlost', lost)
       element.removeEventListener('webglcontextrestored', restored)
       draw.current = null
-      for (const part of parts) gl.deleteBuffer(part.buffer)
+      for (const batch of batches) gl.deleteBuffer(batch.buffer)
       gl.deleteProgram(program)
+      for (const shader of shaders) gl.deleteShader(shader)
     }
   }, [generation, plan, style])
 
@@ -512,24 +315,14 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
         ))}
         {failure && <p className="practice-failure" role="status">{failure}</p>}
       </div>
-      <div className="chordview kit-style" role="radiogroup" aria-label="Drum kit style">
-        <span className="chordview-label" aria-hidden="true">Kit</span>
-        {KIT_STYLES.map((option, index) => (
-          <button key={option} type="button" role="radio" aria-checked={style === option} tabIndex={style === option ? 0 : -1}
-            className="chordview-option" data-style={option} title="Changes only how the kit looks; the hits and sounds stay the same"
-            onClick={() => onStyle(option)}
-            onKeyDown={(event) => {
-              const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-              if (!step) return
-              event.preventDefault()
-              event.stopPropagation()
-              const next = KIT_STYLES[(index + step + KIT_STYLES.length) % KIT_STYLES.length]
-              onStyle(next)
-              ;(event.currentTarget.parentElement?.querySelector(`[data-style="${next}"]`) as HTMLElement | null)?.focus()
-            }}>
-            {STYLE_LABEL[option]}
-          </button>
-        ))}
+      <div className="kit-toolbar">
+        <label className="kit-style">
+          <span>Kit look</span>
+          <select value={style} onChange={(event) => onStyle(event.target.value as KitStyle)}
+            title="Changes only how the kit looks; the hits and sounds stay the same">
+            {KIT_STYLES.map((option) => <option key={option} value={option}>{KIT_STYLE_LABEL[option]}</option>)}
+          </select>
+        </label>
       </div>
       <p className="practice-legend kit-legend">
         {sticking && <>

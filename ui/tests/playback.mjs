@@ -1706,10 +1706,13 @@ async function courseChecks(width, phase) {
   check(bar() === 3, `Switching the practice view keeps the position (${where()})`)
   // The kit style is a look only: Electronic by default, and changing it keeps the position.
   await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'electronic', 'The kit starts Electronic')
-  for (const style of ['acoustic', 'illustrated']) {
-    document.querySelector(`.kit-style [data-style="${style}"]`).click()
-    await wait(() => document.querySelector('.practice-kit')?.dataset.style === style &&
-      document.querySelector(`.kit-style [data-style="${style}"]`).getAttribute('aria-checked') === 'true', `The ${style} kit is shown`)
+  const look = document.querySelector('.kit-style select')
+  check(look && [...look.options].map((option) => option.value).join(',') === 'electronic,studio,acoustic,illustrated' &&
+    document.querySelector('.kit-style').getBoundingClientRect().height < 40, 'The kit look is one compact menu with four looks')
+  for (const style of ['studio', 'acoustic', 'illustrated']) {
+    look.value = style
+    look.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(() => document.querySelector('.practice-kit')?.dataset.style === style && look.value === style, `The ${style} kit is shown`)
     check(bar() === 3 && playButton().getAttribute('aria-label') === 'Play', `Changing the kit style does not move or start playback (${where()})`)
     check(JSON.parse(localStorage.getItem('mizan:practice')).kitStyle === style, 'The kit style is remembered')
   }
