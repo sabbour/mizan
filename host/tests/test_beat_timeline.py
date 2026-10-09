@@ -251,3 +251,31 @@ def test_drum_fine_figures_roll_and_triplets_keep_distinct_attacks(tmp_path):
     assert len(triplet_heads) >= 10
     assert sum(note.findtext("type") == "64th" for note in notes if note.find("rest") is None) >= 4
     assert all(note.findtext("type") for note in notes if note.find("rest") is None)
+
+@pytest.mark.parametrize("counts", [[6] * 8 + [3] * 6, [8] * 8 + [4] * 6, [3, 6] * 8, [4, 8] * 8])
+def test_observed_shorter_and_alternating_related_groups_are_kept_unverified(counts):
+    indices = np.r_[0, np.cumsum(counts)].tolist()
+    meter = downbeat_meter(indices, 0.95)
+    assert meter["supported"] and not meter["boundariesVerified"]
+    bars = build_bar_map(sum(counts), meter["changes"])
+    assert [bar["beats"] for bar in bars] == counts
+    assert any(bar["status"] == "unverified" for bar in bars)
+    assert all(bar["status"] == "unverified" for bar, count in zip(bars, counts) if count != meter["beatsPerBar"])
+
+
+def test_weak_off_phase_downbeats_in_a_short_run_are_half_bar_accents():
+    counts = [4] * 30 + [2] * 6 + [4] * 4
+    indices = np.r_[0, np.cumsum(counts)].astype(int).tolist()
+    activation = np.full(indices[-1] + 1, -10.0)
+    activation[indices] = np.random.default_rng(5).uniform(2, 8, len(indices))
+    accents = [index for index in indices[30:37] if (index - indices[30]) % 4]
+    activation[accents] = 0.1
+    meter = downbeat_meter(indices, 0.95, activation.tolist())
+    assert meter["evidence"]["suppressedWeakAccents"] == len(accents) == 3
+    assert [(change["startBeat"], change["numerator"]) for change in meter["changes"]] == [(0.0, 4)]
+    assert meter["boundariesVerified"]
+    # The same run with downbeat-strength off-phase hits stays observed 2-beat bars.
+    activation[accents] = 5
+    kept = downbeat_meter(indices, 0.95, activation.tolist())
+    assert [bar["beats"] for bar in build_bar_map(sum(counts), kept["changes"])] == counts
+    assert not kept["boundariesVerified"]

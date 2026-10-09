@@ -593,12 +593,14 @@ create signatures; a sustained phase shift leaves an unverified partial bar;
 sustained or alternating different groups become signature changes, including
 long groups such as 9 or 13 beats. Inside an interval spanning several primary
 bars, a beat whose downbeat activation exceeds the song's ordinary beats (90th
-percentile) is an observed weak downbeat; without that evidence a sustained
-multiple group (3 to 6, 4 to 8) stays one longer `unverified` bar rather than
-being split. Any phase shift, ambiguous multiple or shorter run, or many missing
-downbeats marks the bars `unverified`. The count gives a grouping in tracked
-beats, not a written denominator or tempo octave (the same song can track at 92
-or 184 BPM).
+percentile) is an observed weak downbeat. Inside a sustained run of shorter
+groups, off-phase downbeats weaker than the song's 10th-percentile downbeat are
+half-bar accents. Otherwise observed longer or shorter groups, sustained (3 to 6,
+6 to 3) or alternating (3,6 or 4,8), are kept as `unverified` bars rather than
+split or merged into the primary bar. Any phase shift, ambiguous related group
+or many missing downbeats marks the bars `unverified`. The count gives a grouping
+in tracked beats, not a written denominator or tempo octave (the same song can
+track at 92 or 184 BPM).
 Drum notation writes automatic hits on the bar's sixteenth grid (UI score and
 MusicXML export share the rule). A same-lane fine figure whose spacing fits the
 64th or sixteenth-triplet grid (three or more consistent hits, or an isolated

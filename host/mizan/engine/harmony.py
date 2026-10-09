@@ -361,39 +361,39 @@ def inferred_beats_per_bar(timing: dict) -> float:
     return infer_meter(timing)["beatsPerBar"]
 
 
-def _literal_runs(counts: list[int], primary: int) -> tuple[set[int], set[int], int]:
+def _literal_runs(counts: list[int], primary: int) -> tuple[set[int], set[int]]:
     """Intervals that form sustained or alternating groups other than the primary bar.
 
-    Returns literal intervals, the literal intervals that are whole multiples of the primary
-    group (a longer bar or regularly missed downbeats, so ambiguous), and the number of
-    sustained shorter divisor runs (extra downbeats or shorter bars, also ambiguous).
+    Returns the literal intervals and the subset whose length is a whole multiple or divisor of
+    another group in play: a longer bar or missed downbeats, a shorter bar or extra downbeats.
+    Those observed spans are kept but stay ambiguous, so their bars are unverified.
     """
-    def distinct(value):
-        return value >= 2 and value % primary and primary % value
-    literal, multiples = set(), set()
-    divisor_runs = 0
+    def related(value, other):
+        return value != other and (value % other == 0 or other % value == 0)
+    literal, ambiguous = set(), set()
     index = 0
     while index < len(counts):
         stop = index
         while stop < len(counts) and counts[stop] == counts[index]:
             stop += 1
         value = counts[index]
-        if stop - index >= 3 and distinct(value):
-            literal.update(range(index, stop))
-        elif stop - index >= 4 and value > primary and value % primary == 0:
-            literal.update(range(index, stop))
-            multiples.update(range(index, stop))
-        elif stop - index >= 4 and 2 <= value < primary and primary % value == 0:
-            divisor_runs += 1
+        if value >= 2 and value != primary:
+            if not related(value, primary) and stop - index >= 3:
+                literal.update(range(index, stop))
+            elif related(value, primary) and stop - index >= 4:
+                literal.update(range(index, stop))
+                ambiguous.update(range(index, stop))
         index = max(stop, index + 1)
     for index in range(len(counts) - 5):
         pattern = counts[index:index + 2]
-        if pattern[0] != pattern[1] and counts[index:index + 6] == pattern * 3 and any(map(distinct, pattern)):
+        if pattern[0] != pattern[1] and min(pattern) >= 2 and counts[index:index + 6] == pattern * 3:
             stop = index + 6
             while stop < len(counts) and counts[stop] == pattern[(stop - index) % 2]:
                 stop += 1
             literal.update(range(index, stop))
-    return literal, multiples, divisor_runs
+            if related(*pattern) or any(related(value, primary) for value in pattern):
+                ambiguous.update(range(index, stop))
+    return literal, ambiguous
 
 
 def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[float] | None = None) -> dict:
@@ -403,8 +403,10 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
     become one-off signatures, a sustained phase shift leaves an unverified partial bar,
     and only sustained or alternating different groups become signature changes. Inside an
     interval spanning several primary bars, a beat whose downbeat ``activation`` exceeds the
-    song's ordinary beats (90th percentile) is an observed weak downbeat; without that evidence
-    a sustained long group is kept as an unverified longer bar rather than split.
+    song's ordinary beats (90th percentile) is an observed weak downbeat. Inside a sustained run
+    of shorter groups, off-phase downbeats weaker than the song's 10th-percentile downbeat are
+    half-bar accents. Otherwise observed longer or shorter groups, sustained or alternating, are
+    kept as unverified bars rather than split or merged into the primary bar.
     """
     indices = [int(value) for value in indices]
     counts = [int(value) for value in np.diff(indices)] if len(indices) > 1 else []
@@ -423,7 +425,8 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                 "changes": [{"startBeat": 0.0, "numerator": 4, "denominator": 4, "status": "unverified"}],
                 "evidence": {"intervals": len(counts)}, "candidates": {}}
     primary = max(sorted(usable), key=lambda value: (usable[value], -value))
-    recovered = 0
+    detected = list(indices)
+    recovered = suppressed = 0
     if activation is not None and len(activation) > indices[-1]:
         marked = set(indices)
         middles = {index + primary * step for index, count in zip(indices, counts)
@@ -437,7 +440,25 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                 recovered = len(weak)
                 indices = sorted(marked | weak)
                 counts = [int(value) for value in np.diff(indices)]
-    literal, multiples, divisor_runs = _literal_runs(counts, primary)
+        if len(detected) >= 8:
+            floor = float(np.percentile([activation[index] for index in detected], 10))
+            accents = set()
+            first = 0
+            while first < len(counts):
+                stop = first
+                while stop < len(counts) and counts[stop] == counts[first]:
+                    stop += 1
+                if stop - first >= 4 and 2 <= counts[first] < primary and primary % counts[first] == 0:
+                    run = indices[first:stop + 1]
+                    off = [index for index in run if (index - run[0]) % primary]
+                    if off and float(np.median([activation[index] for index in off])) < floor:
+                        accents.update(off)
+                first = max(stop, first + 1)
+            if accents:
+                suppressed = len(accents)
+                indices = [index for index in indices if index not in accents]
+                counts = [int(value) for value in np.diff(indices)]
+    literal, ambiguous = _literal_runs(counts, primary)
     anchor, cursor = indices[0], indices[0]
     changes = []
     explained = missing = shifts = subdivisions = 0
@@ -464,7 +485,7 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
             if cursor != start:
                 cursor = shift(start)
                 shifts += 1
-            mark(cursor, count, "unverified" if position in multiples else "supported")
+            mark(cursor, count, "unverified" if position in ambiguous else "supported")
             cursor = target
             explained += 1
             continue
@@ -497,8 +518,7 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
                                                "status": "unverified"}],
                 "evidence": {"intervals": len(counts), "explained": explained},
                 "candidates": {f"{value}/4": count for value, count in usable.items()}}
-    verified = (not shifts and not multiples and not divisor_runs
-                and missing <= max(1, len(counts) // 4))
+    verified = not shifts and not ambiguous and missing <= max(1, len(counts) // 4)
     if not verified:
         changes = [{**change, "status": "unverified"} for change in changes]
     return {
@@ -507,8 +527,8 @@ def downbeat_meter(indices: list[int], beat_confidence: float, activation: list[
         "anchor": anchor, "changes": changes,
         "evidence": {"intervals": len(counts), "explained": explained, "missingBoundaries": missing,
                      "phaseShifts": shifts, "literalGroups": len(literal),
-                     "recoveredWeakDownbeats": recovered,
-                     "ambiguousMultipleGroups": len(multiples), "ambiguousShorterRuns": divisor_runs},
+                     "recoveredWeakDownbeats": recovered, "suppressedWeakAccents": suppressed,
+                     "ambiguousGroups": len(ambiguous)},
         "candidates": {f"{value}/4": count for value, count in usable.items()},
     }
 
