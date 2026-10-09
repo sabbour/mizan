@@ -8,11 +8,8 @@ import { useFrame, useReducedMotion, useSize } from './hooks'
 import { Guide } from './Guide'
 import { centerDelta, usableSpan } from './follow'
 import { HandsView } from './HandsView'
-import { DrumKitView } from './DrumKitView'
 import type { PracticeView } from './PracticeViewPicker'
 import { drumKey, drumNotationBeats, drumPosition, notationGrid, notationNotes } from './musicxml'
-import type { Sticking } from './sticking'
-import { DEFAULT_KIT_STYLE, type KitStyle } from './prefs'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
 /** `sky` is how far (px, ≤ 0) the highest note or mark rises above the system's top staff line. */
@@ -235,12 +232,8 @@ type Props = {
   audioError: boolean
   vocalGuide?: boolean
   instrumentGuide?: string
-  /** A practice guide docked under the score: a keyboard for piano, a 3D kit for drums. */
+  /** A practice guide docked under the score: a keyboard for piano (the 3D kit sits beside the score, in Workspace). */
   practice?: PracticeView
-  /** Drum sticking shown on the 3D kit; undefined when the sticking letters are off. */
-  sticking?: Sticking
-  kitStyle?: KitStyle
-  onKitStyle?: (style: KitStyle) => void
   onPick: (bar: number, extend: boolean) => void
   previewId: string
 }
@@ -325,7 +318,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', sticking, kitStyle = DEFAULT_KIT_STYLE, onKitStyle = () => {}, onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -570,7 +563,6 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
       {vocalGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="vocals" study showWave={false} />}
       {instrumentGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="other" trackId={instrumentGuide} study showWave={false} />}
       {practice === 'hands' && instrument === 'piano' && status === 'ready' && <HandsView song={song} engine={engine} />}
-      {practice === 'kit' && instrument === 'drums' && status === 'ready' && <DrumKitView song={song} engine={engine} sticking={sticking} style={kitStyle} onStyle={onKitStyle} />}
       {status === 'loading' && (
         <div className="score-skeleton" role="status">
           <span className="visually-hidden">Drawing the score</span>

@@ -59,6 +59,8 @@ type Gltf = {
 }
 
 export const KIT_FILE: Record<KitType, string> = { acoustic: 'AcousticKit.glb', electronic: 'ElectronicKit.glb' }
+/** Largest texture side uploaded to the GPU. */
+export const MAX_TEXTURE = 1024
 
 /** The surfaces and moving parts the app animates, by node name, for both kits. */
 const PARTS: Record<string, { target: Target; motion?: Motion; glows?: boolean }> = {
@@ -104,7 +106,13 @@ export function loadKit(kit: KitType): Promise<Asset> {
       const images = Promise.all(json.images.map(async (image) => {
         const v = json.bufferViews[image.bufferView]
         try {
-          return await createImageBitmap(new Blob([bin.slice(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength)], { type: image.mimeType }))
+          const blob = new Blob([bin.slice(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength)], { type: image.mimeType })
+          // The assets carry 2048-pixel maps; the practice view samples them at 1024 at most, a quarter of the GPU memory.
+          const full = await createImageBitmap(blob)
+          if (full.width <= MAX_TEXTURE && full.height <= MAX_TEXTURE) return full
+          const scale = MAX_TEXTURE / Math.max(full.width, full.height)
+          full.close()
+          return await createImageBitmap(blob, { resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale), resizeQuality: 'high' })
         } catch {
           return null
         }
@@ -246,6 +254,15 @@ export function prepare(asset: Asset, look: Look, lod = lodFor(asset, look)): Pr
   const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
   const radius = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2
   return { items, anchors, center, radius, hatStates, images: json.images.length }
+}
+
+const preparedCache = new WeakMap<Asset, Map<Look, Prepared>>()
+/** `prepare`, kept per asset and look, so reopening a lesson or switching back to a look reuses the work. */
+export function preparedFor(asset: Asset, look: Look): Prepared {
+  const looks = preparedCache.get(asset) ?? new Map<Look, Prepared>()
+  preparedCache.set(asset, looks)
+  if (!looks.has(look)) looks.set(look, prepare(asset, look))
+  return looks.get(look)!
 }
 
 /** Rendered triangles for a prepared look (used by the tests and the asset report). */

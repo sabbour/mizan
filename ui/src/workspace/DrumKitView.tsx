@@ -6,7 +6,7 @@ import { barStart, measures, pulseBeats } from './meter'
 import type { Song } from './song'
 import type { Sticking } from './sticking'
 import { KIT_TYPES, LOOKS, splitKitStyle, type KitStyle, type KitType, type Look } from './prefs'
-import { loadKit, prepare, type Prepared, type Target } from './kitAsset'
+import { loadKit, preparedFor, type Prepared, type Target } from './kitAsset'
 import { KitRenderer, stageBackground } from './kitRenderer'
 import { feedbackAt, type Strike } from './kitFeedback'
 import { fallbackScene } from './kitScene'
@@ -112,15 +112,27 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       return
     }
     setFailure(null)
-    const ratio = () => Math.min(2, window.devicePixelRatio || 1)
+    // The drawing buffer matches the canvas's real device pixels (up to 2x, at most 2560 across), so it stays sharp;
+    // observing device pixels also catches zoom and moving to a screen with another pixel density.
+    const cap = (css: number) => Math.min(2, 2560 / Math.max(1, css))
     renderer.current = { renderer: instance, size: () => [element.width, element.height] }
-    const resize = () => {
-      element.width = Math.max(1, Math.round(element.clientWidth * ratio()))
-      element.height = Math.max(1, Math.round(Math.max(1, element.clientHeight) * ratio()))
+    const resize = (entries: ResizeObserverEntry[]) => {
+      const box = entries[0]?.devicePixelContentBoxSize?.[0]
+      const dpr = window.devicePixelRatio || 1
+      const scale = Math.min(1, cap(element.clientWidth) / dpr)
+      const width = Math.max(1, Math.round((box ? box.inlineSize : element.clientWidth * dpr) * scale))
+      const height = Math.max(1, Math.round((box ? box.blockSize : element.clientHeight * dpr) * scale))
+      if (width === element.width && height === element.height) return
+      element.width = width
+      element.height = height
       setGeneration((value) => value + 1)
     }
     const observer = new ResizeObserver(resize)
-    observer.observe(element)
+    try {
+      observer.observe(element, { box: 'device-pixel-content-box' })
+    } catch {
+      observer.observe(element)
+    }
     const lost = (event: Event) => {
       event.preventDefault()
       renderer.current = null
@@ -146,7 +158,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       const images = await asset.images
       if (cancelled) return
       setNotice(null)
-      setScene({ kit, look, prepared: prepare(asset, look), images })
+      setScene({ kit, look, prepared: preparedFor(asset, look), images })
     }).catch((error) => {
       if (cancelled) return
       console.warn(`The ${kit} kit model could not be loaded; showing the built-in kit.`, error)
@@ -202,6 +214,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     }
     setLabels(placed)
     lastSignature.current = ''
+    ;(globalThis as any).__kitCam = ((globalThis as any).__kitCam ?? 0) + 1
   }, [scene, generation, context, plan])
 
   useFrame(engine, (t) => {
@@ -224,6 +237,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     const { selected: chosen } = latest.current
     const signature = `${hat}|${[...chosen].join(',')}|${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${Math.round(Math.min(f.since, 3) * 30)}`).join(',')}`
     if (signature === lastSignature.current) return
+    ;(globalThis as any).__kitSig = signature + ' <- ' + lastSignature.current
     lastSignature.current = signature
     if (current && !failure) {
       const [width, height] = current.size()

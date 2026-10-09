@@ -14,6 +14,7 @@ import { TrackPicker } from './TrackPicker'
 import { ChordView, type ChordMode } from './ChordView'
 import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
+import { DrumKitView } from './DrumKitView'
 import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
 import './workspace.css'
@@ -104,6 +105,7 @@ export function Workspace({
     [song, voiced, part, instrument, track],
   )
   // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
+  const kitPane = !chart && instrument === 'drums' && practice.drums === 'kit'
   const sticking = useMemo(() => instrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
     [instrument, showSticking, viewed])
   const xml = useMemo(() => {
@@ -482,10 +484,16 @@ export function Workspace({
       {audioError && <div className="audio-error" role="alert">{audioError}</div>}
       {audioLoading && <div className="audio-error" role="status">Preparing sounds...</div>}
 
-      {chart ? (
+      {kitPane ? (
+        <div className="ws-split">
+          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={false} instrument="drums" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="kit" onPick={pick} previewId={track?.id ?? 'chords'} />
+          {/* The 3D kit sits beside the score, outside it, so redrawing the score never restarts the kit. */}
+          <DrumKitView song={viewed} engine={engine} sticking={sticking} style={kitStyle} onStyle={chooseKitStyle} />
+        </div>
+      ) : chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} sticking={sticking} kitStyle={kitStyle} onKitStyle={chooseKitStyle} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} />
       )}
 
       <footer className="ws-foot">
