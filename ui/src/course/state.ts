@@ -50,5 +50,6 @@ export function saveLessonPosition(lesson: Lesson, position: Position): void {
 
 /** Tempo in the lesson's counted pulse, with the note it counts. */
 export function tempoLabel(lesson: Lesson, bpm: number): string {
-  return `${Math.round(bpm)} ${lessonMeter(lesson).compound ? '♩.' : '♩'}`
+  const { compound, pulse } = lessonMeter(lesson)
+  return `${Math.round(bpm)} ${compound ? '♩.' : pulse === 0.5 ? '♪' : '♩'}`
 }

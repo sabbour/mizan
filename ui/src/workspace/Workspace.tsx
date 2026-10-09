@@ -14,6 +14,8 @@ import { TrackPicker } from './TrackPicker'
 import { ChordView, type ChordMode } from './ChordView'
 import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
+import { loadPrefs, savePref, type KitStyle } from './prefs'
+import { stickingFor } from './sticking'
 import './workspace.css'
 
 type Loop = { startBar: number; endBar: number } | null
@@ -53,10 +55,14 @@ export function Workspace({
   }, [saved, song.bars])
 
   const [trackId, setTrackId] = useState(() => start?.trackId ?? song.tracks[0]?.id ?? '')
-  const [rate, setRate] = useState(start?.rate ?? 1)
+  // Count-in, speed, click and sticking letters follow the player everywhere once chosen; until then, this song's own setup.
+  const [prefs] = useState(loadPrefs)
+  const [rate, setRate] = useState(prefs.rate ?? start?.rate ?? 1)
   const [loop, setLoop] = useState<Loop>(start?.loop ?? null)
-  const [countIn, setCountIn] = useState(true)
-  const [click, setClick] = useState(defaults?.click ?? false)
+  const [countIn, setCountIn] = useState(prefs.countIn ?? true)
+  const [click, setClick] = useState(prefs.click ?? defaults?.click ?? false)
+  const [showSticking, setShowSticking] = useState(prefs.sticking ?? true)
+  const [kitStyle, setKitStyle] = useState(prefs.kitStyle ?? 'electronic')
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
@@ -97,14 +103,17 @@ export function Workspace({
     },
     [song, voiced, part, instrument, track],
   )
+  // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
+  const sticking = useMemo(() => instrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
+    [instrument, showSticking, viewed])
   const xml = useMemo(() => {
     if (chart) return ''
     if (instrument === 'chords') return chordsXml(viewed)
-    if (instrument === 'drums') return drumXml(viewed, hasPitchedScore(song))
+    if (instrument === 'drums') return drumXml(viewed, hasPitchedScore(song), sticking?.hands)
     if (instrument === 'vocals') return vocalXml(viewed)
     if (instrument === 'other' && track) return instrumentXml(viewed, track)
     return pianoXml(viewed)
-  }, [viewed, song, instrument, chart, track])
+  }, [viewed, song, instrument, chart, track, sticking])
   // Play-along parts start muted: read one while the recording plays, unmute to hear it.
   const storageKey = `mizan:mixer:${songId}`
   const stored = useMemo<StoredMixer | null>(() => {
@@ -317,7 +326,24 @@ export function Workspace({
     [jump, pos.bar, song],
   )
 
-  const setSpeed = useCallback((r: number) => setRate(Math.round(Math.min(1, Math.max(0.25, r)) * 20) / 20), [])
+  const setSpeed = useCallback((r: number) => {
+    const next = Math.round(Math.min(1, Math.max(0.25, r)) * 20) / 20
+    setRate(next)
+    savePref('rate', next)
+  }, [])
+  // Each toggle stores the player's choice; opening a song or lesson never writes them.
+  const toggleClick = useCallback(() => setClick((on) => { savePref('click', !on); return !on }), [])
+  const toggleCountIn = useCallback(() => setCountIn((on) => { savePref('countIn', !on); return !on }), [])
+  const toggleSticking = useCallback(() => setShowSticking((on) => { savePref('sticking', !on); return !on }), [])
+  // A look only: the engine, position and sounds are untouched.
+  const chooseKitStyle = useCallback((style: KitStyle) => { setKitStyle(style); savePref('kitStyle', style) }, [])
+  // Choosing another track starts it from the beginning, stopped, like opening a new piece.
+  const chooseTrack = useCallback((id: string) => {
+    if (id === track?.id) return
+    engine.pause()
+    engine.seek(0)
+    setTrackId(id)
+  }, [engine, track])
   const setVolume = useCallback((id: string, value: number) => {
     setVolumes((current) => ({ ...current, [id]: Math.max(0, Math.min(1.25, value)) }))
   }, [])
@@ -367,7 +393,7 @@ export function Workspace({
         ' ': togglePlay,
         l: toggleLoop,
         m: () => track && toggleMute(track.id),
-        c: () => setClick((v) => !v),
+        c: toggleClick,
         n: () => pitched && setNoteNames((v) => !v),
         s: () => track && toggleSolo(track.id),
         k: () => playAlong && setChordMode((v) => (v === 'names' ? 'shapes' : 'names')),
@@ -385,7 +411,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, toggleLoop, jump, pos.bar, pos.chordIdx, rate, setSpeed, toggleMute, toggleSolo, track, pitched, instrument, playAlong])
+  }, [togglePlay, toggleLoop, toggleClick, jump, pos.bar, pos.chordIdx, rate, setSpeed, toggleMute, toggleSolo, track, pitched, instrument, playAlong])
 
   return (
     <div className="ws" data-instrument={instrument}>
@@ -434,7 +460,7 @@ export function Workspace({
           tracks={tracks}
           stems={visibleStems}
           value={track?.id ?? ''}
-          onChange={setTrackId}
+          onChange={chooseTrack}
           onDelete={onDeleteTrack ? async (id) => {
             engine.pause()
             await onDeleteTrack(id)
@@ -457,7 +483,7 @@ export function Workspace({
       {chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} sticking={sticking} kitStyle={kitStyle} onKitStyle={chooseKitStyle} />
       )}
 
       <footer className="ws-foot">
@@ -474,8 +500,10 @@ export function Workspace({
           onStep={(d) => jump(pos.bar + d)}
           onRate={setSpeed}
           onLoop={toggleLoop}
-          onCountIn={() => setCountIn((v) => !v)}
-          onClick={() => setClick((v) => !v)}
+          onCountIn={toggleCountIn}
+          onClick={toggleClick}
+          sticking={instrument === 'drums' ? showSticking : null}
+          onSticking={toggleSticking}
           onGo={go}
         />
       </footer>

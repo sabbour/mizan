@@ -345,14 +345,19 @@ try {
 
   const { kitStrike, tomRate } = await vite.ssrLoadModule('/src/workspace/kit.ts')
   const strike = (hit) => kitStrike({ startBeat: 0, velocity: 0.8, ...hit })
-  assert.deepEqual([50, 48, 47].map((sourceMidi) => strike({ lane: 'hightom', sourceMidi }).pieces[0]), ['tom1', 'tom2', 'tom3'])
-  assert.deepEqual([45, 43, 41].map((sourceMidi) => strike({ lane: 'floortom', sourceMidi }).pieces[0]), ['tom4', 'floor1', 'floor2'],
-    'the six GM tom pitches reach six distinct kit pieces')
-  assert.deepEqual(strike({ lane: 'hightom' }), { pieces: ['tom1', 'tom2', 'tom3', 'tom4'], specified: false, foot: false,
-    label: 'Rack tom (which one is unspecified)' }, 'a generic tom stays unspecified instead of naming a drum')
+  const { KIT_PIECES } = await vite.ssrLoadModule('/src/workspace/kit.ts')
+  assert.deepEqual(KIT_PIECES.map(({ piece }) => piece).filter((piece) => /tom|floor/.test(piece)), ['tom1', 'tom2', 'floor'],
+    'the kit is a five-piece: exactly two rack toms and one floor tom')
+  assert.deepEqual([50, 48, 47].map((sourceMidi) => strike({ lane: 'hightom', sourceMidi }).pieces), [['tom1'], ['tom1'], ['tom2']])
+  assert.deepEqual([45, 43, 41].map((sourceMidi) => strike({ lane: 'floortom', sourceMidi }).pieces), [['tom2'], ['floor'], ['floor']],
+    'the six GM tom pitches share the three toms in pairs, high to low')
+  assert.deepEqual([50, 48, 47].map((sourceMidi) => strike({ lane: 'hightom', sourceMidi }).label), ['Tom 1', 'Tom 1', 'Tom 2'])
+  assert.deepEqual(strike({ lane: 'hightom' }), { pieces: ['tom1', 'tom2'], specified: false, foot: false,
+    label: 'Rack tom (which one is unspecified)' }, 'a generic rack tom stays unspecified instead of naming a drum')
+  assert.deepEqual(strike({ lane: 'floortom' }).pieces, ['floor'], 'a generic floor tom can only be the one floor tom')
   assert.equal(strike({ lane: 'hightom', sourceMidi: 41 }).specified, false, 'a floor-tom pitch on the rack lane is not trusted')
   for (const [lane, sourceMidi] of [['hightom', 45], ['hightom', 43], ['floortom', 50], ['floortom', 47]]) {
-    assert.equal(strike({ lane, sourceMidi }).specified, false, `${lane} with GM ${sourceMidi} stays a generic ${lane}`)
+    assert.deepEqual(strike({ lane, sourceMidi }).pieces, lane === 'hightom' ? ['tom1', 'tom2'] : ['floor'], `${lane} with GM ${sourceMidi} stays its lane`)
     assert.equal(tomRate({ lane, sourceMidi }), 1, `${lane} with GM ${sourceMidi} keeps the lane's own pitch`)
   }
   {
@@ -404,10 +409,10 @@ try {
     { lane: 'hightom', startBeat: 0, velocity: 0.8, sourceMidi: 47 }, { lane: 'hihat', startBeat: 1, velocity: 0.5, sourceMidi: 44 },
     { lane: 'hightom', startBeat: 2, velocity: 0.8 }, { lane: 'kick', startBeat: 3, velocity: 0.8 },
   ] }, false)
-  const heads = [...kitXml.matchAll(/<display-step>(\w)<\/display-step><display-octave>(\d)<\/display-octave><\/unpitched>(<notehead>[^<]+<\/notehead>)?[\s\S]*?<voice>(\d)<\/voice>/g)]
-    .map(([, step, octave, head, voice]) => `${step}${octave}${head ? 'x' : ''}:${voice}`)
-  assert.deepEqual(heads, ['B4:1', 'E5:1', 'D4x:2', 'F4:2'],
-    'a GM low-mid tom has its own line, the pedalled hat is written with the feet, a generic tom keeps its lane')
+  const heads = [...kitXml.matchAll(/<display-step>(\w)<\/display-step><display-octave>(\d)<\/display-octave><\/unpitched><duration>\d+<\/duration><voice>(\d)<\/voice>[\s\S]*?<stem>(\w+)<\/stem>(<notehead>[^<]+<\/notehead>)?/g)]
+    .map(([, step, octave, voice, stem, head]) => `${step}${octave}${head ? 'x' : ''}:${voice}:${stem}`)
+  assert.deepEqual(heads, ['B4:1:up', 'D4x:1:up', 'E5:1:up', 'F4:1:up'],
+    'a GM low-mid tom keeps its own line, the pedalled hat its foot position below, a generic tom its lane; all share one up-stemmed voice')
   console.log('Notation projection and source-timing checks passed')
 } finally {
   await vite.close()

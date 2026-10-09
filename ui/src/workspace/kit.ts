@@ -1,20 +1,21 @@
 import type { DrumHit } from './song'
 
-/** Physical kit pieces: four rack toms and two floor toms follow the six GM tom pitches. */
-export type KitPiece = 'kick' | 'snare' | 'hihat' | 'tom1' | 'tom2' | 'tom3' | 'tom4' | 'floor1' | 'floor2' | 'ride' | 'crash'
+/**
+ * Physical kit pieces of a five-piece kit: two rack toms and one floor tom. The six GM tom pitches share them in
+ * pairs (high and high-mid on tom 1, low-mid and low on tom 2, both floor toms on the floor tom); the hits keep
+ * their source pitch for notation and sound.
+ */
+export type KitPiece = 'kick' | 'snare' | 'hihat' | 'tom1' | 'tom2' | 'floor' | 'ride' | 'crash'
 export type HatState = 'closed' | 'half-open' | 'open' | 'pedal'
 
 export const KIT_PIECES: { piece: KitPiece; label: string }[] = [
   { piece: 'crash', label: 'Crash' },
   { piece: 'hihat', label: 'Hi-hat' },
-  { piece: 'tom1', label: 'High tom' },
-  { piece: 'tom2', label: 'High-mid tom' },
-  { piece: 'tom3', label: 'Low-mid tom' },
-  { piece: 'tom4', label: 'Low tom' },
+  { piece: 'tom1', label: 'Tom 1' },
+  { piece: 'tom2', label: 'Tom 2' },
   { piece: 'snare', label: 'Snare' },
   { piece: 'ride', label: 'Ride' },
-  { piece: 'floor1', label: 'High floor tom' },
-  { piece: 'floor2', label: 'Low floor tom' },
+  { piece: 'floor', label: 'Floor tom' },
   { piece: 'kick', label: 'Kick' },
 ]
 
@@ -28,13 +29,13 @@ export const HAT_LABEL: Record<HatState, string> = {
  */
 export type KitStrike = { pieces: KitPiece[]; specified: boolean; hat?: HatState; foot: boolean; label: string }
 
-const TOMS: Record<number, KitPiece> = { 50: 'tom1', 48: 'tom2', 47: 'tom3', 45: 'tom4', 43: 'floor1', 41: 'floor2' }
-const RACK: KitPiece[] = ['tom1', 'tom2', 'tom3', 'tom4']
-const FLOOR: KitPiece[] = ['floor1', 'floor2']
+const TOMS: Record<number, KitPiece> = { 50: 'tom1', 48: 'tom1', 47: 'tom2', 45: 'tom2', 43: 'floor', 41: 'floor' }
+/** The GM tom pitches each lane can name, as playback tuning and exports trust them. */
+const LANE_TOMS = { hightom: [50, 48, 47], floortom: [45, 43, 41] }
+const RACK: KitPiece[] = ['tom1', 'tom2']
 const label = (piece: KitPiece) => KIT_PIECES.find((item) => item.piece === piece)!.label
 
 export function kitStrike(hit: DrumHit): KitStrike {
-  const tom = hit.sourceMidi === undefined ? undefined : TOMS[hit.sourceMidi]
   switch (hit.lane) {
     case 'kick': return { pieces: ['kick'], specified: true, foot: true, label: 'Kick' }
     case 'snare': return { pieces: ['snare'], specified: true, foot: false, label: 'Snare' }
@@ -42,12 +43,15 @@ export function kitStrike(hit: DrumHit): KitStrike {
     case 'crash': return { pieces: ['crash'], specified: true, foot: false, label: 'Crash' }
     case 'hightom':
     case 'floortom':
-      // Trust a GM tom only on its own lane, as playback tuning and exports do; otherwise the family stays generic.
-      if (tom && (hit.lane === 'hightom' ? ['tom1', 'tom2', 'tom3'] : ['tom4', 'floor1', 'floor2']).includes(tom))
+      // Trust a GM tom only on its own lane, as playback tuning and exports do. A generic floor-tom hit can only be
+      // the one floor tom; a generic rack-tom hit could be either rack tom, so it lights both dimly.
+      if (LANE_TOMS[hit.lane].includes(hit.sourceMidi ?? 0)) {
+        const tom = TOMS[hit.sourceMidi!]
         return { pieces: [tom], specified: true, foot: false, label: label(tom) }
+      }
       return hit.lane === 'hightom'
         ? { pieces: RACK, specified: false, foot: false, label: 'Rack tom (which one is unspecified)' }
-        : { pieces: FLOOR, specified: false, foot: false, label: 'Floor tom (which one is unspecified)' }
+        : { pieces: ['floor'], specified: true, foot: false, label: label('floor') }
     case 'openhat':
       return hit.articulation === 'half-open'
         ? { pieces: ['hihat'], specified: true, hat: 'half-open', foot: false, label: 'Hi-hat half-open' }

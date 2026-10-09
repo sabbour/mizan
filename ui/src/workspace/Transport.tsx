@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CaseUpper, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, Timer } from 'lucide-react'
+import { CaseUpper, Hand, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, Timer } from 'lucide-react'
 
 type Props = {
   playing: boolean
@@ -10,6 +10,8 @@ type Props = {
   click: boolean
   /** Null when the current track has no pitched notes to name. */
   noteNames: boolean | null
+  /** Sticking letters and hand colours; null when the current track is not drums. */
+  sticking: boolean | null
   onPlay: () => void
   onStep: (delta: number) => void
   onRate: (rate: number) => void
@@ -17,6 +19,7 @@ type Props = {
   onCountIn: () => void
   onClick: () => void
   onNoteNames: () => void
+  onSticking: () => void
   onGo: (query: string) => boolean
 }
 
@@ -114,6 +117,9 @@ export function Transport(p: Props) {
         <Toggle on={!!p.loop} onPress={p.onLoop} icon={<Repeat aria-hidden="true" />} label="Loop" keyHint="L" state={p.loop ? `${p.loop.startBar}–${p.loop.endBar}` : 'off'} />
         <Toggle on={p.countIn} onPress={p.onCountIn} icon={<Timer aria-hidden="true" />} label="Count-in" state={p.countIn ? 'on' : 'off'} />
         <Toggle on={p.click} onPress={p.onClick} icon={<Metronome aria-hidden="true" />} label="Click" keyHint="C" state={p.click ? 'on' : 'off'} />
+        {p.sticking !== null && (
+          <Toggle on={p.sticking} onPress={p.onSticking} icon={<Hand aria-hidden="true" />} label="Sticking" state={p.sticking ? 'L / R' : 'off'} />
+        )}
         {p.noteNames !== null && (
           <Toggle on={p.noteNames} onPress={p.onNoteNames} icon={<CaseUpper aria-hidden="true" />} label="Note letters" keyHint="N" state={p.noteNames ? 'on' : 'off'} />
         )}

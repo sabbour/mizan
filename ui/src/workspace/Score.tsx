@@ -10,7 +10,9 @@ import { centerDelta, usableSpan } from './follow'
 import { HandsView } from './HandsView'
 import { DrumKitView } from './DrumKitView'
 import type { PracticeView } from './PracticeViewPicker'
-import { notationGrid, notationNotes } from './musicxml'
+import { drumKey, drumNotationBeats, drumPosition, notationGrid, notationNotes } from './musicxml'
+import type { Sticking } from './sticking'
+import type { KitStyle } from './prefs'
 
 export type BarBox = { bar: number; x: number; w: number; inset: number; top: number; bottom: number; system: number }
 /** `sky` is how far (px, ≤ 0) the highest note or mark rises above the system's top staff line. */
@@ -22,6 +24,56 @@ export type Layout = {
 
 const STEP_LETTER: Record<number, string> = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' }
 const SVG = 'http://www.w3.org/2000/svg'
+
+const STEP_TONE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
+
+/**
+ * Drum scores: draws parentheses around each ghost-note head (the renderer reads but does not draw MusicXML notehead
+ * parentheses), matched by written beat and staff position so only that head is marked, and colours the sticking
+ * letters: blue L for the left hand, orange R for the right.
+ */
+function markDrums(osmd: OpenSheetMusicDisplay, song: Song) {
+  const grid = notationGrid(song)
+  const written = drumNotationBeats(song)
+  const key = (beat: number, tone: number) => `${Math.round(beat * 1000)}:${tone}`
+  const ghosts = new Set<string>()
+  song.drums.forEach((hit, index) => {
+    if (hit.dynamic !== 'ghost') return
+    const [step, octave] = drumPosition(drumKey(hit))
+    // OSMD's half-tone index is one octave below MIDI (C4 is 48 here).
+    ghosts.add(key(written[index], octave * 12 + STEP_TONE[step]))
+  })
+  for (const staves of osmd.GraphicSheet.MeasureList)
+    for (const staff of staves)
+      for (const entry of staff?.staffEntries ?? []) {
+        const beat = grid.toBeat(entry.getAbsoluteTimestamp().RealValue * 4 * grid.division)
+        for (const ve of entry.graphicalVoiceEntries)
+          for (const note of ve.notes) {
+            if (!(note instanceof VexFlowGraphicalNote) || note.sourceNote.isRest() || !note.sourceNote.Pitch) continue
+            if (!ghosts.has(key(beat, note.sourceNote.Pitch.getHalfTone()))) continue
+            const head = note.getNoteheadSVGs()[note.vfnoteIndex] as unknown as SVGGraphicsElement | undefined
+            if (!head?.getBBox || !head.parentNode) continue
+            const box = head.getBBox()
+            head.classList.add('score-ghost')
+            for (const [text, x, anchor] of [['(', box.x - box.width * 0.12, 'end'], [')', box.x + box.width * 1.12, 'start']] as const) {
+              const paren = document.createElementNS(SVG, 'text')
+              paren.textContent = text
+              paren.setAttribute('x', String(x))
+              paren.setAttribute('y', String(box.y + box.height * 0.88))
+              paren.setAttribute('font-size', String(box.height * 1.6))
+              paren.setAttribute('text-anchor', anchor)
+              paren.setAttribute('class', 'score-ghost-paren')
+              paren.setAttribute('aria-hidden', 'true')
+              head.parentNode.appendChild(paren)
+            }
+          }
+        for (const lyric of entry.LyricsEntries ?? []) {
+          const node = lyric.GraphicalLabel?.SVGNode as SVGElement | undefined
+          const text = node?.textContent?.trim()
+          if (node && (text === 'L' || text === 'R')) node.classList.add(text === 'L' ? 'score-hand-left' : 'score-hand-right')
+        }
+      }
+}
 
 /** Writes each note's letter inside its notehead, in the score's own SVG so it can never drift off the head. */
 function labelHeads(osmd: OpenSheetMusicDisplay) {
@@ -185,6 +237,10 @@ type Props = {
   instrumentGuide?: string
   /** A practice guide docked under the score: a keyboard for piano, a 3D kit for drums. */
   practice?: PracticeView
+  /** Drum sticking shown on the 3D kit; undefined when the sticking letters are off. */
+  sticking?: Sticking
+  kitStyle?: KitStyle
+  onKitStyle?: (style: KitStyle) => void
   onPick: (bar: number, extend: boolean) => void
   previewId: string
 }
@@ -269,7 +325,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', sticking, kitStyle = 'electronic', onKitStyle = () => {}, onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -340,9 +396,14 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
           await display.load(xml)
           if (cancelled || generation !== loadGeneration.current) return
           display.Zoom = zoomFor(noteNames)
+          // Drum parts carry their own beams by beat group, so the renderer must not regroup them or flip their stems.
+          display.EngravingRules.AutoBeamNotes = instrument !== 'drums'
+          // Every drum triplet keeps its 3, so learners never have to infer a tuplet from the ones before it.
+          display.EngravingRules.TupletNumberLimitConsecutiveRepetitions = instrument !== 'drums'
           display.render()
           notes.current = hits(display, song, instrument, previewId)
           if (noteNames) labelHeads(display)
+          if (instrument === 'drums') markDrums(display, song)
           const nextLayout = measure(display, host.current!, song)
           markChordNames(host.current!, song, nextLayout)
           setLayout(nextLayout)
@@ -509,7 +570,7 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
       {vocalGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="vocals" study showWave={false} />}
       {instrumentGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="other" trackId={instrumentGuide} study showWave={false} />}
       {practice === 'hands' && instrument === 'piano' && status === 'ready' && <HandsView song={song} engine={engine} />}
-      {practice === 'kit' && instrument === 'drums' && status === 'ready' && <DrumKitView song={song} engine={engine} />}
+      {practice === 'kit' && instrument === 'drums' && status === 'ready' && <DrumKitView song={song} engine={engine} sticking={sticking} style={kitStyle} onStyle={onKitStyle} />}
       {status === 'loading' && (
         <div className="score-skeleton" role="status">
           <span className="visually-hidden">Drawing the score</span>

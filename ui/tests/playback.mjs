@@ -80,7 +80,11 @@ try {
   if (courseOnly) {
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
-      console.log(await evaluate(`(${courseChecks.toString()})(${width})`))
+      console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'session')`))
+      // A full reload stands in for an app restart: the saved choices must come back.
+      await call('Page.navigate', { url: testUrl })
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".course")'); i++) await sleep(100)
+      console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'restart')`))
       await call('Page.navigate', { url: testUrl })
       for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".course")'); i++) await sleep(100)
     }
@@ -1628,48 +1632,146 @@ async function realHostChecks(opened) {
   } finally { engine.dispose() }
 }
 
-async function courseChecks(width) {
+async function courseChecks(width, phase) {
   const check = (value, message) => { if (!value) throw new Error(message) }
   const wait = async (test, message) => {
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 160; i++) {
       if (test()) return
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
     throw new Error(message)
   }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const where = () => document.querySelector('.ws-where')?.textContent ?? ''
+  const bar = () => Number(/Bar (\d+)/.exec(where())?.[1])
+  const toggle = (label) => [...document.querySelectorAll('.ws-foot .toggle')].find((button) => button.textContent.includes(label))
+  const pressed = (label) => toggle(label)?.getAttribute('aria-pressed')
+  const playButton = () => document.querySelector('.ws-foot .play')
+  const openLesson = async (title) => {
+    const button = [...document.querySelectorAll('.course-lesson')].find((item) => item.querySelector('.course-title')?.firstChild?.textContent === title)
+    check(button, `Lesson ${title} is listed`)
+    button.click()
+    await wait(() => document.querySelector('.ws .score-bar[aria-label="Bar 2"]') && document.querySelector('.ws-song'), `${title} opens`)
+  }
+  const back = async () => {
+    document.querySelector('.ws-back').click()
+    await wait(() => document.querySelector('.course') && !document.querySelector('.ws'), 'Back returns to the library')
+  }
+  if (phase === 'restart') {
+    // After a full reload: the choices made before are still in force.
+    await wait(() => document.querySelectorAll('.course-lesson').length > 40, 'The library lists the lessons again')
+    await openLesson('Fill around the toms')
+    check(pressed('Count-in') === 'false' && pressed('Click') === 'false' && pressed('Sticking') === 'false',
+      `Count-in, click and sticking stay off after a restart (${pressed('Count-in')}, ${pressed('Click')}, ${pressed('Sticking')})`)
+    check(/75 bpm · 75%/.test(where()), `The chosen speed survives a restart: ${where()}`)
+    await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'illustrated', 'The kit style survives a restart')
+    toggle('Count-in').click(); toggle('Click').click(); toggle('Sticking').click()
+    await wait(() => pressed('Sticking') === 'true' && document.querySelector('.kit-hand'), 'Sticking returns with its legend')
+    await back()
+    const saved = JSON.parse(localStorage.getItem('mizan:practice'))
+    check(Object.keys(saved).length === 5 && saved.kitStyle === 'illustrated' && saved.countIn === true && saved.rate === 0.75 && saved.click === true && saved.sticking === true,
+      `Preferences saved: ${localStorage.getItem('mizan:practice')}`)
+    for (const key of Object.keys(localStorage)) if (key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:course:') || key === 'mizan:practice') localStorage.removeItem(key)
+    return `Course restart checks passed at ${width}px: count-in, click, sticking and speed restored after reload, then reset.`
+  }
   // A library song's saved mixer state must survive practising lessons untouched.
+  localStorage.removeItem('mizan:practice')
   localStorage.setItem('mizan:mixer:s1', JSON.stringify({ muted: ['piano'], volumes: { drums: 0.6 } }))
   const before = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
-  await wait(() => document.querySelectorAll('.course-lesson').length === 19, 'The library lists the 19 course lessons')
-  check(document.querySelectorAll('.course-level').length === 6, 'Lessons are grouped in six levels')
+  await wait(() => document.querySelectorAll('.course-level .course-lesson').length === 37, 'The library lists the 37 course lessons')
+  check(document.querySelectorAll('.course-level').length === 8, 'Lessons are grouped in eight levels')
+  check(document.querySelector('#course-inspired')?.textContent.startsWith('Inspired by great drummers') &&
+    document.querySelector('#course-genre')?.textContent.startsWith('Grooves by genre'), 'The two style collections are separate sections')
+  check(document.querySelectorAll('.course-collection .course-lesson').length === 19, 'The collections list their lessons')
   const lessons = [...document.querySelectorAll('.course-lesson')]
   check(lessons.every((button) => button.getBoundingClientRect().right <= innerWidth), `Course rows fit at ${width}px`)
-  lessons.find((button) => button.textContent.includes('Groove, fill, crash')).click()
-  await wait(() => document.querySelector('.ws .practice-kit') && document.querySelector('.ws .score-bar[aria-label="Bar 4"]'),
-    'The lesson opens in the practice workspace with its score and 3D kit')
-  const where = () => document.querySelector('.ws-where').textContent
-  const pressed = (label) => [...document.querySelectorAll('.ws-foot button')].find((button) => button.textContent.includes(label))?.getAttribute('aria-pressed')
-  check(document.querySelector('.ws-song').textContent === 'Lesson 15: Groove, fill, crash', 'Lesson title')
+  await openLesson('Groove, fill, crash')
+  check(document.querySelector('.ws-song').textContent === 'Lesson 23: Groove, fill, crash', `Lesson title: ${document.querySelector('.ws-song').textContent}`)
   check(/70 bpm · 70%/.test(where()), `The lesson starts at its starting tempo: ${where()}`)
-  check(pressed('Loop') === 'true' && pressed('Count-in') === 'true' && pressed('Click') === 'true', 'Loop, count-in and click are on')
+  check(pressed('Loop') === 'true' && pressed('Count-in') === 'true' && pressed('Click') === 'true' && pressed('Sticking') === 'true',
+    'Loop, count-in, click and sticking are on')
   check(document.querySelector('.lesson-goal')?.textContent.includes('crash'), 'The lesson instructions are beside the score')
   check(document.querySelectorAll('.lesson-counts tr').length === 3, 'Count and sticking for the groove and fill bars')
+  check(document.querySelectorAll('.lesson-counts .hand-left').length > 0 && document.querySelectorAll('.lesson-counts .hand-right').length > 0,
+    'The sticking line marks L and R')
+  await wait(() => document.querySelectorAll('.score-hand-right').length && document.querySelectorAll('.score-hand-left').length, 'The score shows R and L letters')
+  await wait(() => [...document.querySelectorAll('.kit-hand')].map((pill) => pill.textContent).join('|') === 'L Left hand|R Right hand', 'The kit legend names both hands')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }))
   await wait(() => /75 bpm · 75%/.test(where()), 'Speed rises in 5% steps')
+  // A view change does not move the playhead.
+  document.querySelector('.ws .score-bar[aria-label="Bar 3"]').click()
+  await wait(() => bar() === 3, 'Bar 3 is selected')
+  document.querySelector('.chordview-option[data-view="score"]').click(); await sleep(300)
+  document.querySelector('.chordview-option[data-view="kit"]').click(); await sleep(300)
+  check(bar() === 3, `Switching the practice view keeps the position (${where()})`)
+  // The kit style is a look only: Electronic by default, and changing it keeps the position.
+  await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'electronic', 'The kit starts Electronic')
+  for (const style of ['acoustic', 'illustrated']) {
+    document.querySelector(`.kit-style [data-style="${style}"]`).click()
+    await wait(() => document.querySelector('.practice-kit')?.dataset.style === style &&
+      document.querySelector(`.kit-style [data-style="${style}"]`).getAttribute('aria-checked') === 'true', `The ${style} kit is shown`)
+    check(bar() === 3 && playButton().getAttribute('aria-label') === 'Play', `Changing the kit style does not move or start playback (${where()})`)
+    check(JSON.parse(localStorage.getItem('mizan:practice')).kitStyle === style, 'The kit style is remembered')
+  }
+  // Changing lesson starts the new one at bar 1, stopped, at the speed the player chose.
   document.querySelector('.lesson-nav button:last-child').click()
-  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 16: Fill around the toms', 'Next lesson opens')
-  await wait(() => /65 bpm · 65%/.test(where()), 'The next lesson starts at its own tempo')
-  await wait(() => ['High tom', 'High-mid tom', 'Low-mid tom', 'High floor tom', 'Low floor tom'].every((name) =>
-    [...document.querySelectorAll('.kit-pill')].some((pill) => pill.textContent === name)), 'The tom fill names five distinct toms')
-  document.querySelector('.ws-back').click()
-  await wait(() => document.querySelector('.course') && !document.querySelector('.ws'), 'Back returns to the library')
-  await new Promise((resolve) => setTimeout(resolve, 900))
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 24: Fill around the toms', 'Next lesson opens')
+  await wait(() => /75 bpm · 75%/.test(where()) && bar() === 1, `The next lesson starts at bar 1 at the chosen speed: ${where()}`)
+  const toms = () => [...document.querySelectorAll('.kit-pill[data-piece]')].map((pill) => pill.textContent).filter((name) => /tom/i.test(name))
+  await wait(() => toms().join('|') === 'Tom 1|Tom 2|Floor tom', `The tom fill uses the five-piece kit's three toms: ${toms()}`)
+  // While playing: changing lesson stops the old one and starts the new one from the top, not playing.
+  toggle('Count-in').click()
+  await wait(() => pressed('Count-in') === 'false', 'Count-in turns off')
+  playButton().click()
+  await wait(() => bar() >= 2, 'Playback advances')
+  check(!playButton().dataset.counting, 'No count-in when it is off')
+  document.querySelector('.lesson-nav button:first-child').click()
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 23: Groove, fill, crash', 'Previous lesson opens')
+  await sleep(600)
+  check(bar() === 1 && playButton().getAttribute('aria-label') === 'Play', `A lesson changed while playing opens at bar 1, stopped (${where()})`)
+  check(pressed('Count-in') === 'false', 'Count-in stays off in the next lesson')
+  playButton().click()
+  await sleep(250)
+  check(!playButton().dataset.counting, 'The new lesson plays without a count-in')
+  playButton().click()
+  toggle('Count-in').click()
+  await wait(() => pressed('Count-in') === 'true', 'Count-in turns on')
+  playButton().click()
+  await wait(() => playButton().dataset.counting, 'With count-in on, play counts in')
+  playButton().click()
+  // Click and sticking off: the letters and the hand legend go, and the choices follow to other lessons.
+  toggle('Click').click(); toggle('Sticking').click(); toggle('Count-in').click()
+  await wait(() => !document.querySelector('.score-hand-left') && !document.querySelector('.kit-hand'), 'Sticking off hides the letters and hand legend')
+  check(document.querySelector('.ws-where') && toggle('Sticking').querySelector('.toggle-state').textContent === 'off', 'Sticking reads off')
+  await back()
+  await openLesson('Ghost notes in a groove')
+  check(pressed('Click') === 'false' && pressed('Sticking') === 'false' && pressed('Count-in') === 'false', 'The choices follow to another lesson, overriding its defaults')
+  check(/60 bpm · 75%/.test(where()), `Speed follows too: ${where()}`)
+  await wait(() => document.querySelectorAll('.score-ghost').length === 8 && document.querySelectorAll('.score-ghost-paren').length === 16,
+    `Each ghost note is parenthesised (${document.querySelectorAll('.score-ghost').length})`)
+  await back()
+  // Song: a suggested sticking, and choosing another track starts it from the top.
+  const song = [...document.querySelectorAll('.song-open')].find((element) => element.textContent.includes('Paper Rain'))
+  check(song, 'Library has a song to open')
+  song.click()
+  await wait(() => document.querySelector('.track-button') && document.querySelector('.ws .score-bar[aria-label="Bar 3"]'), 'The song opens')
+  document.querySelector('.ws .score-bar[aria-label="Bar 3"]').click()
+  await wait(() => bar() === 3, 'Bar 3 is selected in the song')
+  document.querySelector('.track-button').click()
+  await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
+  ;[...document.querySelectorAll('.track-item[role="menuitemradio"]')].find((element) => element.textContent.includes('Drum kit')).click()
+  await wait(() => bar() === 1 && toggle('Sticking'), `Choosing another track starts it at bar 1 (${where()})`)
+  check(pressed('Click') === 'false', 'The song opens with the saved click choice')
+  toggle('Sticking').click()
+  await wait(() => document.querySelectorAll('.score-hand-right').length > 4, 'The song shows suggested sticking letters')
+  toggle('Sticking').click()
+  await back()
   const after = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
-  const changed = Object.keys(before).filter((key) => after[key] !== before[key])
+  const changed = Object.keys(before).filter((key) => after[key] !== before[key] && !key.startsWith('mizan:mixer:') && key !== 'mizan:position:s1')
   const added = Object.keys(after).filter((key) => !(key in before))
-  check(!changed.length, `Library song state is untouched: ${changed}`)
-  check(added.every((key) => key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:course:')), `Lesson state is namespaced: ${added}`)
-  check(JSON.parse(after['mizan:course:position:snare-fill']).rate === 0.75, 'The lesson resumes at the practised speed')
-  for (const key of added) localStorage.removeItem(key)
-  return `Course checks passed at ${width}px: discovery, lesson defaults, instructions, speed, next lesson, back, namespaced state.`
+  check(!changed.filter((key) => key === 'mizan:mixer:s1').length, 'Library song mixer state is untouched by lessons')
+  check(added.every((key) => key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:') || key === 'mizan:practice'), `Lesson state is namespaced: ${added}`)
+  check(JSON.parse(after['mizan:course:position:snare-fill']).rate === 0.75, 'The lesson keeps the practised speed')
+  return `Course checks passed at ${width}px: sections, lesson defaults, sticking letters and legend, speed, view change keeps position, ` +
+    'lesson change from paused and playing starts at bar 1, count-in/click/sticking/speed follow lessons, ghost parentheses, track change resets, suggested sticking.'
 }

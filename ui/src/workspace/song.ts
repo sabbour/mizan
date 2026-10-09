@@ -40,6 +40,10 @@ export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'sna
 export type DrumHit = {
   trackId?: string; lane: DrumLane; startBeat: number; velocity: number; confidence?: number
   sourceMidi?: number; articulation?: 'half-open'
+  /** The hand that plays the stroke, from the player's point of view. Only authored lessons set it; it is never guessed. */
+  hand?: 'left' | 'right'
+  /** A written ghost note or accent. Only authored lessons set it; a quiet or loud detected hit is not labelled. */
+  dynamic?: 'ghost' | 'accent'
 }
 
 /** One transcribed part. A song lists only the parts that were actually transcribed. */

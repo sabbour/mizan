@@ -1895,4 +1895,6 @@
 .course-lesson:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .course-number { color: var(--ink-2); font-size: 12px; text-align: right; }
 .course-meta { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.course-style { color: var(--ink-2); font-size: 13px; }
+.course-collection { gap: 0 36px; }
 @media (prefers-reduced-motion: reduce) { .course-lesson { transition: none; } }

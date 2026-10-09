@@ -91,6 +91,13 @@
   transition: background-color 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease);
 }
 .kit-pill[data-lit] { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
+.practice-kit .kit-style { width: fit-content; margin: 6px auto 0; }
+.kit-hand { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.kit-hand b { font-weight: 800; }
+.kit-hand[data-hand='left'] b { color: var(--hand-left); }
+.kit-hand[data-hand='right'] b { color: var(--hand-right); }
+.kit-hand[data-hand='left'][data-lit] { border-color: var(--hand-left); background: rgb(27 92 181 / 0.1); color: var(--hand-left); }
+.kit-hand[data-hand='right'][data-lit] { border-color: var(--hand-right); background: rgb(166 72 0 / 0.1); color: var(--hand-right); }
 @media (prefers-reduced-motion: reduce) { .kit-pill { transition: none; } }
 @media (max-height: 760px) {
   .practice-hands .practice-canvas { height: 112px; }
@@ -591,6 +598,20 @@
 .score-osmd .score-head-active.score-head-hollow path {
   fill: none;
 }
+
+.score-osmd .score-ghost-paren {
+  font-family: 'Times New Roman', serif;
+  fill: #111111;
+  stroke: none;
+  pointer-events: none;
+}
+
+/* Sticking letters under drum strokes: the letter carries the meaning, the colour repeats it. */
+/* OSMD wraps each lyric in a group whose text carries its own fill. */
+.score-osmd .score-hand-left text,
+.score-osmd .score-hand-right text { font-weight: 700; }
+.score-osmd .score-hand-left text { fill: var(--hand-left); }
+.score-osmd .score-hand-right text { fill: var(--hand-right); }
 
 .score-osmd .head-letter {
   font-family: 'Archivo Variable', sans-serif;
@@ -1288,6 +1309,11 @@
 .lesson-counts { border-collapse: collapse; }
 .lesson-counts th { padding: 1px 14px 1px 0; color: var(--ink-2); font-weight: 600; text-align: left; white-space: nowrap; }
 .lesson-counts td { padding: 1px 20px 1px 0; color: var(--ink); font-size: 14px; word-spacing: 0.35em; }
+.lesson-sticking { display: inline-flex; flex-wrap: wrap; gap: 0 0.5em; word-spacing: normal; }
+.lesson-stroke { white-space: nowrap; }
+.hand-left, .hand-right { font-weight: 700; }
+.hand-left { color: var(--hand-left); }
+.hand-right { color: var(--hand-right); }
 .lesson-label { margin-right: 6px; color: var(--ink-2); font-size: 12px; word-spacing: normal; }
 .lesson-steps summary { width: fit-content; color: var(--accent-deep); font-weight: 600; cursor: pointer; }
 .lesson-steps ol { max-width: 75ch; margin: 6px 0 0; padding-left: 20px; line-height: 1.5; }

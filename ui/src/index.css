@@ -12,6 +12,9 @@
   --accent-wash: rgb(13 122 99 / 0.09);
   --accent-edge: rgb(13 122 99 / 0.45);
   --danger: #b3261e;
+  /* Drum sticking, from the player's side: left hand cool blue, right hand warm orange. Both pass 4.5:1 as text on white. */
+  --hand-left: #1b5cb5;
+  --hand-right: #a64800;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 

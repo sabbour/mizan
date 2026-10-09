@@ -79,8 +79,9 @@ export default function App() {
   const done = queue.finished
   const opened = view.kind === 'song' || view.kind === 'job' ? view.opened : undefined
   const lesson = view.kind === 'lesson' ? lessonById(view.id) : undefined
-  // One song and starting position per opened lesson, so the workspace keeps its engine across renders.
-  const practised = useMemo(() => lesson && { song: lessonSong(lesson), start: lessonPosition(lesson) }, [lesson])
+  // One song and starting setup per opened lesson, so the workspace keeps its engine across renders. A lesson always
+  // starts at bar 1; its loop and other saved choices carry over.
+  const practised = useMemo(() => lesson && { song: lessonSong(lesson), start: { ...lessonPosition(lesson), bar: 1 } }, [lesson])
   const updating = opened && activeAnalysis(queue.jobs, opened.entry.id)
   const updated = opened && done?.songId === opened.entry.id
   const decodingHeadline = decodingErrorHeadline(opened?.song.decodingErrors?.count)

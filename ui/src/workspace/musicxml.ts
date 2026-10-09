@@ -712,10 +712,8 @@ export function drumKey(hit: Pick<DrumHit, 'lane' | 'sourceMidi'>): DrumKey {
 }
 const footKey = (key: DrumKey) => key === 'kick' || key === 'pedal'
 
-function drumHead(lane: DrumKey): string {
-  const [step, octave, head] = lane in DRUM_POS ? DRUM_POS[lane as DrumLane] : DETAIL_POS[lane as Exclude<DrumKey, DrumLane>]
-  return `<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>${head ? `<notehead>${head}</notehead>` : ''}`
-}
+/** Staff position and notehead shape for a written drum key. */
+export const drumPosition = (key: DrumKey) => key in DRUM_POS ? DRUM_POS[key as DrumLane] : DETAIL_POS[key as Exclude<DrumKey, DrumLane>]
 
 type Piece = { length: number; type?: string; dot: boolean; triplet: boolean }
 
@@ -742,17 +740,46 @@ const pieceXml = (piece: Piece, division: number) => piece.type
   ? `<type>${piece.type}</type>${piece.dot ? '<dot/>' : ''}${piece.triplet ? '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>' : ''}`
   : typeOf(piece.length, division)
 
-/** Hands or feet voice: chorded simultaneous lanes; each written length reaches the next attack. */
-function drumVoice(attacks: Map<number, DrumKey[]>, voiceNo: number, stem: string, barDivs: number, division: number): string {
+/** One written stroke: where it is drawn, how it is played, and the hand for the sticking letters. */
+type Stroke = { key: DrumKey; ghost: boolean; accent: boolean; foot: boolean; hand?: 'left' | 'right'; unhanded: boolean }
+
+const BEAMS: Record<string, number> = { eighth: 1, '16th': 2, '32nd': 3, '64th': 4 }
+
+/**
+ * Beam groups in divisions for a bar: each quarter in simple time, each dotted quarter in compound time, and pairs of
+ * eighths (the last group three when the count is odd) in other eighth-note meters, such as 7/8 as 2 + 2 + 3.
+ */
+function beamGroups(numerator: number, denominator: number, barDivs: number, division: number): number[] {
+  const starts: number[] = []
+  if (denominator === 8 && numerator >= 6 && numerator % 3 === 0) {
+    for (let at = 0; at < barDivs; at += division * 1.5) starts.push(at)
+  } else if (denominator === 8) {
+    for (let eighth = 0; eighth < numerator; eighth += 2) if (numerator - eighth !== 1) starts.push(eighth * division / 2)
+  } else {
+    for (let at = 0; at < barDivs; at += division) starts.push(at)
+  }
+  return starts
+}
+
+/**
+ * One drum voice: chorded simultaneous strokes, each written length reaching the next attack. Beams follow the
+ * meter's beat groups, so stems keep the voice's direction instead of being chosen by pitch. Ghost notes are marked
+ * with parenthesised noteheads and accents with an accent mark; the sticking letters go under the hand strokes.
+ */
+function drumVoice(attacks: Map<number, Stroke[]>, voiceNo: number, stem: string, barDivs: number, division: number,
+  groups: number[]): string {
   const positions = [...attacks.keys()].filter((pos) => pos >= 0 && pos < barDivs).sort((a, b) => a - b)
   if (!positions.length) return `<note><rest measure="yes"/><duration>${barDivs}</duration><voice>${voiceNo}</voice><staff>1</staff></note>`
-  const items: { piece: Piece; lanes?: DrumKey[] }[] = []
+  const items: { piece: Piece; start: number; strokes?: Stroke[] }[] = []
   let cursor = 0
-  const rest = (from: number, to: number) => { for (const piece of spanPieces(from, to, division)) items.push({ piece }) }
+  const rest = (from: number, to: number) => {
+    let at = from
+    for (const piece of spanPieces(from, to, division)) { items.push({ piece, start: at }); at += piece.length }
+  }
   positions.forEach((pos, index) => {
     if (pos > cursor) rest(cursor, pos)
     const head = spanPieces(pos, positions[index + 1] ?? barDivs, division)[0]
-    items.push({ piece: head, lanes: attacks.get(pos)! })
+    items.push({ piece: head, start: pos, strokes: attacks.get(pos)! })
     cursor = pos + head.length
   })
   if (cursor < barDivs) rest(cursor, barDivs)
@@ -769,11 +796,41 @@ function drumVoice(attacks: Map<number, DrumKey[]>, voiceNo: number, stem: strin
     brackets[last - 1] += '<tuplet type="stop"/>'
     first = last - 1
   }
-  return items.map(({ piece, lanes }, index) => {
-    const notations = brackets[index] ? `<notations>${brackets[index]}</notations>` : ''
-    if (!lanes) return `<note><rest/><duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<staff>1</staff>${notations}</note>`
-    return lanes.map((lane, chord) =>
-      `<note>${chord ? '<chord/>' : ''}${drumHead(lane)}<duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<stem>${stem}</stem><staff>1</staff>${chord ? '' : notations}</note>`).join('')
+  // Beams join consecutive notes of eighth value or shorter inside one beat group; rests break them.
+  const levels = items.map((item) => item.strokes ? BEAMS[item.piece.type ?? ''] ?? 0 : 0)
+  const group = (start: number) => groups.filter((at) => at <= start).length
+  const beams = items.map(() => '')
+  for (let index = 0; index < items.length; index++) {
+    if (!levels[index]) continue
+    const joins = (other: number) => other >= 0 && other < items.length && levels[other] > 0 && group(items[other].start) === group(items[index].start)
+    const before = joins(index - 1)
+    const after = joins(index + 1)
+    if (!before && !after) continue
+    for (let level = 1; level <= levels[index]; level++) {
+      const prev = before && levels[index - 1] >= level
+      const next = after && levels[index + 1] >= level
+      const kind = prev && next ? 'continue' : next ? 'begin' : prev ? 'end' : before ? 'backward hook' : 'forward hook'
+      beams[index] += `<beam number="${level}">${kind}</beam>`
+    }
+  }
+  return items.map(({ piece, strokes }, index) => {
+    const notations = brackets[index]
+    if (!strokes) return `<note><rest/><duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<staff>1</staff>${notations ? `<notations>${notations}</notations>` : ''}</note>`
+    const hands = strokes.filter((stroke) => !stroke.foot)
+    // Letters only where every hand stroke at this moment has a hand; R above L when both play.
+    const lyric = hands.length && hands.every((stroke) => stroke.hand) ? ['right', 'left']
+      .map((hand, line) => hands.some((stroke) => stroke.hand === hand)
+        ? `<lyric number="${line + 1}" placement="below"><syllabic>single</syllabic><text>${hand === 'right' ? 'R' : 'L'}</text></lyric>` : '').join('') : ''
+    const accent = strokes.some((stroke) => stroke.accent) ? '<articulations><accent placement="above"/></articulations>' : ''
+    return strokes.map((stroke, chord) => {
+      const [step, octave, head] = drumPosition(stroke.key)
+      const shape = head ?? 'normal'
+      const notehead = stroke.ghost ? `<notehead parentheses="yes">${shape}</notehead>` : head ? `<notehead>${head}</notehead>` : ''
+      const marks = chord ? '' : notations + accent
+      return `<note>${chord ? '<chord/>' : ''}<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>` +
+        `<duration>${piece.length}</duration><voice>${voiceNo}</voice>${pieceXml(piece, division)}<stem>${stem}</stem>${notehead}<staff>1</staff>` +
+        `${chord ? '' : beams[index]}${marks ? `<notations>${marks}</notations>` : ''}${chord ? '' : lyric}</note>`
+    }).join('')
   }).join('')
 }
 
@@ -846,7 +903,25 @@ export function drumNotationBeats(song: Song): number[] {
   return written
 }
 
-export function drumXml(song: Song, chords = true): string {
+/** True when a bar puts triplet hand strokes and duple foot strokes in the same beat (3 against 2), which one voice cannot write. */
+function crossRhythm(hands: number[], feet: number[], division: number): boolean {
+  const kind = (pos: number) => {
+    const offset = pos % division
+    if (!offset) return null
+    return (offset * 3) % division === 0 && (offset * 2) % division !== 0 ? 'triplet' : (offset * 4) % division === 0 ? 'duple' : 'other'
+  }
+  const beats = (list: number[], wanted: string) => new Set(list.filter((pos) => kind(pos) === wanted).map((pos) => Math.floor(pos / division)))
+  const triplets = [beats(hands, 'triplet'), beats(feet, 'triplet')]
+  const duples = [beats(hands, 'duple'), beats(feet, 'duple')]
+  return [...triplets[0]].some((beat) => duples[1].has(beat)) || [...triplets[1]].some((beat) => duples[0].has(beat))
+}
+
+/**
+ * The drum part as one staff. Hands and feet share one up-stemmed voice, as drum charts usually write them, so a
+ * hi-hat and a kick played together sit on one stem; a bar where the hands play triplets against duple feet keeps
+ * the feet in a second, down-stemmed voice instead. `hands` (one per hit, for the hand strokes) adds sticking letters.
+ */
+export function drumXml(song: Song, chords = true, hands?: ('left' | 'right' | undefined)[]): string {
   const grid = notationGrid(song)
   // Three times the shared grid so sixteenth-triplet figures have exact written positions.
   const division = grid.division * 3
@@ -854,10 +929,13 @@ export function drumXml(song: Song, chords = true): string {
   const spans = meterMeasures(song)
   const measures: string[] = []
   const written = drumNotationBeats(song)
-  const hitsByBar = new Map<number, { lane: DrumKey; beat: number }[]>()
+  const hitsByBar = new Map<number, { stroke: Stroke; beat: number }[]>()
   song.drums.forEach((hit, index) => {
     const bar = measureIndex(song, written[index])
-    hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { lane: drumKey(hit), beat: written[index] }])
+    const key = drumKey(hit)
+    const stroke: Stroke = { key, ghost: hit.dynamic === 'ghost', accent: hit.dynamic === 'accent', foot: footKey(key),
+      hand: hands?.[index], unhanded: !!hands && !hands[index] }
+    hitsByBar.set(bar, [...(hitsByBar.get(bar) ?? []), { stroke, beat: written[index] }])
   })
   for (let bar = 1; bar <= song.bars; bar++) {
     const { startDiv, endDiv, points } = grid.bars[bar - 1]
@@ -865,22 +943,35 @@ export function drumXml(song: Song, chords = true): string {
     const barDivs = (endDiv - startDiv) * 3
     const position = (beat: number) => points.length
       ? (grid.toDiv(beat) - startDiv) * 3 : Math.round((beat - span.startBeat) * division)
-    const attacks = (feet: boolean) => {
-      const map = new Map<number, DrumKey[]>()
-      for (const hit of hitsByBar.get(bar - 1) ?? []) {
-        if (footKey(hit.lane) !== feet) continue
-        const lanes = map.get(position(hit.beat)) ?? []
-        if (!lanes.includes(hit.lane)) lanes.push(hit.lane)
-        map.set(position(hit.beat), lanes)
+    const attacks = (include: (stroke: Stroke) => boolean) => {
+      const map = new Map<number, Stroke[]>()
+      for (const { stroke, beat } of hitsByBar.get(bar - 1) ?? []) {
+        if (!include(stroke)) continue
+        const strokes = map.get(position(beat)) ?? []
+        const same = strokes.find((other) => other.key === stroke.key)
+        // Repeats of one sound at one moment are one written note: a ghost only if every repeat is, an accent if any is.
+        if (same) Object.assign(same, { ghost: same.ghost && stroke.ghost, accent: same.accent || stroke.accent,
+          hand: same.hand === stroke.hand ? same.hand : undefined, unhanded: same.unhanded || stroke.unhanded || same.hand !== stroke.hand })
+        else strokes.push({ ...stroke })
+        map.set(position(beat), strokes)
+      }
+      for (const strokes of map.values()) {
+        if (strokes.some((stroke) => !stroke.foot && stroke.unhanded)) for (const stroke of strokes) stroke.hand = undefined
       }
       return map
     }
+    const groups = beamGroups(span.numerator, span.denominator, barDivs, division)
+    const handMap = attacks((stroke) => !stroke.foot)
+    const footMap = attacks((stroke) => stroke.foot)
+    const split = crossRhythm([...handMap.keys()], [...footMap.keys()], division)
+    const voices = split
+      ? drumVoice(handMap, 1, 'up', barDivs, division, groups) + `<backup><duration>${barDivs}</duration></backup>` +
+        drumVoice(footMap, 2, 'down', barDivs, division, groups)
+      : drumVoice(attacks(() => true), 1, 'up', barDivs, division, groups)
     measures.push(
       measureOpen(bar, attrs, song) +
         annotations(song, bar, chords, 3) +
-        drumVoice(attacks(false), 1, 'up', barDivs, division) +
-        `<backup><duration>${barDivs}</duration></backup>` +
-        drumVoice(attacks(true), 2, 'down', barDivs, division) +
+        voices +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
     )
