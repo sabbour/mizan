@@ -294,20 +294,22 @@ export function Workspace({
   }, [pos.bar, loop, rate, track, muted, solo, song.sections])
   const latest = useRef(position)
   latest.current = position
+  // Opening music starts it from the top; its stored position only changes once the player does something.
+  const [opened] = useState(() => JSON.stringify(position))
+  const savePosition = useRef((p: Position) => { if (JSON.stringify(p) !== opened) onPosition?.(p) })
+  savePosition.current = (p: Position) => { if (JSON.stringify(p) !== opened) onPosition?.(p) }
   useEffect(() => {
-    if (!onPosition || pos.playing) return
+    if (!onPosition || pos.playing || JSON.stringify(position) === opened) return
     const timer = setTimeout(() => onPosition(latest.current), 800)
     return () => clearTimeout(timer)
-  }, [onPosition, position, pos.playing])
+  }, [onPosition, position, pos.playing, opened])
   // Leaving by any route (next lesson, re-open) keeps the latest setup, not only the last debounced one.
-  const savePosition = useRef(onPosition)
-  savePosition.current = onPosition
-  useEffect(() => () => savePosition.current?.(latest.current), [])
+  useEffect(() => () => savePosition.current(latest.current), [])
   const leave = useCallback(() => {
     engine.pause()
-    onPosition?.(latest.current)
+    savePosition.current(latest.current)
     onBack?.()
-  }, [engine, onPosition, onBack])
+  }, [engine, onBack])
 
   const go = useCallback(
     (query: string) => {

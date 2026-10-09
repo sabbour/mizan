@@ -47,7 +47,7 @@ export function stageProviderLabel(provider: string | null): string {
 
 export function resumeParts(p: Position | null): string[] {
   if (!p) return ['Not started']
-  const parts = [`Bar ${p.bar}`]
+  const parts = [`Last at bar ${p.bar}`]
   if (p.loop) parts.push(p.loopName ? `${p.loopName} loop` : `Bars ${p.loop.startBar}–${p.loop.endBar} loop`)
   if (p.rate < 1) parts.push(`${Math.round(p.rate * 100)}%`)
   return parts

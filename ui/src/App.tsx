@@ -128,7 +128,8 @@ export default function App() {
           song={opened.song}
           songId={opened.entry.id}
           stems={opened.stems}
-          start={opened.entry.position}
+          // Opening a song starts it from the top; its saved loop, speed and mixer come with it.
+          start={opened.entry.position && { ...opened.entry.position, bar: 1 }}
           note={`${NOTE[opened.entry.source]}${opened.entry.recording ? '' : ' · synth playback'}`}
           onPosition={(p) => void host.savePosition(opened.entry.id, p)}
           onDeleteTrack={async (trackId) => {
