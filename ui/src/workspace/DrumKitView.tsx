@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Engine } from './engine'
 import { useFrame, useReducedMotion } from './hooks'
 import { HAT_LABEL, KIT_PIECES, kitStrike, type HatState, type KitPiece } from './kit'
@@ -20,7 +20,7 @@ type Props = {
   onStyle: (style: KitStyle) => void
 }
 
-const KIT_LABEL: Record<KitType, string> = { electronic: 'Electronic kit', acoustic: 'Acoustic kit' }
+const KIT_LABEL: Record<KitType, string> = { electronic: 'Electronic', acoustic: 'Acoustic' }
 const LOOK_LABEL: Record<Look, string> = {
   Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
 }
@@ -49,7 +49,10 @@ const lookAt = (eye: number[], target: number[]) => {
 
 /** A 3D kit that follows the shared transport: notes glow as they approach, pulse when played, and the parts react. */
 export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
-  const canvas = useRef<HTMLCanvasElement>(null)
+  const canvas = useRef<HTMLCanvasElement | null>(null)
+  // The GL setup follows the canvas element itself, so a replaced canvas always gets a context and a renderer.
+  const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null)
+  const attachCanvas = useCallback((element: HTMLCanvasElement | null) => { canvas.current = element; setCanvasElement(element) }, [])
   const section = useRef<HTMLElement>(null)
   const reduced = useReducedMotion()
   const { kit, look } = splitKitStyle(style)
@@ -93,7 +96,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
   }, [song.drums, sticking])
   // The GL context and renderer live as long as the view; kit and look changes only swap what it draws.
   useEffect(() => {
-    const element = canvas.current
+    const element = canvasElement
     if (!element) return
     // Visual tests can ask to keep the drawn frame so it can be read back.
     const keep = !!(globalThis as { __mizanKitCapture?: boolean }).__mizanKitCapture
@@ -148,7 +151,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       renderer.current = null
       instance.dispose()
     }
-  }, [context])
+  }, [context, canvasElement])
 
   // The scene for the chosen kit and look: the kit's GLB (fetched once), or the built-in model if it cannot load.
   const [scene, setScene] = useState<{ kit: KitType; look: Look; prepared: Prepared; images: (ImageBitmap | null)[] } | null>(null)
@@ -209,7 +212,8 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       const clash = () => placed.some((other) => Math.abs(other.x - anchor.x) < half + other.text.length * 3.3 + 8 && Math.abs(other.y - anchor.y) < 17)
       for (let tries = 0; tries < 6 && clash() && anchor.y - 17 > 18; tries++) anchor.y -= 17
       for (let tries = 0; tries < 8 && clash(); tries++) anchor.y += 17
-      anchor.y = Math.max(18, Math.min(height - 4, anchor.y))
+      // The label sits 16px above its anchor and is about 20px tall: keep it inside the stage.
+      anchor.y = Math.max(38, Math.min(height - 4, anchor.y))
       placed.push({ piece, text: label, x: anchor.x, y: anchor.y })
     }
     setLabels(placed)
@@ -239,7 +243,15 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     lastSignature.current = signature
     if (current && !failure) {
       const [width, height] = current.size()
-      current.renderer.draw(width, height, { hat, feedback, selected: chosen })
+      try {
+        current.renderer.draw(width, height, { hat, feedback, selected: chosen })
+      } catch (error) {
+        // Say so rather than leave a blank stage; the legend keeps following the hits.
+        console.error('The 3D kit stopped drawing.', error)
+        renderer.current = null
+        setFailure('The 3D kit stopped drawing because of a graphics error. The highlighted names below follow the same hits.')
+        return
+      }
       // Visual tests can read the frame right after it is drawn.
       ;(globalThis as { __mizanKitFrame?: (canvas: HTMLCanvasElement, state: { hat: string; feedback: typeof feedback }) => void }).__mizanKitFrame?.(canvas.current!, { hat, feedback })
     }
@@ -266,26 +278,39 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     <section ref={section} className="practice-view practice-kit" data-style={style} data-kit={kit} data-look={look}
       style={{ ['--stage-bg' as string]: `rgb(${stageBackground(look).map((x) => Math.round(x * 255)).join(' ')})` }}
       aria-label="Drum kit: pieces glow as their notes approach and light up when played">
+      <div className="kit-toolbar" title="Changes only how the kit looks; the hits, sounds and playback stay the same">
+        <div className="chordview kit-type" role="radiogroup" aria-label="Kit">
+          <span className="chordview-label" aria-hidden="true">Kit</span>
+          {KIT_TYPES.map((type, index) => (
+            <button key={type} type="button" role="radio" aria-checked={kit === type} tabIndex={kit === type ? 0 : -1}
+              className="chordview-option" data-kit-type={type} onClick={() => onStyle(`${type}:${look}`)}
+              onKeyDown={(event) => {
+                const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+                if (!step) return
+                event.preventDefault()
+                event.stopPropagation()
+                const next = KIT_TYPES[(index + step + KIT_TYPES.length) % KIT_TYPES.length]
+                onStyle(`${next}:${look}`)
+                ;(event.currentTarget.parentElement?.querySelector(`[data-kit-type="${next}"]`) as HTMLElement | null)?.focus()
+              }}>
+              {KIT_LABEL[type]}
+            </button>
+          ))}
+        </div>
+        <label className="kit-look">
+          <span>Look</span>
+          <select value={look} onChange={(event) => onStyle(`${kit}:${event.target.value as Look}`)}>
+            {LOOKS.map((option) => <option key={option} value={option}>{LOOK_LABEL[option]}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="practice-stage">
-        <canvas ref={canvas} className="practice-canvas" aria-hidden="true" hidden={!!failure} />
+        <canvas ref={attachCanvas} className="practice-canvas" aria-hidden="true" hidden={!!failure} />
         {!failure && labels.map(({ piece, text, x, y }) => (
           <span key={piece} className="kit-label" style={{ left: x, top: y }} aria-hidden="true">{text}</span>
         ))}
         {failure && <p className="practice-failure" role="status">{failure}</p>}
         {notice && !failure && <p className="practice-note kit-notice" role="status">{notice}</p>}
-      </div>
-      <div className="kit-toolbar">
-        <label className="kit-style">
-          <span>Kit</span>
-          <select value={style} onChange={(event) => onStyle(event.target.value as KitStyle)}
-            title="Changes only how the kit looks; the hits, sounds and playback stay the same">
-            {KIT_TYPES.map((type) => (
-              <optgroup key={type} label={KIT_LABEL[type]}>
-                {LOOKS.map((option) => <option key={option} value={`${type}:${option}`}>{LOOK_LABEL[option]}</option>)}
-              </optgroup>
-            ))}
-          </select>
-        </label>
       </div>
       <p className="practice-legend kit-legend">
         {sticking && <>

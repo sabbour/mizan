@@ -67,7 +67,19 @@ function markDrums(osmd: OpenSheetMusicDisplay, song: Song) {
         for (const lyric of entry.LyricsEntries ?? []) {
           const node = lyric.GraphicalLabel?.SVGNode as SVGElement | undefined
           const text = node?.textContent?.trim()
-          if (node && (text === 'L' || text === 'R')) node.classList.add(text === 'L' ? 'score-hand-left' : 'score-hand-right')
+          if (node && (text === 'L' || text === 'R')) {
+            node.classList.add(text === 'L' ? 'score-hand-left' : 'score-hand-right')
+            // A quarter smaller than OSMD's lyric text, kept centred under its note.
+            for (const label of node instanceof SVGTextElement ? [node] : [...node.querySelectorAll('text')]) {
+              const size = parseFloat(label.getAttribute('font-size') ?? '')
+              if (!size || label.dataset.handScaled) continue
+              const before = label.getBBox()
+              label.setAttribute('font-size', String(size * 0.75))
+              const after = label.getBBox()
+              label.setAttribute('x', String(parseFloat(label.getAttribute('x') ?? '0') + (before.x + before.width / 2) - (after.x + after.width / 2)))
+              label.dataset.handScaled = '1'
+            }
+          }
         }
       }
 }

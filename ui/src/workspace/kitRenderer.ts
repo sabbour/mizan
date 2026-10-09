@@ -31,7 +31,7 @@ const LOOK_INDEX: Record<Look, number> = { Realistic: 0, ClayStudyModel: 1, Neon
 const STAGE: Record<Look, { bg: Vec3; floor: Vec3; shadow: number; ink?: Vec3; inkWidth?: number; inkAll?: boolean }> = {
   Realistic: { bg: [1, 1, 1], floor: [0.91, 0.91, 0.915], shadow: 0.075 },
   ClayStudyModel: { bg: [1, 0.988, 0.962], floor: [0.95, 0.92, 0.85], shadow: 0.1, ink: [0.36, 0.27, 0.21], inkWidth: 0.0016 },
-  NeonRhythm: { bg: [0.035, 0.035, 0.05], floor: [0.06, 0.06, 0.08], shadow: 0.12 },
+  NeonRhythm: { bg: [0.25, 0.28, 0.34], floor: [0.3, 0.33, 0.4], shadow: 0.16 },
   TechnicalBlueprint: { bg: [0.93, 0.95, 0.98], floor: [0.88, 0.91, 0.96], shadow: 0.03, ink: [0.1, 0.2, 0.42], inkWidth: 0.0012, inkAll: true },
 }
 export const stageBackground = (look: Look) => STAGE[look].bg
@@ -177,8 +177,9 @@ const rotX = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new
 const rotZ = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }
 const HAT_OFFSET: Record<HatState, string> = { closed: 'closed', pedal: 'pedalClosed', 'half-open': 'partiallyOpen', open: 'fullyOpen' }
 
-/** The local motion of a part for its piece's feedback: press, wobble, hat travel or swing. */
-export function motionMatrix(item: Pick<Item, 'motion' | 'angle' | 'target'>, fb: Feedback | undefined, hatOffset: number): Float32Array {
+/** The local motion of a part for its piece's feedback: press, wobble, hat travel or swing. `hatOpen` (0 closed, 1 open)
+ *  scales the top hi-hat's wobble: a closed hat is clamped against the bottom cymbal and does not rock. */
+export function motionMatrix(item: Pick<Item, 'motion' | 'angle' | 'target'>, fb: Feedback | undefined, hatOffset: number, hatOpen = 1): Float32Array {
   const since = fb?.since ?? 99
   const strength = fb ? 0.4 + 0.6 * fb.velocity : 0
   const decay = Math.exp(-since * 6)
@@ -188,7 +189,7 @@ export function motionMatrix(item: Pick<Item, 'motion' | 'angle' | 'target'>, fb
       const a = 0.07 * strength * decay
       return mul(rotX(a * Math.sin(since * 26)), rotZ(a * 0.6 * Math.sin(since * 26 + 1.3)))
     }
-    case 'hat': return mul(translateY(hatOffset), rotX(0.025 * strength * decay * Math.sin(since * 30)))
+    case 'hat': return hatOpen > 0 ? mul(translateY(hatOffset), rotX(0.025 * hatOpen * strength * decay * Math.sin(since * 30))) : translateY(hatOffset)
     case 'pedal': return rotX(-(item.angle ?? 0.15) * Math.exp(-since * 14) * (fb ? 1 : 0))
     case 'beater': {
       // Pulled back as the note approaches, through the head at the hit, then settling.
@@ -332,7 +333,9 @@ export class KitRenderer {
     if (!prepared) return
     const look = this.look
     const stage = STAGE[look]
-    const hatOffset = prepared.hatStates[HAT_OFFSET[state.hat]] ?? 0
+    // The pedal chick never presses the top cymbal through the bottom one: it rests at the closed contact at most.
+    const hatOffset = state.hat === 'pedal' ? Math.max(prepared.hatStates.pedalClosed ?? 0, prepared.hatStates.closed ?? 0) : prepared.hatStates[HAT_OFFSET[state.hat]] ?? 0
+    const hatOpen = state.hat === 'open' ? 1 : state.hat === 'half-open' ? 0.5 : 0
     gl.viewport(0, 0, width, height)
     gl.clearColor(stage.bg[0], stage.bg[1], stage.bg[2], 1)
     gl.clearStencil(0)
@@ -346,7 +349,7 @@ export class KitRenderer {
     for (const name of ['flatten', 'floorPass', 'ink', 'halo', 'grow']) gl.uniform1f(this.at[name], 0)
     gl.uniform1f(this.at.alpha, 1)
     this.feedbackUniforms(undefined, false)
-    const model = (item: Uploaded) => item.motion ? mul(item.frame, motionMatrix(item, item.target ? state.feedback.get(item.target) : undefined, hatOffset)) : item.frame
+    const model = (item: Uploaded) => item.motion ? mul(item.frame, motionMatrix(item, item.target ? state.feedback.get(item.target) : undefined, hatOffset, hatOpen)) : item.frame
 
     // Floor, then soft planar shadows (each light direction shades a floor pixel once).
     gl.depthMask(false)
@@ -431,8 +434,10 @@ export class KitRenderer {
       gl.blendFunc(gl.ONE, gl.ONE)
       gl.depthMask(false)
       gl.uniform1f(this.at.halo, look === 'NeonRhythm' ? 1.4 : 0.7)
-      gl.uniform1f(this.at.grow, look === 'NeonRhythm' ? 0.012 : 0.007)
       for (const item of lit) {
+        // Cymbals are thin: a wide hull would read as a thick extra disc under them, so they get a thin rim.
+        const thin = item.motion === 'cymbal' || item.motion === 'hat'
+        gl.uniform1f(this.at.grow, thin ? (look === 'NeonRhythm' ? 0.0025 : 0.0012) : look === 'NeonRhythm' ? 0.012 : 0.007)
         this.bind(item)
         gl.uniformMatrix4fv(this.at.m, false, model(item))
         this.feedbackUniforms(state.feedback.get(item.target!), true)

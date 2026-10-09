@@ -68,6 +68,8 @@ try {
   assert.ok(motionMatrix({ motion: 'pedal', angle: 0.18 }, fb(0), 0)[6] < 0, 'the pedal presses at the hit')
   assert.ok(motionMatrix({ motion: 'beater' }, fb(99, 0.9), 0)[6] > 0, 'the beater draws back before a note')
   assert.ok(Math.abs(motionMatrix({ motion: 'hat' }, undefined, -0.013)[13] + 0.013) < 1e-6, 'the hi-hat top rides to its state')
+  assert.ok(ident(motionMatrix({ motion: 'hat' }, fb(0.05), 0, 0).map((x, i) => i === 13 ? 0 : x)), 'a closed hi-hat does not rock open when struck')
+  assert.ok(!ident(motionMatrix({ motion: 'hat' }, fb(0.05), 0, 1)), 'an open hi-hat rocks when struck')
 
   // ---------- Each kit in every look ----------
   const dir = process.argv.includes('--assets') ? process.argv[process.argv.indexOf('--assets') + 1] : join(process.cwd(), 'public', 'models')

@@ -1706,13 +1706,26 @@ async function courseChecks(width, phase) {
   check(bar() === 3, `Switching the practice view keeps the position (${where()})`)
   // Kit and look are one compact menu: the electronic kit in its realistic look by default; changing it is a view change only.
   await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'electronic:Realistic', 'The kit starts as the realistic electronic kit')
-  const look = document.querySelector('.kit-style select')
-  check(look && look.querySelectorAll('optgroup').length === 2 && look.options.length === 8 &&
-    document.querySelector('.kit-style').getBoundingClientRect().height < 40, 'Kit and look are one compact menu: two kits, four looks each')
+  const kitSwitch = [...document.querySelectorAll('.kit-type [role="radio"]')]
+  const look = document.querySelector('.kit-look select')
+  const toolbar = document.querySelector('.kit-toolbar').getBoundingClientRect()
+  check(kitSwitch.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Electronic:true|Acoustic:false' &&
+    document.querySelector('.kit-type').getAttribute('aria-label') === 'Kit' && look?.labels[0]?.textContent.startsWith('Look') &&
+    [...look.options].map((option) => option.textContent).join('|') === 'Realistic|Hand-painted clay|Neon rhythm|Technical blueprint',
+    'The kit is a two-way switch and the look a labelled menu of four looks')
+  check(toolbar.height < 44 && toolbar.bottom <= document.querySelector('.practice-kit .practice-stage').getBoundingClientRect().top + 1 &&
+    toolbar.right <= document.querySelector('.practice-kit').getBoundingClientRect().right, 'The kit controls sit compactly above the kit, not over it')
+  const chooseStyle = async (style) => {
+    const [kit, lookName] = style.split(':')
+    document.querySelector(`.kit-type [data-kit-type="${kit}"]`).click()
+    await wait(() => document.querySelector('.practice-kit')?.dataset.kit === kit, `The ${kit} kit is chosen`)
+    const menu = document.querySelector('.kit-look select')
+    menu.value = lookName
+    menu.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(() => document.querySelector('.practice-kit')?.dataset.style === style && menu.value === lookName, `The ${style} kit is shown`)
+  }
   for (const style of ['electronic:TechnicalBlueprint', 'acoustic:NeonRhythm', 'acoustic:ClayStudyModel']) {
-    look.value = style
-    look.dispatchEvent(new Event('change', { bubbles: true }))
-    await wait(() => document.querySelector('.practice-kit')?.dataset.style === style && look.value === style, `The ${style} kit is shown`)
+    await chooseStyle(style)
     check(bar() === 3 && playButton().getAttribute('aria-label') === 'Play', `Changing the kit style does not move or start playback (${where()})`)
     check(JSON.parse(localStorage.getItem('mizan:practice')).kitStyle === style, 'The kit style is remembered')
   }
@@ -1725,8 +1738,30 @@ async function courseChecks(width, phase) {
   // While playing: changing lesson stops the old one and starts the new one from the top, not playing.
   toggle('Count-in').click()
   await wait(() => pressed('Count-in') === 'false', 'Count-in turns off')
+  // While playing, every drawn frame shows the kit (the realistic electronic kit once vanished between shadow passes).
+  const frames = []
+  window.__mizanKitFrame = (canvas) => {
+    // One read of the finished frame, after every draw pass.
+    const gl = canvas.getContext('webgl')
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, all = new Uint8Array(w * h * 4)
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, all)
+    let dark = 0
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) {
+      const i = (Math.floor((y + 0.5) * h / 48) * w + Math.floor((x + 0.5) * w / 48)) * 4
+      if (all[i] + all[i + 1] + all[i + 2] < 300) dark++
+    }
+    frames.push({ dark, playing: playButton().getAttribute('aria-label') !== 'Play' })
+  }
+  await chooseStyle('electronic:Realistic')
+  await wait(() => frames.some((f) => f.dark > 20), 'The realistic electronic kit is drawn')
+  frames.length = 0
   playButton().click()
   await wait(() => bar() >= 2, 'Playback advances')
+  await sleep(3000)
+  const played = frames.filter((f) => f.playing)
+  window.__mizanKitFrame = undefined
+  check(played.length > 30 && played.every((f) => f.dark > 20), `Every frame drawn while playing shows the kit (${played.filter((f) => f.dark > 20).length}/${played.length})`)
+  await chooseStyle('acoustic:ClayStudyModel')
   check(!playButton().dataset.counting, 'No count-in when it is off')
   document.querySelector('.lesson-nav button:first-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 23: Groove, fill, crash', 'Previous lesson opens')

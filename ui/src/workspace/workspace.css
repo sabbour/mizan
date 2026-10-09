@@ -117,19 +117,39 @@
 }
 .kit-pill[data-lit] { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
 .practice-kit { position: relative; }
-/* The kit look is a small control in the stage's corner, out of the way of the kit and its legend. */
-.kit-toolbar { position: absolute; top: 6px; right: 8px; z-index: 1; }
-.kit-style { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
-.kit-style select {
-  padding: 3px 6px;
+/* The pane header: the kit as a segmented switch (the app's view-switch pattern) and its look as a labelled menu. */
+.kit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto 6px;
+}
+.ws-split > .practice-kit > .kit-toolbar { margin: 0; }
+.kit-type.chordview { padding: 2px; border-radius: 8px; }
+.kit-type .chordview-label { padding: 0 6px; font-size: 12px; }
+.kit-type .chordview-option { height: 28px; padding: 0 11px; font-size: 12.5px; }
+.kit-type .chordview-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kit-look { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 12px; font-weight: 550; }
+.kit-look select {
+  height: 32px;
+  padding: 0 30px 0 11px;
   border: 1px solid var(--line-2);
-  border-radius: 6px;
-  background: rgb(255 255 255 / 0.9);
+  border-radius: 8px;
+  background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%23555' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color 140ms var(--ease);
 }
-.kit-style select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kit-look select:hover { border-color: var(--ink-3); }
+.kit-look select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kit-hand { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
 .kit-hand b { font-weight: 800; }
 .kit-hand[data-hand='left'] b { color: var(--hand-left); }
