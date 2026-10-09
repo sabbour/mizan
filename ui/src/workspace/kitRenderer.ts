@@ -357,9 +357,10 @@ export class KitRenderer {
     gl.uniform1f(this.at.flatten, 1)
     gl.uniform1f(this.at.shadowAlpha, stage.shadow)
     SUNS.forEach((sun, index) => {
-      if (index) gl.clear(gl.STENCIL_BUFFER_BIT)
-      gl.stencilFunc(gl.EQUAL, 0, 0xff)
-      gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR)
+      // Each light direction marks the floor pixels it shades with its own stencil value, so no pixel is darkened
+      // twice by one light, without clearing the stencil between lights.
+      gl.stencilFunc(gl.NOTEQUAL, index + 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
       gl.uniform3fv(this.at.sun, sun)
       for (const item of this.items) { this.bind(item); gl.uniformMatrix4fv(this.at.m, false, model(item)); this.elements(item.count) }
     })
