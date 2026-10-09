@@ -91,12 +91,11 @@ export function buildElectronic(kit, q, rootExtras) {
     else kit.instance(name, M.t(...at), clamps, firstClamp)
   }
   const arms = kit.part('Rack_MountingArms', M.identity(), rack)
-  /** An L-shaped arm from a clamp on a rack tube to a pad's bracket, with a ball joint at the bracket. */
+  /** A straight arm from a clamp on a rack tube to a pad's bracket, with a ball joint at the bracket. */
   const arm = (name, from, to) => {
     const world = M.t(...from)
-    const elbow = [to[0], from[1] + 0.02, (from[2] + to[2]) / 2]
     kit.part(name, world, arms, localize(world, [P(merge(
-      sweep(roundPath([from, [from[0], from[1] + 0.02, from[2]], elbow, [to[0], to[1] - 0.03, to[2]]], 0.025, q === 2 ? 2 : 5), 0.0115, S(16, 8)),
+      rod(from, to, 0.0115, S(16, 8)),
       transform(lathe([[0, -0.018], [0.014, -0.014], [0.018, 0], [0.014, 0.014], [0, 0.018]], S(16, 8)), M.t(to[0], to[1] - 0.02, to[2])),
     ), 'powder', 'hardware')]), { pivot: 'clamp' })
   }
@@ -154,7 +153,7 @@ export function buildElectronic(kit, q, rootExtras) {
     const mountWorld = M.t(...postTop)
     kit.part(`${name}_Mount`, mountWorld, node, localize(mountWorld, [
       P(merge(
-        sweep([postTop, [postTop[0], postTop[1] + 0.06, postTop[2]], [below[0], below[1] - 0.05, below[2]], below], 0.0095, S(16, 8)),
+        rod(postTop, below, 0.0095, S(16, 8)),
         rod(below, v.add(c.center, v.scale(normal, 0.03)), 0.0045, S(10, 5)),
         transform(lathe([[0, -0.008], [0.016, -0.008], [0.016, 0.006], [0, 0.012]], S(16, 8)), M.mul(world, M.t(0, 0.02, 0))),
       ), 'powder', 'hardware'),

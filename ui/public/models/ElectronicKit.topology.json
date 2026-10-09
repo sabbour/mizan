@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "asset": "ui/public/models/ElectronicKit.glb",
-  "bytes": 26079848,
-  "sha256": "91a9d932966918f2253cc076314fb76e30202abef29e4bc5934361148a534172",
+  "bytes": 26033172,
+  "sha256": "e023d6c91afc2378784e267c7475b1384600b8787fa630cd4bb254f73ddec04b",
   "measured": {
     "boundsM": {
       "min": [
@@ -22,9 +22,9 @@
       }
     },
     "lodTriangles": [
-      98544,
-      32380,
-      14258
+      97648,
+      31932,
+      14194
     ],
     "textureCount": 32,
     "imageCount": 32,
@@ -148,8 +148,42 @@
   "officialValidator": {
     "mode": "full",
     "electronicViolations": 0,
-    "printedOpenBoundaryEdges": 0,
-    "note": "The unchanged checkMeshes returns from inside its TANGENT branch after the first tangent-bearing primitive, so its printed topology totals do not cover all mesh primitives."
+    "traversedMeshes": 126,
+    "traversedPrimitives": 147,
+    "analyzedPrimitives": 147,
+    "skippedPrimitives": 0,
+    "printedOpenBoundaryEdges": 2358,
+    "normalWindingViolations": 0,
+    "note": "Validated with the corrected all-primitive traversal harness; all 147 Electronic primitives were analyzed."
+  },
+  "electronicSupportWindingCorrection": {
+    "correctedHarnessCommit": "fdc50ad0b8b067e191db3d401d77498db48224d2",
+    "affectedMeshes": [
+      "Rack_Arm_Snare",
+      "Rack_Arm_TomHigh",
+      "Rack_Arm_TomMid",
+      "Rack_Arm_FloorTom",
+      "Ride_Mount"
+    ],
+    "originalNormalWindingViolationsByLod": {
+      "LOD0": [38, 142, 142, 39, 8],
+      "LOD1": [16, 74, 74, 17, 5],
+      "LOD2": [8, 31, 31, 8, 5]
+    },
+    "finalNormalWindingViolations": 0,
+    "representativeOriginalWitness": {
+      "mesh": "Rack_Arm_TomHigh",
+      "primitive": 0,
+      "lod": 0,
+      "triangle": 32,
+      "indices": [17, 18, 34],
+      "faceNormalCross": [8.530062545510086e-7, 5.913628034525711e-7, 4.296211160030535e-6],
+      "averageVertexNormal": [-0.11812350600575883, -0.05035719989488522, -0.970954696337382],
+      "faceNormalDotAverageVertexNormal": -4.301965866624987e-6,
+      "reproducedByDirectSweepHelperCall": true
+    },
+    "rootCause": "The electronic producer supplied short or sharply kinked centerlines to sweep(); its tube offsets folded at those bends. Direct calls to the existing sweep helper reproduced all 15 findings and triangle witnesses. The same endpoints swept as straight rod() supports produced zero opposing-winding triangles at every LOD.",
+    "correction": "Use rod() between the existing mounting endpoints for the four rack arms and Ride boom. Node names, pivots, materials, and endpoints remain unchanged."
   },
   "resolvedReported40": {
     "originalPrimitive": {
