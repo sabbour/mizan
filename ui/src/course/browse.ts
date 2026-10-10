@@ -8,11 +8,11 @@ export type DrumShelf = 'course' | 'inspired' | 'genre'
 export type PianoShelf = 'genre' | 'inspired' | 'progression' | 'scale'
 export type CourseBrowse = {
   instrument: CourseInstrument; shelf: DrumShelf; genre: string
-  pianoShelf: PianoShelf; pianoGenre: string; pianoKey: { pitch: number; mode: KeyMode }
+  pianoShelf: PianoShelf; pianoGenre: string; pianoKey: { pitch: number; mode: KeyMode }; pianoScale: string
 }
 
 export const DEFAULT_BROWSE: CourseBrowse = {
-  instrument: 'drums', shelf: 'course', genre: 'Rock', pianoShelf: 'genre', pianoGenre: 'Rock', pianoKey: { pitch: 0, mode: 'major' },
+  instrument: 'drums', shelf: 'course', genre: 'Rock', pianoShelf: 'genre', pianoGenre: 'Rock', pianoKey: { pitch: 0, mode: 'major' }, pianoScale: 'major',
 }
 
 /** The browse position that shows a lesson, so Back returns to the list (and key) it was opened from. */
@@ -21,7 +21,7 @@ export function browseTo(id: string, current: CourseBrowse): CourseBrowse {
   if (piano) {
     const key = lessonKey(piano)
     return { ...current, instrument: 'piano', pianoShelf: piano.kind, ...piano.kind === 'genre' ? { pianoGenre: piano.style } : {},
-      ...key ? { pianoKey: { pitch: key.pitch, mode: key.mode } } : {} }
+      ...key ? { pianoKey: { pitch: key.pitch, mode: key.mode } } : {}, ...key?.family ? { pianoScale: key.family } : {} }
   }
   const lesson = lessonById(id)
   if (!lesson) return current

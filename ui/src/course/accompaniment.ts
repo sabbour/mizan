@@ -280,8 +280,6 @@ export const backingKey = (style: string) => STYLES[style].key
 
 /** The style's chords for an eight- or sixteen-bar lesson, one entry per bar. */
 export function progression(style: string, bars: number): string[] {
-  // ponytail: interim for drum genre lessons still at two or four bars; removed when they are lengthened to 8/16.
-  if (bars === 2 || bars === 4) return STYLES[style].progression.eight.slice(0, bars)
   if (bars !== 8 && bars !== 16) throw new Error(`Genre lessons are eight or sixteen bars, not ${bars}`)
   return [...STYLES[style].progression[bars === 8 ? 'eight' : 'sixteen']]
 }

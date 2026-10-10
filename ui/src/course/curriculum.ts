@@ -1,6 +1,8 @@
 import type { BarMeter, DrumHit, DrumLane, Song } from '../workspace/song'
 import { backingKey, GENRE_STYLE, genreBacking, type Backing } from './accompaniment'
-import { GENRE_LESSONS } from './genres'
+import { expandGenreLesson, GENRE_LESSONS } from './genres'
+import { BASIC_INSERTIONS } from './drumBasics'
+import { INSPIRED_LESSONS } from './drumInspired'
 
 /**
  * A built-in, offline drum course. Each lesson is authored as a few bars on a step grid and opens as an ordinary
@@ -68,7 +70,7 @@ export const COLLECTIONS: Record<Collection, { title: string; intro: string }> =
   inspired: { title: 'Inspired by great drummers',
     intro: 'Original exercises on a hallmark of a famous drummer or band. They teach a style; they are not transcriptions of any recording.' },
   genre: { title: 'Grooves by genre',
-    intro: 'Five lessons per style: the basic groove, two variations, a fill and a four-bar phrase. Each plays with an original bass line and chords in the style; mute or turn them down in the track list.' },
+    intro: 'Five lessons per style: an 8-bar basic groove, two 8-bar variations, an 8-bar fill study and a 16-bar performance phrase. Each plays with original bass and chords; mute or turn them down in the track list.' },
 }
 
 export const LEVELS = ['Pulse and rests', 'Subdivision', 'Rudiments', 'Grooves', 'Limb independence', 'Fills', 'Meter', 'Advanced']
@@ -650,11 +652,17 @@ const BASE_LESSONS: Lesson[] = [
   },
 ]
 
-/** The course, then each collection; every genre's first lesson is followed by the rest of that genre's lessons. */
-export const LESSONS: Lesson[] = BASE_LESSONS.flatMap((lesson) => lesson.collection === 'genre' ? [lesson, ...GENRE_LESSONS[lesson.id]] : [lesson])
+/** The course, then each collection; additions follow their prerequisites, and genre studies follow their basics. */
+export const LESSONS: Lesson[] = BASE_LESSONS.flatMap((lesson) => {
+  if (lesson.collection === 'genre')
+    return [expandGenreLesson(lesson, 0), ...GENRE_LESSONS[lesson.id].map((item, index) => expandGenreLesson(item, index + 1))]
+  const additions = BASIC_INSERTIONS[lesson.id] ?? []
+  const inspired = lesson.id === 'inspired-odd-meter' ? INSPIRED_LESSONS : []
+  return [lesson, ...additions, ...inspired]
+})
 
 /** What each of a genre's five lessons teaches, in order. */
-export const GENRE_STAGES = ['Basic groove', 'Variation', 'Variation', 'Fill', 'Four-bar phrase']
+export const GENRE_STAGES = ['Basic groove', 'Variation', 'Variation', 'Fill', 'Sixteen-bar phrase']
 
 /** A genre's lessons, in order. */
 export const genreLessons = (style: string) => LESSONS.filter((lesson) => lesson.collection === 'genre' && lesson.style === style)

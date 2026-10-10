@@ -53,6 +53,8 @@ export type PianoLesson = {
   key?: { tonic: string; mode: 'major' | 'minor' }
   /** Roman numerals for a progression, one per bar. */
   numerals?: string[]
+  /** For a scale: which scale (major, dorian, blues, ...). */
+  family?: string
   /** For an inspired study: the artist and recording it takes its style from. */
   influence?: string
 }

@@ -4,7 +4,7 @@ import type { CourseBrowse } from './browse'
 import { COLLECTIONS, genres, LESSONS, LEVELS, lessonBacking, lessonList, lessonStage, type Lesson, type LessonBar } from './curriculum'
 import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonList, pianoLessonSong, pianoStep, type PianoLesson } from './piano'
 import { PIANO_INSPIRED } from './pianoInspired'
-import { KEY_NAMES, PROGRESSION_COUNT, SCALE_COUNT, tonalLessons, type KeyMode } from './pianoTonal'
+import { KEY_NAMES, PROGRESSION_COUNT, progressionLessons, SCALE_COUNT, SCALE_FAMILIES, scaleLessons, scaleTonic, type KeyMode } from './pianoTonal'
 import { tempoLabel } from './state'
 
 /** Consecutive identical bars share one count and sticking line. */
@@ -124,7 +124,25 @@ function PianoLessonButton({ lesson, onLesson }: { lesson: PianoLesson; onLesson
   )
 }
 
-/** The key for progressions and scales: a tonic from a menu and major or (natural) minor. Choosing a key shows its lessons. */
+/** A scale: its tonic and which scale, each from a menu; the tonic is spelled as that scale is usually written. */
+function ScalePicker({ pitch, family, onChange }: { pitch: number; family: string; onChange: (pitch: number, family: string) => void }) {
+  return (
+    <div className="course-key">
+      <label className="kit-look"><span>Tonic</span>
+        <select value={pitch} onChange={(event) => onChange(Number(event.target.value), family)}>
+          {KEY_NAMES.major.map((_, index) => <option key={index} value={index}>{scaleTonic(index, family)}</option>)}
+        </select>
+      </label>
+      <label className="kit-look"><span>Scale</span>
+        <select value={family} onChange={(event) => onChange(pitch, event.target.value)}>
+          {SCALE_FAMILIES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+/** The key for progressions: a tonic from a menu and major or (natural) minor. Choosing a key shows its lessons. */
 function KeyPicker({ value, onChange }: { value: { pitch: number; mode: KeyMode }; onChange: (key: { pitch: number; mode: KeyMode }) => void }) {
   return (
     <div className="course-key">
@@ -207,7 +225,8 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
   const pianoGenre = pianoGenreList.find(({ style }) => style === browse.pianoGenre) ?? pianoGenreList[0]
   const backing = lessonBacking(drumGenre.lessons[0])!
   const pianoBass = pianoLessonSong(pianoGenre.lessons[0]).tracks.find((track) => track.id === 'bass')!
-  const tonal = browse.pianoShelf === 'progression' || browse.pianoShelf === 'scale' ? tonalLessons(browse.pianoShelf, browse.pianoKey.pitch, browse.pianoKey.mode) : []
+  const tonal = browse.pianoShelf === 'progression' ? progressionLessons(browse.pianoKey.pitch, browse.pianoKey.mode)
+    : browse.pianoShelf === 'scale' ? scaleLessons(browse.pianoKey.pitch, browse.pianoScale) : []
   return (
     <div className="course-browse">
       <div className="course-switches">
@@ -258,9 +277,11 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
             <h2 id="course-piano-tonal" className="lib-h2">{browse.pianoShelf === 'progression' ? 'Chord progressions' : 'Scales'}
               <span className="dim num"> {tonal.length} in {tonal[0].style}</span></h2>
             <p className="course-intro">{browse.pianoShelf === 'progression'
-              ? 'Common progressions in any key, with roman numerals over the chord names: held chords, then four to the bar, voiced so each chord moves to the nearest notes of the next. Minor keys use the natural minor unless the lesson says harmonic minor.'
-              : 'Each scale two octaves up and down: right hand, left hand, then hands together, with the standard fingering for that key. Minor scales are the natural minor.'}</p>
-            <KeyPicker value={browse.pianoKey} onChange={(pianoKey) => set({ pianoKey })} />
+              ? 'Common progressions in any key, named with songs that use them, roman numerals over the chord names. One chord a bar, then two a bar with a walk back to the top. Minor keys use the natural minor; a raised seventh (harmonic minor) or the blues\u2019 flat seventh is named where it is used.'
+              : 'Fifteen scales in every key: the seven modes, harmonic and melodic minor, pentatonics, the blues scale, chromatic, whole tone and diminished. Each goes up and down with the right hand, the left, then both, every note spelled for its scale and fingered for it.'}</p>
+            {browse.pianoShelf === 'progression'
+              ? <KeyPicker value={browse.pianoKey} onChange={(pianoKey) => set({ pianoKey })} />
+              : <ScalePicker pitch={browse.pianoKey.pitch} family={browse.pianoScale} onChange={(pitch, pianoScale) => set({ pianoKey: { ...browse.pianoKey, pitch }, pianoScale })} />}
             <ol className="course-steps">{tonal.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
           </section>
         )

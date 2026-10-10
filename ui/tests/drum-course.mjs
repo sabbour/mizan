@@ -7,7 +7,7 @@ const vite = await createServer({ server: { middlewareMode: true }, appType: 'cu
 try {
   const { LESSONS, LEVELS, COLLECTIONS, FOOT_VOICES, VELOCITY, GENRE_STAGES, genres, lessonBacking, lessonHits, lessonList, lessonMeter, lessonNote, lessonSong, lessonStage } =
     await vite.ssrLoadModule('/src/course/curriculum.ts')
-  const { parseChord } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
+  const { parseChord, progression, GENRE_STYLE } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
   const { freshPosition, tempoLabel } = await vite.ssrLoadModule('/src/course/state.ts')
   const { measures, songBeats } = await vite.ssrLoadModule('/src/workspace/meter.ts')
   const { drumXml, instrumentXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
@@ -20,7 +20,7 @@ try {
   const genre = lessonList({ collection: 'genre' })
   assert.deepEqual(Object.keys(COLLECTIONS), ['inspired', 'genre'])
   assert.equal(course.length + inspired.length + genre.length, LESSONS.length, 'every lesson is in the course or one collection')
-  assert.deepEqual([course.length, inspired.length, genre.length, LESSONS.length], [37, 8, 55, 100], 'exact lesson counts')
+  assert.deepEqual([course.length, inspired.length, genre.length, LESSONS.length], [49, 26, 55, 130], 'exact lesson counts')
   assert.equal(new Set(LESSONS.map((lesson) => lesson.id)).size, LESSONS.length, 'lesson ids are unique')
   assert.ok(course.every((lesson, i) => i === 0 || lesson.level >= course[i - 1].level), 'the course runs beginner to advanced')
   for (let level = 1; level <= LEVELS.length; level++)
@@ -30,6 +30,8 @@ try {
   for (const id of ['quarter-pulse', 'quarter-rests', 'eighths', 'sixteenths', 'triplets', 'double-strokes', 'paradiddle', 'hat-and-kick',
     'rock-beat', 'paradiddle-groove', 'kick-syncopation', 'ride-and-hat-foot', 'snare-fill', 'tom-fill', 'accents-and-ghosts', 'waltz', 'six-eight'])
     assert.ok(course.some((lesson) => lesson.id === id), `${id} is still in the course`)
+  const existingInspired = new Set(['inspired-reggae-rock-hats', 'inspired-heavy-triplet-fill', 'inspired-sparse-fill',
+    'inspired-tom-orchestration', 'inspired-half-time-shuffle', 'inspired-funk-syncopation', 'inspired-rudimental-groove', 'inspired-odd-meter'])
   for (const lesson of inspired) {
     assert.match(lesson.id, /^inspired-/)
     assert.match(lesson.style, /^Inspired by [A-Z]/, `${lesson.id} names the drummer it is inspired by`)
@@ -37,11 +39,63 @@ try {
     assert.match(lessonNote(lesson), /^Inspired by great drummers · Inspired by .* · Level \d · \d+ of \d+$/)
   }
   assert.ok(new Set(inspired.map((lesson) => lesson.style)).size === inspired.length, 'each inspired lesson has its own drummer')
+  const newInspired = inspired.filter((lesson) => !existingInspired.has(lesson.id))
+  assert.equal(newInspired.length, 18, 'eighteen inspired studies were added')
+  for (const lesson of newInspired) {
+    assert.match(lesson.style, / — .+$/, `${lesson.id} names its artist and track`)
+    assert.match(lesson.goal, /Original exercise, not a transcription/, `${lesson.id} is clearly an original exercise`)
+    assert.ok(lesson.steps.length >= 3 && /bar 4|bars 3–4/i.test(lesson.steps.join(' ')), `${lesson.id} teaches a developed payoff phrase`)
+  }
+  const track = (lesson) => lesson.style.split(' — ').at(-1)
+  for (const [artist, tracks] of [
+    ['Pink Floyd', ['Money', 'Time', 'Another Brick in the Wall, Part 2']],
+    ['Dire Straits', ['Sultans of Swing', 'Money for Nothing', 'Walk of Life']],
+    ['Metallica', ['Enter Sandman', 'Master of Puppets', 'Sad But True']],
+    ['Tool', ['Schism', 'Lateralus', 'The Pot']],
+    ['Eagles', ['Hotel California', 'Take It Easy', 'Life in the Fast Lane']],
+    ['Phil Collins', ['In the Air Tonight']],
+    ['Philip Bailey & Phil Collins', ['Easy Lover']],
+    ['Genesis', ['Turn It On Again']],
+  ]) {
+    for (const title of tracks)
+      assert.ok(newInspired.some((lesson) => lesson.style.includes(artist) && track(lesson) === title), `${artist} has an original study for ${title}`)
+  }
+  assert.equal(new Set(newInspired.map(track)).size, 18, 'every new inspired study refers to a distinct track')
+  const inspiredTrack = (artist, title) => newInspired.find((lesson) => lesson.style.includes(artist) && track(lesson) === title)
+  const money = inspiredTrack('Pink Floyd', 'Money')
+  assert.deepEqual(money.meter, { numerator: 7, denominator: 4 }, 'Money has its seven-quarter phrase')
+  assert.match(money.goal, /3 \+ 2 \+ 2/)
+  const brick = inspiredTrack('Pink Floyd', 'Another Brick in the Wall, Part 2')
+  assert.ok(brick.bars.every((bar) => bar.steps === 4) && brick.bars.some((bar) => Object.values(bar.notes).some((pattern) => pattern.includes('o'))),
+    'Another Brick pairs sixteenth hats with open articulations')
+  assert.ok(brick.bars.every((bar) => bar.notes.hp), 'the open hats close with the left-foot pedal')
+  const sultans = inspiredTrack('Dire Straits', 'Sultans of Swing')
+  assert.ok(sultans.bars.every((bar) => bar.steps === 3) && sultans.bars.some((bar) => bar.notes.sn?.includes('g')),
+    'Sultans uses a light shuffle and ghost-note snare')
+  const moneyForNothing = inspiredTrack('Dire Straits', 'Money for Nothing')
+  assert.ok(moneyForNothing.bars[0].notes.f1 && moneyForNothing.bars[0].notes.hh === undefined &&
+    moneyForNothing.bars[3].notes.t2 && moneyForNothing.bars[3].notes.f1, 'Money for Nothing builds from toms to a low-tom answer')
+  const sandman = inspiredTrack('Metallica', 'Enter Sandman')
+  const master = inspiredTrack('Metallica', 'Master of Puppets')
+  const sad = inspiredTrack('Metallica', 'Sad But True')
+  assert.notDeepEqual(sandman.bars[0].notes, master.bars[0].notes)
+  assert.notDeepEqual(master.bars[0].notes, sad.bars[0].notes)
+  assert.ok(master.bars[3].notes.t1 && master.bars[3].notes.bd.length === 16, 'Master of Puppets has a fast kick and tom payoff')
+  const schism = inspiredTrack('Tool', 'Schism')
+  assert.match(schism.steps.join(' '), /not the track meter/)
+  assert.ok(schism.bars[0].notes.t1 && schism.bars[2].notes.t2, 'Schism moves the tom ostinato between groupings')
+  assert.ok(inspiredTrack('Eagles', 'Take It Easy').bars[0].notes.sn.includes('g'),
+    'Take It Easy uses snare ghost taps in its train beat')
+  assert.ok(inspiredTrack('Eagles', 'Life in the Fast Lane').bars.every((bar) => bar.steps === 4),
+    'Life in the Fast Lane drives with sixteenth hats')
+  const air = inspiredTrack('Phil Collins', 'In the Air Tonight')
+  assert.ok(air.bars[3].notes.t1 && air.bars[3].notes.t2 && air.bars[3].notes.f1.endsWith('X') &&
+    /not the recording.s famous fill/i.test(air.steps.join(' ')), 'In the Air Tonight has a newly written tom payoff')
   for (const lesson of genre) {
     assert.match(lesson.id, /^genre-/)
     assert.ok(lesson.style && lesson.feel, `${lesson.id} names its genre and feel`)
   }
-  // Five lessons per genre, each genre's original lesson first: groove, two variations, a fill, a four-bar phrase.
+  // Five lessons per genre, each genre's original lesson first: an 8-bar groove, two 8-bar variations, an 8-bar fill and a 16-bar phrase.
   const FIRST = ['genre-rock', 'genre-blues-shuffle', 'genre-reggae', 'genre-pop', 'genre-disco', 'genre-jazz-swing', 'genre-bossa-nova',
     'genre-metal', 'genre-drum-and-bass', 'genre-soul-ballad', 'genre-funk']
   const groups = genres()
@@ -51,19 +105,32 @@ try {
   for (const { style, lessons } of groups) {
     assert.equal(lessons.length, 5, `${style} has five lessons`)
     assert.deepEqual(lessons.map((lesson) => lessonStage(lesson).name), GENRE_STAGES)
-    assert.deepEqual(GENRE_STAGES, ['Basic groove', 'Variation', 'Variation', 'Fill', 'Four-bar phrase'])
+    assert.deepEqual(GENRE_STAGES, ['Basic groove', 'Variation', 'Variation', 'Fill', 'Sixteen-bar phrase'])
     assert.ok(lessons.every((lesson, i) => i === 0 || lesson.level >= lessons[i - 1].level), `${style} never gets easier`)
     assert.ok(lessons.at(-1).level > lessons[0].level || lessons[0].level === 8, `${style} ends harder than it starts`)
     assert.ok(lessons.every((lesson) => lesson.meter.numerator === lessons[0].meter.numerator), `${style} keeps its meter`)
+    assert.deepEqual(lessons.map((lesson) => lesson.bars.length), [8, 8, 8, 8, 16], `${style} has 8/8/8/8/16-bar studies`)
     const [, one, two, fill, phrase] = lessons
     for (const variation of [one, two]) {
       assert.ok(!variation.sections, `${variation.id} is a groove without a fill`)
       assert.ok(JSON.stringify(variation.bars.map((b) => b.notes)) !== JSON.stringify(lessons[0].bars.map((b) => b.notes)), `${variation.id} changes the rhythm`)
     }
-    assert.deepEqual(fill.sections, [{ name: 'Groove', bars: 1 }, { name: 'Fill', bars: 1 }], `${fill.id} is a groove bar and a fill bar`)
-    assert.deepEqual(phrase.sections, [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }], `${phrase.id} is three groove bars and a fill`)
-    assert.equal(phrase.bars.length, 4)
-    // A fill plays toms or a run of single strokes; the groove bars before it do not end the same way.
+    assert.deepEqual(fill.sections, [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 },
+      { name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }], `${fill.id} has two groove-and-fill turnarounds`)
+    assert.deepEqual(phrase.sections, [{ name: 'Groove', bars: 7 }, { name: 'Fill', bars: 1 },
+      { name: 'Groove', bars: 7 }, { name: 'Fill', bars: 1 }], `${phrase.id} is an A/B phrase with two fill turnarounds`)
+    assert.match(fill.steps.join(' '), /bars 4 and 8/)
+    assert.match(phrase.goal, /16-bar performance phrase/)
+    assert.match(phrase.steps.join(' '), /bars 8 and 16/)
+    // Every study changes its authored bars and ends with a different bar that leads back to the loop.
+    for (const lesson of lessons) {
+      const signatures = lesson.bars.map((bar) => JSON.stringify([bar.notes, bar.sticking]))
+      assert.ok(new Set(signatures).size >= (lessons.indexOf(lesson) === 0 ? 3 : 4), `${lesson.id} varies within its phrase`)
+      assert.notEqual(signatures.at(-1), signatures[0], `${lesson.id} ends differently from its opening bar`)
+      assert.notEqual(lesson.bars.at(-1).notes.bd.at(-1), '-', `${lesson.id} puts a kick pickup into the loop's downbeat`)
+      for (const period of lesson.bars.length === 8 ? [1, 2, 4] : [1, 2, 4, 8])
+        assert.ok(signatures.some((signature, index) => signature !== signatures[index % period]), `${lesson.id} is not a ${period}-bar tile`)
+    }
     for (const lesson of [fill, phrase]) {
       const last = lesson.bars.at(-1)
       assert.ok(last.sticking.split(' ').length >= 4 && JSON.stringify(last.notes) !== JSON.stringify(lesson.bars[0].notes), `${lesson.id} ends with a fill`)
@@ -87,7 +154,8 @@ try {
     assert.ok(ratio >= 0.5 && ratio < 1 && Math.abs(ratio * 20 - Math.round(ratio * 20)) < 1e-9,
       `${lesson.id} starts below its target on the 5% speed steps`)
     assert.equal(freshPosition(lesson).rate, Math.round(ratio * 20) / 20)
-    assert.ok(lesson.bars.length >= 2 && lesson.bars.length <= 4, `${lesson.id} is a short loop`)
+    if (lesson.collection === 'genre') assert.ok([8, 16].includes(lesson.bars.length), `${lesson.id} is an eight- or sixteen-bar genre study`)
+    else assert.ok(lesson.bars.length >= 2 && lesson.bars.length <= 4, `${lesson.id} is a short loop`)
     patterns.add(JSON.stringify(lesson.bars.map((bar) => [bar.notes, bar.sticking])))
     lesson.bars.forEach((bar, index) => {
       const where = `${lesson.id} bar ${index + 1}`
@@ -155,14 +223,16 @@ try {
   }
   assert.equal(patterns.size, LESSONS.length, 'every lesson plays a different pattern')
 
-  // The 45 course and inspired lessons, and the 11 original genre lessons, are exactly as before (fingerprints from 7bc6089).
+  // The original 37 core lessons and eight inspired patterns are unchanged (fingerprint from 7bc6089).
   {
     const { createHash } = await import('node:crypto')
     const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-    const kept = LESSONS.filter((item) => item.collection !== 'genre')
-    assert.equal(hash(kept.map((item) => [item, lessonSong(item)])), '4c6f3a52ddac0fe7a9e09b74a2b968311d010b85f7f02f83e56147dfea7b0999', 'course and inspired lessons and their songs are unchanged')
-    assert.equal(hash(groups.map(({ lessons }) => lessons[0])), '2eaaef81f24b1ea4f0ba74e1a6be9dcdba192532824c7ad92835aad8e3fa0423', 'the original genre lessons are unchanged')
-    for (const item of kept) {
+    const additions = /^(basics-|inspired-(pink-floyd|dire-straits|metallica|tool-|eagles-|phil-collins-|genesis-))/
+    const legacy = LESSONS.filter((item) => item.collection !== 'genre' && !additions.test(item.id))
+    assert.equal(legacy.length, 45)
+    assert.equal(hash(legacy.map((item) => [item.id, item.bars])), '18914017aa953c051e344c5829b9995e599cd28c8e9b5bd7e2161fff510a87c0',
+      'the original 37 core and eight inspired lesson patterns are byte-identical')
+    for (const item of LESSONS.filter((candidate) => candidate.collection !== 'genre')) {
       assert.equal(lessonBacking(item), null)
       assert.deepEqual(lessonSong(item).tracks.map((track) => track.id), ['drums'], `${item.id} has no backing`)
     }
@@ -185,8 +255,11 @@ try {
         `${item.id}: backing plays from the local sound bank, is audible by default and is labelled as original`)
       assert.ok(song.key && song.chords.length === 0 && song.piano.length === 0, `${item.id}: a key, and no generated chord track on top of the backing`)
       assert.equal(backing.chords.length, item.bars.length, `${item.id}: one chord per bar`)
+      assert.deepEqual(backing.chords, progression(GENRE_STYLE[item.style], item.bars.length), `${item.id}: the written progression follows its study length`)
       sounds.add(song.tracks.slice(1).map((track) => track.gmProgram).join('/'))
-      const fills = (item.sections ?? []).flatMap(({ name, bars }) => Array(bars).fill(name === 'Fill'))
+      const fills = (item.sections ?? [{ name: 'Groove', bars: item.bars.length }])
+        .flatMap(({ name, bars }) => Array(bars).fill(name === 'Fill'))
+      assert.equal(fills.length, item.bars.length, `${item.id}: every backing bar has a matching groove or fill section`)
       for (const id of ['bass', 'harmony']) {
         const notes = song.instrumentNotes[id]
         assert.ok(notes.length >= item.bars.length, `${item.id} ${id} plays`)
@@ -197,8 +270,13 @@ try {
           assert.ok(note.trackId === id && Number.isInteger(note.midi) && note.midi >= low && note.midi <= high, `${item.id} ${id} pitch ${note.midi} in range`)
           assert.ok(note.beats > 0 && onGrid(note.startBeat) && onGrid(note.beats) && note.velocity > 0 && note.velocity <= 1, `${item.id} ${id} note on the sixteenth grid`)
           assert.ok(end <= (index + (fills[index] ? 0.5 : 1)) * beatsPerBar + 1e-9, `${item.id} ${id} stays in its bar${fills[index] ? ' and stops for the fill' : ''}`)
-          if (id === 'harmony') assert.ok(parseChord(backing.chords[index]).intervals.map((i) => pc(parseChord(backing.chords[index]).root + i)).includes(pc(note.midi)),
-            `${item.id} chord tone ${note.midi} belongs to ${backing.chords[index]}`)
+          if (id === 'harmony') {
+            const symbols = backing.chords[index].split(' ')
+            const offset = note.startBeat - index * beatsPerBar
+            const chord = symbols[Math.min(symbols.length - 1, Math.floor(offset / (beatsPerBar / symbols.length)))]
+            assert.ok(parseChord(chord).intervals.map((i) => pc(parseChord(chord).root + i)).includes(pc(note.midi)),
+              `${item.id} chord tone ${note.midi} belongs to ${chord}`)
+          }
         }
         // Monophonic bass and repeated chord tones never overlap themselves, so no voice is cut off or doubled.
         const byPitch = Map.groupBy(notes, (note) => note.midi)
@@ -208,7 +286,8 @@ try {
           notes.forEach((note, i) => assert.ok(i === 0 || notes[i - 1].startBeat + notes[i - 1].beats <= note.startBeat + 1e-9, `${item.id} bass is one line`))
           for (let bar = 0; bar < item.bars.length; bar++) {
             const first = notes.find((note) => note.startBeat === bar * beatsPerBar)
-            assert.ok(first && pc(first.midi) === parseChord(backing.chords[bar]).root, `${item.id} bass starts bar ${bar + 1} on the root of ${backing.chords[bar]}`)
+            assert.ok(first && pc(first.midi) === parseChord(backing.chords[bar].split(' ')[0]).root,
+              `${item.id} bass starts bar ${bar + 1} on the root of ${backing.chords[bar]}`)
           }
         }
         const xml = instrumentXml(song, song.tracks.find((track) => track.id === id))
@@ -229,6 +308,19 @@ try {
   // Rudiment stickings.
   assert.equal(bar('double-strokes').sticking, 'R R L L R R L L R R L L R R L L')
   assert.equal(bar('paradiddle').sticking, 'R L R R L R L L R L R R L R L L')
+  const addedBasics = course.filter((item) => item.id.startsWith('basics-'))
+  assert.equal(addedBasics.length, 12, 'twelve progressive basics were added at their prerequisite levels')
+  assert.ok(addedBasics.every((item) => item.bars.length === 4), 'each new basic is a four-bar drill')
+  for (const id of ['basics-single-accent-control', 'basics-eighth-rests', 'basics-sixteenth-rests',
+    'basics-subdivision-rests', 'basics-double-accent-control', 'basics-paradiddle-dynamics',
+    'basics-three-limb-moving-kick', 'basics-four-limb-moving-hand', 'basics-pedal-quarter-independence',
+    'basics-pedal-offbeats', 'basics-pedal-kick-independence', 'basics-three-to-four-limbs'])
+    assert.ok(addedBasics.some((item) => item.id === id), `${id} exists`)
+  const pedalQuarters = lessonHits(lesson('basics-pedal-quarter-independence')).filter((hit) => hit.sourceMidi === 44)
+  const pedalOffbeats = lessonHits(lesson('basics-pedal-offbeats')).filter((hit) => hit.sourceMidi === 44)
+  assert.deepEqual(pedalQuarters.slice(0, 4).map((hit) => hit.startBeat), [0, 1, 2, 3], 'left-foot pedal plays the quarter-note pulse')
+  assert.deepEqual(pedalOffbeats.slice(0, 4).map((hit) => hit.startBeat), [0.5, 1.5, 2.5, 3.5], 'left-foot pedal plays the offbeats')
+  assert.ok([...pedalQuarters, ...pedalOffbeats].every((hit) => hit.lane === 'hihat'), 'left-foot drills use GM pedal voice 44')
   // Single-focus basics: hands alone, no kick mixed in.
   for (const id of ['sixteenths', 'triplets', 'double-strokes', 'paradiddle', 'moving-accents']) assert.deepEqual(Object.keys(bar(id).notes), ['sn'])
   // Hand mapping: alternating, doubles, the paradiddle, and both hands together (cymbal right, drum left).
@@ -249,10 +341,11 @@ try {
   const states = (id) => [...new Set(lessonHits(lesson(id)).map((hit) => kitStrike(hit).hat).filter(Boolean))].sort()
   assert.deepEqual(states('open-hi-hat'), ['closed', 'open', 'pedal'])
   assert.deepEqual(states('half-open-hi-hat'), ['closed', 'half-open', 'pedal'])
-  // Fills: groove, then fill, then the crash on the next downbeat.
+  // Fills begin with the crash and their section lengths agree with the written bars.
   for (const item of LESSONS.filter((candidate) => candidate.sections?.some((section) => section.name === 'Fill'))) {
     assert.ok(lessonHits(item).some((hit) => hit.lane === 'crash' && hit.startBeat === 0), `${item.id} lands on a crash at the loop's downbeat`)
-    assert.deepEqual(item.sections.map((section) => section.name), ['Groove', 'Fill'])
+    assert.equal(item.sections.reduce((sum, section) => sum + section.bars, 0), item.bars.length, `${item.id} sections cover every bar`)
+    if (item.collection !== 'genre') assert.deepEqual(item.sections.map((section) => section.name), ['Groove', 'Fill'])
   }
   const toms = lessonHits(lesson('tom-fill')).filter((hit) => /tom/.test(hit.lane)).map((hit) => kitStrike(hit).pieces[0])
   assert.deepEqual(toms, ['tom1', 'tom1', 'tom2', 'tom2', 'floor', 'floor', 'floor', 'floor'], 'the fill moves from tom 1 to tom 2 to the floor tom')
@@ -290,12 +383,19 @@ try {
     }
     const text = [item.goal, item.limbs, ...item.steps].join(' ')
     const claimed = /\b(three|four)-limb\b/.exec(text)?.[1]
-    if (claimed) assert.equal(used.size, claimed === 'three' ? 3 : 4, `${item.id} says ${claimed} limbs and uses ${[...used]}`)
+    if (item.id === 'basics-three-to-four-limbs') {
+      const perBar = item.bars.map((bar) => new Set([
+        ...bar.sticking.split(' ').flatMap((token) => token.split('+')),
+        ...(['bd', 'hp'].filter((voice) => bar.notes[voice]?.includes('x') || bar.notes[voice]?.includes('X'))),
+      ]).size)
+      assert.deepEqual(perBar, [3, 3, 4, 4], 'the progressive independence drill adds the fourth limb in bar 3')
+    } else if (claimed) assert.equal(used.size, claimed === 'three' ? 3 : 4, `${item.id} says ${claimed} limbs and uses ${[...used]}`)
   }
   const hatSteps = lesson('open-hi-hat').steps.join(' ')
   assert.ok(/pedal/.test(hatSteps) && /pressure/.test(hatSteps) && !/heel/.test(hatSteps), 'opening the hat is taught as easing pedal pressure')
   // Meters: simple, compound and odd, counted correctly.
-  assert.deepEqual([...new Set(LESSONS.map((item) => `${item.meter.numerator}/${item.meter.denominator}`))].sort(), ['12/8', '3/4', '4/4', '5/4', '6/8', '7/8'])
+  assert.deepEqual([...new Set(LESSONS.map((item) => `${item.meter.numerator}/${item.meter.denominator}`))].sort(),
+    ['12/8', '3/4', '4/4', '5/4', '6/8', '7/4', '7/8'])
   assert.equal(lessonSong(lesson('six-eight')).bpm, 90, '6/8 at 60 dotted quarters is 90 quarter notes per minute')
   assert.equal(lessonSong(lesson('seven-eight')).bpm, 100, '7/8 at 200 eighth notes is 100 quarter notes per minute')
   assert.equal(tempoLabel(lesson('seven-eight'), 200), '200 ♪')

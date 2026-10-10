@@ -495,3 +495,144 @@ export const GENRE_LESSONS: Record<string, Lesson[]> = {
     },
   ],
 }
+
+function withCrashAtStart(source: LessonBar): LessonBar {
+  const notes = Object.fromEntries(Object.entries(source.notes).map(([voice, pattern]) => [voice, pattern])) as LessonBar['notes']
+  const length = source.steps * (source.count.split(' ').length / source.steps)
+  const cymbals = (['hh', 'rd', 'cr'] as Voice[]).filter((voice) => notes[voice])
+  const handsAtStart = (Object.keys(notes) as Voice[]).filter((voice) => !FEET.includes(voice) && notes[voice]![0] !== '-')
+  if (!cymbals.length && handsAtStart.length > 1) return source
+  const crash = [...(notes.cr ?? '-'.repeat(length))]
+  let accent = 'x'
+  for (const voice of cymbals) {
+    const pattern = [...notes[voice]!]
+    if (voice !== 'cr' && pattern[0] !== '-') {
+      accent = pattern[0]
+      pattern[0] = '-'
+      notes[voice] = pattern.join('')
+    }
+  }
+  crash[0] = accent
+  notes.cr = crash.join('')
+  return { ...source, notes }
+}
+
+function varyCymbal(notes: LessonBar['notes']): void {
+  const source: Voice | undefined = notes.hh && [...notes.hh].every((symbol) => 'xX-'.includes(symbol))
+    ? 'hh' : notes.rd ? 'rd' : undefined
+  if (!source) return
+  const target: Voice = source === 'hh' ? 'rd' : 'hh'
+  if (notes[target]) return
+  notes[target] = notes[source]!
+  delete notes[source]
+}
+
+function accentAtDifferentSubdivision(notes: LessonBar['notes'], index: number): void {
+  const voice = (['hh', 'rd', 'cr'] as Voice[]).find((item) => notes[item] && [...notes[item]!].some((symbol) => 'xXoO'.includes(symbol)))
+  if (!voice) return
+  const pattern = [...notes[voice]!]
+  const start = index * 5 % pattern.length
+  for (let offset = 0; offset < pattern.length; offset++) {
+    const step = (start + offset) % pattern.length
+    if (pattern[step] === 'x') { pattern[step] = 'X'; break }
+    if (pattern[step] === 'X') { pattern[step] = 'x'; break }
+    if (pattern[step] === 'o') { pattern[step] = 'O'; break }
+    if (pattern[step] === 'O') { pattern[step] = 'o'; break }
+  }
+  notes[voice] = pattern.join('')
+}
+
+function addTurnaroundKick(notes: LessonBar['notes']): void {
+  const length = Math.max(...Object.values(notes).map((pattern) => pattern.length))
+  const kick = [...(notes.bd ?? '-'.repeat(length))]
+  if (kick.at(-1) === '-') kick[kick.length - 1] = 'x'
+  notes.bd = kick.join('')
+}
+
+function authoredBar(source: LessonBar, index: number, phraseBars: number, stage: number, fill: boolean, meter: Lesson['meter']): LessonBar {
+  const notes = Object.fromEntries(Object.entries(source.notes).map(([voice, pattern]) => [voice, pattern])) as LessonBar['notes']
+  const isB = index >= phraseBars / 2
+  if (stage > 0 && !fill && isB && index % 2 === 0) varyCymbal(notes)
+  if (index === 0 || stage > 0 && index === phraseBars / 2 || stage === 0 && index % 4 === 3) {
+    const withCrash = withCrashAtStart({ ...source, notes })
+    Object.assign(notes, withCrash.notes)
+  }
+  if (!fill && (stage > 0 || index % 4 === 3)) accentAtDifferentSubdivision(notes, index)
+  if (index % 4 === 3) addTurnaroundKick(notes)
+  const alternating = source.sticking?.split(' ').slice(0, 6).join(' ') === 'R L R L R L'
+  return bar(source.steps, notes, {
+    from: alternating ? 0 : Infinity,
+    twelve: meter.numerator === 12 && meter.denominator === 8,
+  })
+}
+
+/**
+ * Expand the original short motif into a complete study while keeping the lesson's authored groove and fill cells.
+ * Bars 4/8 or 8/16 carry turnarounds; the B section changes cymbal orchestration where the source has a closed hat
+ * or ride. Only the two fill stages give the backing a Fill bar, so it rests for exactly the second half of that bar.
+ */
+export function expandGenreLesson(lesson: Lesson, stage: number): Lesson {
+  const length = stage === 4 ? 16 : 8
+  const source = lesson.bars
+  const hasFill = stage >= 3
+  const groove = hasFill ? source.slice(0, -1) : source
+  const fillBar = source.at(-1)!
+  const phrase = Array.from({ length }, (_, index) => {
+    const fill = stage === 3 ? index % 4 === 3 : stage === 4 && index % 8 === 7
+    const selected = fill ? fillBar : groove[index % groove.length]
+    return authoredBar(selected, index, length, stage, fill, lesson.meter)
+  })
+  const sections = stage === 3
+    ? [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }, { name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }]
+    : stage === 4
+      ? [{ name: 'Groove', bars: 7 }, { name: 'Fill', bars: 1 }, { name: 'Groove', bars: 7 }, { name: 'Fill', bars: 1 }]
+      : undefined
+  const barsText = stage === 4
+    ? 'A 16-bar performance phrase: bars 1–7 set up the groove, bar 8 fills, bars 9–15 vary the orchestration, and bar 16 fills back to bar 1.'
+    : stage === 3
+      ? 'An 8-bar fill study: groove in bars 1–3 and 5–7, with fills in bars 4 and 8; the band rests during each fill’s second half.'
+      : stage === 0
+        ? `An 8-bar basic groove: bars 1–3 establish ${lesson.feel}; bars 4 and 8 turn the phrase around, and bars 5–7 return to the core groove.`
+        : `An 8-bar ${lesson.title.toLowerCase()} variation: develop the ${lesson.feel} focus through bars 1–7, then turn bar 8 back to bar 1.`
+  const focus = lesson.goal
+    .replace(/\b(?:one|two|three|four)-bar\b/gi, `${length}-bar`)
+    .replace(/\bOne bar\b/g, 'The groove')
+    .replace(/\bone bar\b/g, 'the groove')
+    .replace(/\bthree bars\b/gi, 'the groove section')
+    .replace(/\bBar 1\b/gi, 'the opening motif')
+    .replace(/\bBar 2\b/gi, 'the alternate motif')
+    .replace(/\bBar 3\b/gi, 'the later motif')
+    .replace(/\bBar 4\b/gi, 'the fill turnaround')
+  const reword = (step: string) => step
+    .replace(/\bBar 1\b/gi, 'the opening motif')
+    .replace(/\bBar 2\b/gi, 'the alternate motif')
+    .replace(/\bBar 3\b/gi, 'the later motif')
+    .replace(/\bBar 4\b/gi, 'the fill turnaround')
+  const teaching = stage === 3
+    ? [
+        `Keep the ${lesson.title.toLowerCase()} focus in groove bars 1–3 and 5–7; bars 4 and 8 leave the second half for the fill.`,
+        'Repeat the four-bar groove-and-fill layout; the final fill leads back to the opening crash.',
+        reword(lesson.steps.at(-1)!),
+      ]
+    : stage === 4
+      ? [
+          'Bars 1–7 build the A section and bar 8 fills; bars 9–15 vary the orchestration and bar 16 fills back to bar 1.',
+          `The backing rests for the second half of bars 8 and 16; keep the ${lesson.title.toLowerCase()} technique clear through both sections.`,
+          'Let the final fill resolve into the opening groove rather than stopping at the end of bar 16.',
+        ]
+      : [
+        reword(lesson.steps[0]),
+        reword(lesson.steps[1] ?? lesson.goal),
+        stage === 0
+          ? 'Bars 1–3 and 5–7 keep the basic pattern steady; use bars 4 and 8 for the small turnaround and return.'
+          : 'The second half shifts cymbal color and accents while keeping the lesson’s defining groove intact.',
+      ]
+  return {
+    ...lesson,
+    feel: `${lesson.feel} · ${length}-bar ${stage >= 3 ? 'phrase with turnarounds' : 'study'}`,
+    goal: `${barsText} Focus: ${lesson.title.toLowerCase()} — ${focus}`,
+    steps: teaching,
+    bars: phrase,
+    ...(sections ? { sections } : { sections: undefined }),
+  }
+}
