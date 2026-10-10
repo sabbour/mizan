@@ -467,7 +467,8 @@ def test_existing_database_migrates_folders_and_artist(tmp_path):
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         )}
     assert "artist" in columns
-    assert {"transcription_model", "separation_method", "license", "attribution"} <= columns
+    assert {"transcription_model", "separation_method"} <= columns
+    assert not {"license", "attribution"} & columns, "rights live beside the analysis, not in new columns"
     assert {"folders", "folder_songs"} <= tables
 
 

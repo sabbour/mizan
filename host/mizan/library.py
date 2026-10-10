@@ -41,9 +41,7 @@ class LibraryStore:
                     song_path TEXT NOT NULL,
                     tempo_map TEXT,
                     transcription_model TEXT,
-                    separation_method TEXT,
-                    license TEXT,
-                    attribution TEXT
+                    separation_method TEXT
                 )
             """)
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(songs)")}
@@ -54,10 +52,6 @@ class LibraryStore:
                 connection.execute("ALTER TABLE songs ADD COLUMN transcription_model TEXT")
             if "separation_method" not in columns:
                 connection.execute("ALTER TABLE songs ADD COLUMN separation_method TEXT")
-            if "license" not in columns:
-                connection.execute("ALTER TABLE songs ADD COLUMN license TEXT")
-            if "attribution" not in columns:
-                connection.execute("ALTER TABLE songs ADD COLUMN attribution TEXT")
             job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
             if migrating_processing and {"transcription_model", "kind"} <= job_columns:
                 for job in connection.execute("""
@@ -114,15 +108,21 @@ class LibraryStore:
         song_path = artifacts["analysis"]
         parts = [track["name"] for track in song["tracks"]]
         metadata = entry_metadata or {}
+        # A downloaded score's license and attribution live in a small file beside its analysis, listed with the
+        # song's other artifacts, so the library's table keeps its existing columns.
+        rights = {key: metadata[key] for key in ("license", "attribution", "provider") if metadata.get(key)}
+        if rights:
+            sidecar = Path(song_path).with_name("source.json")
+            sidecar.write_text(json.dumps(rights, ensure_ascii=False), encoding="utf-8")
+            artifacts = {**artifacts, "source": str(sidecar)}
         with closing(self._connect()) as connection, connection:
             connection.execute("""
                 INSERT INTO songs (id, title, thumbnail, source, parts, recording, duration,
                     created_at, practiced_at, position, pipeline_version, source_url,
-                    artifacts, song_path, tempo_map, artist, license, attribution)
-                VALUES (?, ?, NULL, ?, ?, 0, NULL, ?, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)
+                    artifacts, song_path, tempo_map, artist)
+                VALUES (?, ?, NULL, ?, ?, 0, NULL, ?, NULL, NULL, ?, ?, ?, ?, NULL, ?)
             """, (song_id, title, source, json.dumps(parts), timestamp, pipeline_version,
-                  metadata.get("sourceUrl"), json.dumps(artifacts), song_path,
-                  metadata.get("artist"), metadata.get("license"), metadata.get("attribution")))
+                  metadata.get("sourceUrl"), json.dumps(artifacts), song_path, metadata.get("artist")))
         return self.get(song_id)
 
     def upsert_job(self, job: dict, pipeline_version: str) -> dict | None:
@@ -406,13 +406,22 @@ class LibraryStore:
                 shutil.rmtree(directory)
 
 
+def _rights(entry: dict) -> dict:
+    """A downloaded score's license and attribution, from the source file listed with its artifacts."""
+    path = (entry.get("artifacts") or {}).get("source")
+    try:
+        rights = json.loads(Path(path).read_text(encoding="utf-8")) if path else {}
+    except (OSError, ValueError):
+        rights = {}
+    return {"license": rights.get("license"), "attribution": rights.get("attribution")}
+
+
 def public_entry(entry: dict, pipeline_version: str) -> dict:
     return {
         "id": entry["id"], "title": entry["title"], "thumbnail": entry["thumbnail"],
         "artist": entry.get("artist"),
         "sourceUrl": entry.get("source_url"),
-        "license": entry.get("license"),
-        "attribution": entry.get("attribution"),
+        **_rights(entry),
         "source": entry["source"], "parts": entry["parts"] or [],
         "recording": entry["recording"], "duration": entry["duration"],
         "createdAt": entry["created_at"], "practicedAt": entry["practiced_at"],

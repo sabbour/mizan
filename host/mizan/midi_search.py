@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import logging
 import re
 from pathlib import PurePosixPath
 from html.parser import HTMLParser
@@ -11,6 +12,8 @@ from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit, urlunspl
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .errors import InvalidFile, InvalidSearch, MidiSearchFailed
+
+logger = logging.getLogger(__name__)
 
 MAX_MIDI_BYTES = 2 * 1024 * 1024
 COMMONS_HOSTS = frozenset({"commons.wikimedia.org", "upload.wikimedia.org"})
