@@ -1,13 +1,26 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { inspectPianoMusic, inspectPianoScales, inspectPianoProgressions, inspectPianoInspired } from './piano-music-check.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
+async function stopOwnedBrowsers(profile) {
+  const ownedProfile = profile.replaceAll("'", "''")
+  await promisify(execFile)('pwsh.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | ` +
+    `Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${ownedProfile}') } | ` +
+    `ForEach-Object { try { Stop-Process -Id $_.ProcessId -ErrorAction Stop } ` +
+    `catch { if ($_.FullyQualifiedErrorId -notlike 'NoProcessFoundForGivenId,*') { throw } } }`,
+  ], { timeout: 60000 })
+}
 const preview = process.argv.includes('--preview')
+const previewPortArgument = process.argv.find(arg => arg.startsWith('--preview-port='))
+const previewPort = previewPortArgument?.slice('--preview-port='.length) ?? '5199'
+assert.ok(!previewPortArgument || preview, 'A preview port requires preview mode')
+assert.ok(/^[1-9]\d{0,4}$/.test(previewPort) && Number(previewPort) <= 65535, 'The preview port must be 1 through 65535')
 const visualCheckpoint = process.argv.includes('--visual-checkpoint')
 const loadCheck = process.argv.includes('--load-check')
 const controlsCheck = process.argv.includes('--controls-check')
@@ -17,6 +30,35 @@ const catalogCheck = process.argv.includes('--catalog-check')
 const scalesInspiredCheck = process.argv.includes('--scales-inspired-check')
 const progressionsCheck = process.argv.includes('--progressions-check')
 const homeCheck = process.argv.includes('--home-check')
+const viewMemoryCheck = process.argv.includes('--view-memory-check')
+const viewMemoryPhase = process.argv.find(arg => arg.startsWith('--view-memory-phase='))?.split('=')[1]
+const sharedProfile = process.argv.find(arg => arg.startsWith('--view-memory-profile='))?.slice('--view-memory-profile='.length)
+const viewMemoryPairs = [
+  { piano: 'hands', drums: 'kit' },
+  { piano: 'keyboard', drums: 'score' },
+  { piano: 'score', drums: 'kit' },
+]
+if (viewMemoryCheck && viewMemoryPhase === undefined) {
+  const restartProfile = await mkdtemp(join(root, 'installed-edge-view-memory-'))
+  try {
+    for (let phase = 0; phase <= viewMemoryPairs.length; phase++) {
+      const { stdout } = await promisify(execFile)(process.execPath, [
+        fileURLToPath(import.meta.url), ...process.argv.slice(2),
+        `--view-memory-phase=${phase}`, `--view-memory-profile=${restartProfile}`,
+      ], { timeout: 240000, maxBuffer: 1024 * 1024 })
+      process.stdout.write(stdout)
+    }
+  } finally {
+    await stopOwnedBrowsers(restartProfile)
+    await rm(restartProfile, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 })
+  }
+  process.exit(0)
+}
+assert.ok(viewMemoryPhase === undefined || viewMemoryCheck, 'A restart phase requires the view-memory check')
+assert.ok(sharedProfile === undefined || (viewMemoryCheck && viewMemoryPhase !== undefined && sharedProfile.length > 0 &&
+  dirname(resolve(sharedProfile)) === root && basename(sharedProfile).startsWith('installed-edge-view-memory-')),
+  'A shared restart profile must belong to this verification run')
+if (viewMemoryPhase !== undefined) assert.ok(/^[0-3]$/.test(viewMemoryPhase), 'The restart phase must be 0 through 3')
 const partialCheck = visualCheckpoint || handsCheck
 assert.ok(!visualCheckpoint || preview, 'An incomplete curriculum checkpoint cannot certify the installed update')
 assert.ok(!loadCheck || preview, 'A load diagnosis cannot certify the installed update')
@@ -25,10 +67,10 @@ assert.ok(!musicCheck || preview, 'A source music diagnosis cannot certify the i
 assert.ok(!catalogCheck || preview, 'A source catalog diagnosis cannot certify the installed update')
 assert.ok(!scalesInspiredCheck || preview, 'A source scale/inspired diagnosis cannot certify the installed update')
 assert.ok(!progressionsCheck || preview, 'A source progression diagnosis cannot certify the installed update')
-const url = preview ? 'http://127.0.0.1:5199/' : 'http://127.0.0.1:5398/'
+const url = preview ? `http://127.0.0.1:${previewPort}/` : 'http://127.0.0.1:5398/'
 const artifact = progressionsCheck ? 'source-progressions' : scalesInspiredCheck ? 'source-scales-inspired' : catalogCheck ? 'source-catalog' : musicCheck ? 'piano-music' : loadCheck ? 'preview-load' : controlsCheck ? 'checkpoint-controls' : handsCheck ? 'checkpoint-hands' : visualCheckpoint ? 'checkpoint-visual' : preview ? 'preview-ui' : 'installed-ui'
-const resultArtifact = homeCheck ? 'home-shelves' : artifact
-const profile = await mkdtemp(join(root, 'installed-edge-'))
+const resultArtifact = viewMemoryCheck ? `view-memory-${preview ? 'preview' : 'installed'}-${viewMemoryPhase}` : homeCheck ? 'home-shelves' : artifact
+const profile = sharedProfile ?? await mkdtemp(join(root, 'installed-edge-'))
 const browser = spawn('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', [
   '--headless=new', '--remote-debugging-pipe', '--no-first-run',
   '--force-device-scale-factor=1.5', '--autoplay-policy=no-user-gesture-required', '--mute-audio', `--user-data-dir=${profile}`,
@@ -37,7 +79,7 @@ const exited = new Promise((resolve) => browser.once('exit', resolve))
 const pending = new Map(), errors = [], failedRequests = [], httpErrors = [], requestUrls = new Map()
 const inflightRequests = new Map(), audioContexts = new Map()
 const viteSockets = new Set(), viteUpdates = []
-let readFailureContext
+let readFailureContext, checkFailure
 let sequence = 0, buffer = ''
 browser.stdio[4].on('data', (chunk) => {
   buffer += chunk.toString()
@@ -74,7 +116,7 @@ browser.stdio[4].on('data', (chunk) => {
     })
     else if (message.method === 'Network.webSocketCreated') {
       const socket = new URL(message.params.url)
-      if (['localhost', '127.0.0.1'].includes(socket.hostname) && socket.port === '5199') viteSockets.add(message.params.requestId)
+      if (['localhost', '127.0.0.1'].includes(socket.hostname) && socket.port === previewPort) viteSockets.add(message.params.requestId)
     }
     else if (message.method === 'Network.webSocketFrameReceived' && viteSockets.has(message.params.requestId) &&
       message.params.response.opcode === 1 && message.params.response.payloadData.startsWith('{')) {
@@ -110,6 +152,7 @@ try {
   }
   readFailureContext = () => evaluate(`({
     url: location.href, readyState: document.readyState,
+    preferences: /^https?:$/.test(location.protocol) ? localStorage.getItem('mizan:practice') : undefined,
     startupErrors: globalThis.__installedStartupErrors,
     resizeNotifications: globalThis.__installedResizeNotifications,
     body: document.body?.innerText.slice(0, 4000),
@@ -272,7 +315,83 @@ try {
     console.log(`Source piano music: ${report.lessons} lessons across ${report.genres} genres; no identical transposed two-hand four-bar parts or tiled two-bar phrases; ${report.rhythmCollisions.length} cross-genre rhythmic matches require musical review`)
   } else {
   await waitFor('#lib-tab-course')
-  if (homeCheck) {
+  if (viewMemoryCheck) {
+    const phase = Number(viewMemoryPhase)
+    const snapshots = []
+    const inspectView = () => evaluate(`({
+      title: document.querySelector('h1')?.textContent,
+      view: document.querySelector('.chordview-option[aria-checked="true"], .chordview-option[aria-pressed="true"]')?.dataset.view,
+      preferences: JSON.parse(localStorage.getItem('mizan:practice') ?? '{}'),
+    })`)
+    const openLesson = async (instrument, index, expected) => {
+      await evaluate(`(() => {
+        if (document.querySelector('#lib-tab-course')) return;
+        const back = document.querySelector('button[aria-label="Back to the library"]');
+        if (!back) throw new Error('The library navigation control is unavailable');
+        back.click();
+      })()`)
+      await waitFor('#lib-tab-course')
+      await evaluate(`document.querySelector('#lib-tab-course').click()`)
+      await waitFor(`[data-instrument="${instrument}"]`)
+      await evaluate(`document.querySelector('[data-instrument="${instrument}"]').click()`)
+      const shelf = instrument === 'piano' ? '[data-piano-shelf="genre"]' : '[data-shelf="genre"]'
+      await waitFor(shelf)
+      await evaluate(`document.querySelector(${JSON.stringify(shelf)}).click()`)
+      await waitFor('[data-genre]')
+      await evaluate(`document.querySelector('[data-genre]').click()`)
+      await waitFor('.course-lesson')
+      await evaluate(`(() => {
+        const lesson = document.querySelectorAll('.course-lesson')[${index}];
+        if (!lesson) throw new Error('The requested course lesson is unavailable');
+        lesson.click();
+      })()`)
+      await waitFor('.chordview-option[data-view]')
+      if (expected) {
+        await waitFor(`.chordview-option[data-view="${expected}"][aria-checked="true"], .chordview-option[data-view="${expected}"][aria-pressed="true"]`)
+      }
+      await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+      const state = await inspectView()
+      if (expected) assert.equal(state.view, expected, `${instrument} retains its own chosen view`)
+      snapshots.push({ instrument, index, expected, ...state })
+      return state
+    }
+    const readSaved = () => evaluate(`JSON.parse(localStorage.getItem('mizan:practice') ?? '{}')`)
+    const previous = phase > 0 ? viewMemoryPairs[phase - 1] : null
+    if (previous) {
+      const saved = await readSaved()
+      assert.equal(saved.pianoView, previous.piano, 'Piano preference survives a full browser-process exit')
+      assert.equal(saved.drumsView, previous.drums, 'Drum preference survives a full browser-process exit')
+      for (const instrument of ['piano', 'drums']) {
+        const first = await openLesson(instrument, 0, previous[instrument])
+        const second = await openLesson(instrument, 1, previous[instrument])
+        assert.notEqual(first.title, second.title, 'The view is retained across different songs')
+      }
+    }
+    const chosen = viewMemoryPairs[phase]
+    if (chosen) {
+      for (const instrument of ['piano', 'drums']) {
+        await openLesson(instrument, 0, previous?.[instrument])
+        await evaluate(`document.querySelector('.chordview-option[data-view="${chosen[instrument]}"]').click()`)
+        const selected = await inspectView()
+        assert.equal(selected.view, chosen[instrument], 'The deliberate view selection takes effect')
+        await openLesson(instrument, 1, chosen[instrument])
+      }
+      const saved = await readSaved()
+      assert.equal(saved.pianoView, chosen.piano)
+      assert.equal(saved.drumsView, chosen.drums)
+      for (const instrument of ['piano', 'drums']) await openLesson(instrument, 0, chosen[instrument])
+      const afterNavigation = await readSaved()
+      assert.equal(afterNavigation.pianoView, saved.pianoView, 'Navigation does not overwrite the piano view')
+      assert.equal(afterNavigation.drumsView, saved.drumsView, 'Navigation does not overwrite the drum view')
+    }
+    assert.deepEqual(errors, [], 'The view-memory check produced no browser errors')
+    assert.deepEqual(viteUpdates, [], 'Source changed during the view-memory check')
+    await writeFile(join(root, `${resultArtifact}-runtime.json`), JSON.stringify({
+      url, version, phase, browserPid: browser.pid, profile, previous, chosen, snapshots, errors, viteUpdates,
+      restartShutdown: 'CDP close, debugger pipe detach, exact owned-process cleanup',
+    }, null, 2))
+    console.log(`View memory: process ${browser.pid}, phase ${phase}, independent views retained across different songs`)
+  } else if (homeCheck) {
     await waitFor('.popular-shelf .popular-music-card')
     const shelves = await evaluate(`({
       sample: document.querySelector('.popular-music-summary')?.textContent,
@@ -1107,6 +1226,7 @@ try {
   }
   }
 } catch (error) {
+  checkFailure = error
   let context = null
   if (readFailureContext) {
     try { context = await readFailureContext() } catch (contextError) {
@@ -1119,26 +1239,30 @@ try {
   }, null, 2))
   throw error
 } finally {
+  let closeFailure
   if (browser.exitCode === null) {
-    try { await command('Browser.close', {}, undefined, 10000) } catch (error) {
+    try {
+      await command('Browser.close', {}, undefined, 10000)
+      browser.stdio[3].destroy()
+      browser.stdio[4].destroy()
+    } catch (error) {
+      closeFailure = error
       console.error('Owned browser close failed; terminating it', error.message)
       browser.kill()
     }
   }
   browser.stdio[3].destroy()
   browser.stdio[4].destroy()
-  const ownedProfile = profile.replaceAll("'", "''")
-  await promisify(execFile)('pwsh.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | ` +
-    `Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${ownedProfile}') } | ` +
-    `ForEach-Object { try { Stop-Process -Id $_.ProcessId -ErrorAction Stop } ` +
-    `catch { if ($_.FullyQualifiedErrorId -notlike 'NoProcessFoundForGivenId,*') { throw } } }`,
-  ], { timeout: 60000 })
+  await stopOwnedBrowsers(profile)
   if (browser.exitCode === null) browser.kill()
   await exited
   for (const entry of pending.values()) {
     clearTimeout(entry.timer)
     entry.reject(new Error('Browser closed'))
   }
-  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 })
+  if (!sharedProfile) await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 })
+  if (viewMemoryCheck && closeFailure) {
+    if (checkFailure) throw new AggregateError([checkFailure, closeFailure], 'The UI check and browser shutdown both failed')
+    throw new Error('The restart check could not request browser shutdown', { cause: closeFailure })
+  }
 }
