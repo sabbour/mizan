@@ -20,7 +20,7 @@ try {
   const genre = lessonList({ collection: 'genre' })
   assert.deepEqual(Object.keys(COLLECTIONS), ['inspired', 'genre'])
   assert.equal(course.length + inspired.length + genre.length, LESSONS.length, 'every lesson is in the course or one collection')
-  assert.deepEqual([course.length, inspired.length, genre.length, LESSONS.length], [49, 26, 55, 130], 'exact lesson counts')
+  assert.deepEqual([course.length, inspired.length, genre.length, LESSONS.length], [49, 38, 55, 142], 'exact lesson counts')
   assert.equal(new Set(LESSONS.map((lesson) => lesson.id)).size, LESSONS.length, 'lesson ids are unique')
   assert.ok(course.every((lesson, i) => i === 0 || lesson.level >= course[i - 1].level), 'the course runs beginner to advanced')
   for (let level = 1; level <= LEVELS.length; level++)
@@ -36,32 +36,36 @@ try {
     assert.match(lesson.id, /^inspired-/)
     assert.match(lesson.style, /^Inspired by [A-Z]/, `${lesson.id} names the drummer it is inspired by`)
     assert.ok(lesson.feel?.length > 5, `${lesson.id} names its feel`)
+    assert.ok(lesson.artist && lesson.track && lesson.section && lesson.fidelity, `${lesson.id} has reference metadata`)
+    assert.equal(lesson.fidelity.meter, `${lesson.meter.numerator}/${lesson.meter.denominator}`, `${lesson.id} matches its reference-section meter`)
+    assert.ok(Math.abs(lesson.tempo.target - lesson.fidelity.tempo) <= Math.max(4, lesson.fidelity.tempo * 0.1),
+      `${lesson.id} target tempo is close to its reference`)
+    assert.doesNotMatch(`${lesson.goal} ${lesson.feel} ${lesson.steps.join(' ')}`, /transcription|original exercise|not copied/i,
+      `${lesson.id} has no disclaimer in its teaching copy`)
     assert.match(lessonNote(lesson), /^Inspired by great drummers · Inspired by .* · Level \d · \d+ of \d+$/)
   }
-  assert.ok(new Set(inspired.map((lesson) => lesson.style)).size === inspired.length, 'each inspired lesson has its own drummer')
   const newInspired = inspired.filter((lesson) => !existingInspired.has(lesson.id))
-  assert.equal(newInspired.length, 18, 'eighteen inspired studies were added')
+  assert.equal(newInspired.length, 30, 'thirty track-specific inspired studies were added')
   for (const lesson of newInspired) {
-    assert.match(lesson.style, / — .+$/, `${lesson.id} names its artist and track`)
-    assert.doesNotMatch(`${lesson.goal} ${lesson.feel}`, /transcription|original exercise/i, `${lesson.id} teaches without disclaimers`)
     assert.ok(lesson.steps.length >= 3 && /bar 4|bars 3–4/i.test(lesson.steps.join(' ')), `${lesson.id} teaches a developed payoff phrase`)
   }
-  const track = (lesson) => lesson.style.split(' — ').at(-1)
+  const track = (lesson) => lesson.track
   for (const [artist, tracks] of [
-    ['Pink Floyd', ['Money', 'Time', 'Another Brick in the Wall, Part 2']],
-    ['Dire Straits', ['Sultans of Swing', 'Money for Nothing', 'Walk of Life']],
-    ['Metallica', ['Enter Sandman', 'Master of Puppets', 'Sad But True']],
-    ['Tool', ['Schism', 'Lateralus', 'The Pot']],
-    ['Eagles', ['Hotel California', 'Take It Easy', 'Life in the Fast Lane']],
-    ['Phil Collins', ['In the Air Tonight']],
-    ['Philip Bailey & Phil Collins', ['Easy Lover']],
-    ['Genesis', ['Turn It On Again']],
+    ['Pink Floyd', ['Money', 'Time', 'Another Brick in the Wall, Part 2', 'Have a Cigar', 'Us and Them']],
+    ['Dire Straits', ['Sultans of Swing', 'Money for Nothing', 'Walk of Life', 'Brothers in Arms']],
+    ['Metallica', ['Enter Sandman', 'Master of Puppets', 'Sad But True', 'One']],
+    ['Tool', ['Schism', 'Lateralus', 'The Pot', 'Ænema']],
+    ['Eagles', ['Hotel California', 'Take It Easy', 'Life in the Fast Lane', 'Desperado']],
+    ['Phil Collins / Genesis', ['In the Air Tonight', 'Easy Lover', 'Turn It On Again', 'Mama']],
   ]) {
     for (const title of tracks)
-      assert.ok(newInspired.some((lesson) => lesson.style.includes(artist) && track(lesson) === title), `${artist} has an original study for ${title}`)
+      assert.ok(newInspired.some((lesson) => lesson.artist === artist && track(lesson) === title), `${artist} has a study for ${title}`)
   }
-  assert.equal(new Set(newInspired.map(track)).size, 18, 'every new inspired study refers to a distinct track')
-  const inspiredTrack = (artist, title) => newInspired.find((lesson) => lesson.style.includes(artist) && track(lesson) === title)
+  for (const artist of ['Pink Floyd', 'Dire Straits', 'Metallica', 'Tool', 'Eagles', 'Phil Collins / Genesis'])
+    assert.ok(inspired.filter((lesson) => lesson.artist === artist).length >= 3, `${artist} has at least three inspired studies`)
+  assert.equal(new Set(newInspired.map((lesson) => `${lesson.artist} — ${track(lesson)}`)).size, 30,
+    'every added inspired study refers to a distinct artist/track')
+  const inspiredTrack = (artist, title) => inspired.find((lesson) => lesson.artist === artist && track(lesson) === title)
   const money = inspiredTrack('Pink Floyd', 'Money')
   assert.deepEqual(money.meter, { numerator: 7, denominator: 4 }, 'Money has its seven-quarter phrase')
   assert.match(money.goal, /3 \+ 2 \+ 2/)
@@ -82,13 +86,13 @@ try {
   assert.notDeepEqual(master.bars[0].notes, sad.bars[0].notes)
   assert.ok(master.bars[3].notes.t1 && master.bars[3].notes.bd.length === 16, 'Master of Puppets has a fast kick and tom payoff')
   const schism = inspiredTrack('Tool', 'Schism')
-  assert.match(schism.steps.join(' '), /not the track meter/)
+  assert.match(schism.section, /7\/8/)
   assert.ok(schism.bars[0].notes.t1 && schism.bars[2].notes.t2, 'Schism moves the tom ostinato between groupings')
   assert.ok(inspiredTrack('Eagles', 'Take It Easy').bars[0].notes.sn.includes('g'),
     'Take It Easy uses snare ghost taps in its train beat')
   assert.ok(inspiredTrack('Eagles', 'Life in the Fast Lane').bars.every((bar) => bar.steps === 4),
     'Life in the Fast Lane drives with sixteenth hats')
-  const air = inspiredTrack('Phil Collins', 'In the Air Tonight')
+  const air = inspiredTrack('Phil Collins / Genesis', 'In the Air Tonight')
   assert.ok(air.bars[3].notes.t1 && air.bars[3].notes.t2 && air.bars[3].notes.f1.endsWith('X') &&
     /snare-to-tom descent/i.test(air.steps.join(' ')), 'In the Air Tonight ends its phrase with a tom payoff')
   for (const lesson of genre) {
@@ -227,8 +231,8 @@ try {
   {
     const { createHash } = await import('node:crypto')
     const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-    const additions = /^(basics-|inspired-(pink-floyd|dire-straits|metallica|tool-|eagles-|phil-collins-|genesis-))/
-    const legacy = LESSONS.filter((item) => item.collection !== 'genre' && !additions.test(item.id))
+    const legacy = LESSONS.filter((item) => item.collection !== 'genre' &&
+      !item.id.startsWith('basics-') && (item.collection !== 'inspired' || existingInspired.has(item.id)))
     assert.equal(legacy.length, 45)
     assert.equal(hash(legacy.map((item) => [item.id, item.bars])), '18914017aa953c051e344c5829b9995e599cd28c8e9b5bd7e2161fff510a87c0',
       'the original 37 core and eight inspired lesson patterns are byte-identical')
@@ -395,7 +399,7 @@ try {
   assert.ok(/pedal/.test(hatSteps) && /pressure/.test(hatSteps) && !/heel/.test(hatSteps), 'opening the hat is taught as easing pedal pressure')
   // Meters: simple, compound and odd, counted correctly.
   assert.deepEqual([...new Set(LESSONS.map((item) => `${item.meter.numerator}/${item.meter.denominator}`))].sort(),
-    ['12/8', '3/4', '4/4', '5/4', '6/8', '7/4', '7/8'])
+    ['12/8', '3/4', '4/4', '5/4', '6/8', '7/4', '7/8', '9/8'])
   assert.equal(lessonSong(lesson('six-eight')).bpm, 90, '6/8 at 60 dotted quarters is 90 quarter notes per minute')
   assert.equal(lessonSong(lesson('seven-eight')).bpm, 100, '7/8 at 200 eighth notes is 100 quarter notes per minute')
   assert.equal(tempoLabel(lesson('seven-eight'), 200), '200 ♪')

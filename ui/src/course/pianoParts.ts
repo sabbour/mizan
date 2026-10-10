@@ -59,6 +59,10 @@ export type PianoLesson = {
   examples?: { songs: string[]; scope: string }
   /** For an inspired study: the artist and recording it takes its style from. */
   influence?: string
+  artist?: string
+  track?: string
+  section?: string
+  fidelity?: { meter: string; feel: string; tempo: number }
 }
 
 export const pc = (midi: number) => ((midi % 12) + 12) % 12

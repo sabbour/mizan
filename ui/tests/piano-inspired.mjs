@@ -10,6 +10,7 @@ try {
   const { parseChord, chordSpans } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
   const { lessonMeter } = await vite.ssrLoadModule('/src/course/curriculum.ts')
   const { pianoXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
+  const { inspiredOrder } = await vite.ssrLoadModule('/src/course/inspired.ts')
   const pc = (midi) => ((midi % 12) + 12) % 12
   const expectedInfluences = [
     'Erik Satie — Gymnopédie No. 1',
@@ -35,15 +36,28 @@ try {
     'Hans Zimmer — Paul’s Dream (Dune)',
     'Pink Floyd — Us and Them',
     'Coldplay — The Scientist',
+    'Pink Floyd — The Great Gig in the Sky',
+    'Coldplay — Fix You',
+    'Coldplay — Viva La Vida',
+    'Elton John — Tiny Dancer',
+    'Elton John — Rocket Man',
+    'Stevie Wonder — Isn’t She Lovely',
+    'Stevie Wonder — Sir Duke',
+    'Ray Charles — Georgia on My Mind',
+    'Ray Charles — What’d I Say',
+    'The Dave Brubeck Quartet — Blue Rondo à la Turk',
+    'Herbie Hancock — Watermelon Man',
+    'Carole King — So Far Away',
   ]
-  assert.equal(PIANO_INSPIRED.length, 23, 'twenty-three inspired piano studies')
-  assert.equal(new Set(PIANO_INSPIRED.map(({ id }) => id)).size, 23, 'unique ids')
-  assert.equal(new Set(PIANO_INSPIRED.map(({ title }) => title)).size, 23, 'unique titles')
+  assert.equal(PIANO_INSPIRED.length, 35, 'thirty-five inspired piano studies')
+  assert.equal(new Set(PIANO_INSPIRED.map(({ id }) => id)).size, 35, 'unique ids')
+  assert.equal(new Set(PIANO_INSPIRED.map(({ title }) => title)).size, 35, 'unique titles')
   const zimmer = PIANO_INSPIRED.filter((lesson) => /Hans Zimmer/.test(lesson.influence))
   assert.equal(zimmer.length, 9, 'nine Zimmer-inspired studies')
   assert.ok(new Set(zimmer.map((lesson) => lesson.influence.match(/\(([^()]*)\)$/)?.[1])).size >= 7, 'Zimmer studies span at least seven films')
-  assert.equal(PIANO_INSPIRED.filter((lesson) => lesson.influence.startsWith('Pink Floyd —')).length, 2, 'two distinct Pink Floyd studies')
-  assert.equal(PIANO_INSPIRED.filter((lesson) => lesson.influence.startsWith('Coldplay —')).length, 2, 'two distinct Coldplay studies')
+  assert.equal(PIANO_INSPIRED.filter((lesson) => lesson.influence.startsWith('Pink Floyd —')).length, 3, 'three distinct Pink Floyd studies')
+  assert.equal(PIANO_INSPIRED.filter((lesson) => lesson.influence.startsWith('Coldplay —')).length, 4, 'four distinct Coldplay studies')
+  assert.equal(new Set(PIANO_INSPIRED.map((lesson) => `${lesson.artist} — ${lesson.track}`)).size, 35, 'unique artist/track references')
 
   const handMotif = (lesson, bar, hand) => {
     const beatsPerBar = lessonMeter(lesson).beatsPerBar
@@ -64,6 +78,10 @@ try {
     const where = lesson.id
     assert.match(where, /^piano-inspired-[a-z0-9-]+$/)
     assert.equal(lesson.influence, expectedInfluences[index], `${where}: artist and reference track`)
+    assert.ok(lesson.artist && lesson.track && lesson.section && lesson.fidelity, `${where}: structured track metadata`)
+    assert.equal(lesson.fidelity.meter, `${lesson.meter.numerator}/${lesson.meter.denominator}`, `${where}: exercise meter matches reference section`)
+    assert.ok(Math.abs(lesson.tempo.target - lesson.fidelity.tempo) <= Math.max(4, lesson.fidelity.tempo * 0.1),
+      `${where}: target tempo stays close to its reference section`)
     assert.doesNotMatch(`${lesson.goal} ${lesson.feel} ${lesson.steps.join(' ')}`, /transcription|original study|quoting/i, `${where}: teaches without disclaimers`)
     assert.ok(lesson.kind === 'inspired' && lesson.level === index + 1)
     assert.ok(lesson.tempo.start < lesson.tempo.target)
@@ -144,9 +162,9 @@ try {
     const xml = pianoXml(song)
     assert.equal((xml.match(/<measure /g) ?? []).length, lesson.bars, `${where}: MusicXML measure count`)
     assert.doesNotMatch(xml, /NaN|undefined/, `${where}: valid MusicXML`)
-    assert.deepEqual(pianoLessonList(lesson), PIANO_INSPIRED, `${where}: Previous/Next order`)
+    assert.deepEqual(pianoLessonList(lesson), inspiredOrder(PIANO_INSPIRED), `${where}: Previous/Next follows artist groups`)
   }
-  console.log('piano-inspired: 23 studies passed')
+  console.log('piano-inspired: 35 studies passed')
 } finally {
   await vite.close()
 }

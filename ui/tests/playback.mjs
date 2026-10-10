@@ -1865,18 +1865,18 @@ async function pianoChecks(width) {
   const keysBefore = new Set(Object.keys(localStorage))
   await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
   const tab = document.querySelector('.lib-tabs [data-tab="course"]')
-  check(tab.textContent === 'Course263', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
+  check(tab.textContent === 'Course287', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
   tab.click()
   await wait(() => document.querySelector('.course-instrument'), 'The course offers an instrument choice')
   const radios = [...document.querySelectorAll('.course-instrument [role="radio"]')]
-  check(radios.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Drums 130:true|Piano 133:false', `Drums and piano with their counts: ${radios.map((r) => r.textContent)}`)
+  check(radios.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Drums 142:true|Piano 145:false', `Drums and piano with their counts: ${radios.map((r) => r.textContent)}`)
   radios[0].focus()
   radios[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
   await wait(() => document.querySelector('#course-piano') && document.activeElement?.dataset.instrument === 'piano', 'ArrowRight chooses Piano')
   check(document.querySelectorAll('.course-genre-option').length === 11 && document.querySelectorAll('.course-genre-detail .course-lesson').length === 10 &&
     !document.querySelector('#course-title, .course-shelf'), 'Piano lists eleven genres and one genre\'s ten lessons, without the drum lists')
   const pianoShelves = [...document.querySelectorAll('.course-piano-shelf [role="radio"]')]
-  check(pianoShelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Genres 110:true|Inspired 23:false|Progressions 18:false|Scales 15:false',
+  check(pianoShelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Genres 110:true|Inspired 35:false|Progressions 18:false|Scales 15:false',
     `Piano shelves with their counts: ${pianoShelves.map((r) => r.textContent)}`)
   // Inspired: original studies naming their artist and track.
   pianoShelves[1].click()
@@ -1884,7 +1884,7 @@ async function pianoChecks(width) {
   await wait(() => document.querySelector('#course-piano-inspired-genres'), 'The inspired studies are grouped by artist')
   const pianoArtists = [...document.querySelectorAll('#course-piano-inspired-genres .course-genre-option')]
   const pianoStudies = pianoArtists.reduce((sum, option) => sum + Number(/\d+/.exec(option.querySelector('.course-genre-note').textContent)[0]), 0)
-  check(pianoStudies === 23 && pianoArtists.length >= 10, `Twenty-three inspired studies by ${pianoArtists.length} artists (${pianoStudies})`)
+  check(pianoStudies === 35 && pianoArtists.length >= 10, `Thirty-five inspired studies by ${pianoArtists.length} artists (${pianoStudies})`)
   pianoArtists.find((option) => option.dataset.genre === 'Hans Zimmer').click()
   await wait(() => document.querySelector('.course-genre-detail h3')?.textContent === 'Hans Zimmer' &&
     document.querySelectorAll('.course-genre-detail .course-lesson').length === 9, 'Nine Hans Zimmer studies')
@@ -2256,7 +2256,7 @@ async function courseChecks(width, phase) {
     'The Course tab opens on the 49 course lessons alone')
   check(document.querySelectorAll('.course-level').length === 8, 'Lessons are grouped in eight levels')
   const shelves = [...document.querySelectorAll('.course-shelf [role="radio"]')]
-  check(shelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Course 49:true|Inspired 26:false|Genres 55:false',
+  check(shelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Course 49:true|Inspired 38:false|Genres 55:false',
     `Drum lessons are three lists with their counts: ${shelves.map((radio) => radio.textContent)}`)
   const fits = () => [...document.querySelectorAll('.course-lesson, .course-genre-option')].every((button) => button.getBoundingClientRect().right <= innerWidth) &&
     document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1
@@ -2266,7 +2266,7 @@ async function courseChecks(width, phase) {
   await wait(() => document.querySelector('#course-inspired') && document.activeElement?.dataset.shelf === 'inspired', 'ArrowRight shows the inspired lessons')
   const drumArtists = [...document.querySelectorAll('#course-inspired-genres .course-genre-option')]
   const drumStudies = drumArtists.reduce((sum, option) => sum + Number(/\d+/.exec(option.querySelector('.course-genre-note').textContent)[0]), 0)
-  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && drumStudies === 26 &&
+  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && drumStudies === 38 &&
     [...document.querySelectorAll('.course-collection .course-style')].every((line) => /^Inspired by /.test(line.textContent)) && fits(),
     `The inspired lessons are grouped by artist, each naming its drummer (${drumStudies} by ${drumArtists.length} artists)`)
   drumArtists.find((option) => option.dataset.genre === 'Pink Floyd')?.click()

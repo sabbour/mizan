@@ -47,6 +47,10 @@ export type Lesson = {
   collection?: Collection
   /** For a collection lesson: the drummer, band or genre whose style it practises. The pattern itself is original. */
   style?: string
+  artist?: string
+  track?: string
+  section?: string
+  fidelity?: { meter: string; feel: string; tempo: number }
   /** For a collection lesson: the feel and subdivision that make the style recognisable. */
   feel?: string
   /** The course level; for a collection lesson, the level of the course to complete first (its difficulty). */
@@ -461,10 +465,13 @@ const BASE_LESSONS: Lesson[] = [
   },
   // Inspired by great drummers: original exercises on a stylistic hallmark, never a transcription of a recording.
   {
-    id: 'inspired-reggae-rock-hats', collection: 'inspired', style: 'Inspired by Stewart Copeland (The Police)', feel: 'Straight sixteenths, half-time drop on 3',
+    id: 'inspired-reggae-rock-hats', collection: 'inspired', style: 'Inspired by Stewart Copeland (The Police)',
+    artist: 'Stewart Copeland', track: 'Roxanne', section: 'verse groove',
+    fidelity: { meter: '4/4', feel: 'syncopated offbeat accents with a reggae-tinged pulse', tempo: 133 },
+    feel: 'Straight sixteenths, half-time drop on 3',
     level: 4, title: 'Reggae-rock hi-hat accents', meter: { numerator: 4, denominator: 4 },
     goal: 'Accent the hi-hat on every "&" while the kick and snare drop together on 3 only, then add quick hi-hat pickups.',
-    tempo: { start: 70, target: 100 }, limbs: 'Right hand: hi-hat · Left hand: snare and hi-hat pickups · Right foot: kick',
+    tempo: { start: 91, target: 130 }, limbs: 'Right hand: hi-hat · Left hand: snare and hi-hat pickups · Right foot: kick',
     steps: ['Bar 1: hi-hat eighths with the accent on each "&"; kick and snare land together on 3.',
       'Bar 2 adds sixteenth pickups on "2 a" and "4 a" with the left hand on the hi-hat.', 'Nothing on 1: let the space under beat 1 be part of the groove.'],
     bars: [
@@ -475,10 +482,13 @@ const BASE_LESSONS: Lesson[] = [
     ],
   },
   {
-    id: 'inspired-heavy-triplet-fill', collection: 'inspired', style: 'Inspired by John Bonham (Led Zeppelin)', feel: 'Heavy straight eighths, triplet fill',
+    id: 'inspired-heavy-triplet-fill', collection: 'inspired', style: 'Inspired by John Bonham (Led Zeppelin)',
+    artist: 'John Bonham', track: 'Good Times Bad Times', section: 'verse groove',
+    fidelity: { meter: '4/4', feel: 'heavy straight eighths with triplet-shaped kick accents', tempo: 94 },
+    feel: 'Heavy straight eighths, triplet fill',
     level: 6, title: 'Heavy groove and hands-feet triplet fill', meter: { numerator: 4, denominator: 4 },
     goal: 'A heavy, wide groove, then a fill of triplets traded between the hands on the toms and the kick.',
-    tempo: { start: 56, target: 80 }, limbs: 'Right hand: hi-hat, then toms · Left hand: snare, then toms · Right foot: kick',
+    tempo: { start: 66.5, target: 95 }, limbs: 'Right hand: hi-hat, then toms · Left hand: snare, then toms · Right foot: kick',
     steps: ['Bar 1: play the groove big and slightly behind the click; the kick doubles on "2 &" and 3.',
       'Bar 2, beats 3 and 4: R L on tom 1 then kick, R L on the floor tom then kick.', 'Land the crash and kick on the next 1.'],
     bars: [
@@ -489,10 +499,13 @@ const BASE_LESSONS: Lesson[] = [
     sections: [{ name: 'Groove', bars: 1 }, { name: 'Fill', bars: 1 }],
   },
   {
-    id: 'inspired-sparse-fill', collection: 'inspired', style: 'Inspired by Ringo Starr (The Beatles)', feel: 'Straight eighths, loose and sparse',
+    id: 'inspired-sparse-fill', collection: 'inspired', style: 'Inspired by Ringo Starr (The Beatles)',
+    artist: 'Ringo Starr', track: 'Come Together', section: 'verse groove',
+    fidelity: { meter: '4/4', feel: 'laid-back half-time pulse with tom and snare answers', tempo: 84 },
+    feel: 'Straight eighths, loose and sparse',
     level: 6, title: 'Sparse melodic fill', meter: { numerator: 4, denominator: 4 },
     goal: 'Leave space: a fill of only four notes that walks from the snare down the toms and serves the song.',
-    tempo: { start: 77, target: 110 }, limbs: 'Right hand: hi-hat, then toms · Left hand: snare, then toms · Right foot: kick',
+    tempo: { start: 59.5, target: 85 }, limbs: 'Right hand: hi-hat, then toms · Left hand: snare, then toms · Right foot: kick',
     steps: ['Bar 2 keeps the hi-hat for beats 1 and 2, then stops.', 'The fill leads with the left hand on the snare on 3: L, R on tom 1, L on tom 2, R on the floor tom.',
       'Play it musically rather than loudly; the crash on the next 1 finishes the phrase.'],
     bars: [CRASH_IN, { steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R L R L R',
@@ -500,10 +513,13 @@ const BASE_LESSONS: Lesson[] = [
     sections: [{ name: 'Groove', bars: 1 }, { name: 'Fill', bars: 1 }],
   },
   {
-    id: 'inspired-tom-orchestration', collection: 'inspired', style: 'Inspired by Neil Peart (Rush)', feel: 'Straight sixteenths, accents in threes',
+    id: 'inspired-tom-orchestration', collection: 'inspired', style: 'Inspired by Neil Peart (Rush)',
+    artist: 'Neil Peart', track: 'Tom Sawyer', section: 'verse groove',
+    fidelity: { meter: '4/4', feel: 'driving straight subdivision with accents and broad tom answers', tempo: 88 },
+    feel: 'Straight sixteenths, accents in threes',
     level: 6, title: 'Orchestrated tom fill', meter: { numerator: 4, denominator: 4 },
     goal: 'Alternating sixteenths in groups of three, each group on a new drum: snare, tom 1, tom 2, then the floor tom.',
-    tempo: { start: 60, target: 80 }, limbs: 'Both hands: snare and toms, alternating · Right foot: kick',
+    tempo: { start: 63, target: 90 }, limbs: 'Both hands: snare and toms, alternating · Right foot: kick',
     steps: ['Keep R L R L all through bar 2; only the drums change.', 'Accent the first note of each group; the accents fall R, L, R, L, R.',
       'The floor tom takes the last seven notes; land the crash on the next 1.'],
     bars: [CRASH_IN, { steps: 4, count: SIXTEENS, sticking: ALTERNATE(16),
@@ -511,7 +527,10 @@ const BASE_LESSONS: Lesson[] = [
     sections: [{ name: 'Groove', bars: 1 }, { name: 'Fill', bars: 1 }],
   },
   {
-    id: 'inspired-half-time-shuffle', collection: 'inspired', style: 'Inspired by Jeff Porcaro (Toto)', feel: 'Half-time shuffle in triplets',
+    id: 'inspired-half-time-shuffle', collection: 'inspired', style: 'Inspired by Jeff Porcaro (Toto)',
+    artist: 'Jeff Porcaro', track: 'Rosanna', section: 'verse shuffle',
+    fidelity: { meter: '4/4', feel: 'half-time shuffle with triplet subdivisions and snare ghosts', tempo: 87 },
+    feel: 'Half-time shuffle in triplets',
     level: 8, title: 'Half-time shuffle with ghost notes', meter: { numerator: 4, denominator: 4 },
     goal: 'A shuffle on the hi-hat with soft ghost notes on the middle triplet and a single backbeat on 3.',
     tempo: { start: 63, target: 90 }, limbs: 'Right hand: hi-hat · Left hand: snare (ghosts and backbeat) · Right foot: kick',
@@ -521,7 +540,10 @@ const BASE_LESSONS: Lesson[] = [
       notes: { hh: 'x-xx-xx-xx-x', sn: '-g--g-X---g-', bd: 'x----x--x---' } }),
   },
   {
-    id: 'inspired-funk-syncopation', collection: 'inspired', style: 'Inspired by Clyde Stubblefield (James Brown)', feel: 'Straight sixteenths, syncopated',
+    id: 'inspired-funk-syncopation', collection: 'inspired', style: 'Inspired by Clyde Stubblefield (James Brown)',
+    artist: 'Clyde Stubblefield', track: 'Funky Drummer', section: 'drum break groove',
+    fidelity: { meter: '4/4', feel: 'straight sixteenths, syncopated kick and soft snare ghosts', tempo: 101 },
+    feel: 'Straight sixteenths, syncopated',
     level: 8, title: 'Syncopated funk with ghost notes', meter: { numerator: 4, denominator: 4 },
     goal: 'A funk groove whose ghost notes and off-beat kicks push against a steady hi-hat and a strong 2 and 4.',
     tempo: { start: 70, target: 100 }, limbs: 'Right hand: hi-hat · Left hand: snare (ghosts and backbeat) · Right foot: kick',
@@ -531,17 +553,23 @@ const BASE_LESSONS: Lesson[] = [
       notes: { hh: 'x-x-x-x-x-x-x-x-', sn: '---gX--g-g--X--g', bd: 'x-x-------x---x-' } }),
   },
   {
-    id: 'inspired-rudimental-groove', collection: 'inspired', style: 'Inspired by Steve Gadd', feel: 'Straight sixteenths, rudiment split between hi-hat and snare',
+    id: 'inspired-rudimental-groove', collection: 'inspired', style: 'Inspired by Steve Gadd',
+    artist: 'Steve Gadd', track: '50 Ways to Leave Your Lover', section: 'verse groove',
+    fidelity: { meter: '4/4', feel: 'syncopated snare accents over a steady groove', tempo: 103 },
+    feel: 'Straight sixteenths, rudiment split between hi-hat and snare',
     level: 8, title: 'Inverted paradiddle groove', meter: { numerator: 4, denominator: 4 },
     goal: 'Play the inverted paradiddle, R R L R L L R L, with the right hand on the hi-hat and the left on the snare.',
-    tempo: { start: 60, target: 80 }, limbs: 'Right hand: hi-hat · Left hand: snare (ghosts and backbeat) · Right foot: kick',
+    tempo: { start: 73.5, target: 105 }, limbs: 'Right hand: hi-hat · Left hand: snare (ghosts and backbeat) · Right foot: kick',
     steps: ['Practise the sticking on the snare alone first.', 'Then move every R to the hi-hat; the accented L notes on 2 and 4 are the backbeat.',
       'The kick plays 1, 3 and "3 &".'],
     bars: twice({ steps: 4, count: SIXTEENS, sticking: 'R R L R L L R L R R L R L L R L',
       notes: { hh: 'xx-x--x-xx-x--x-', sn: '--g-Xg-g--g-Xg-g', bd: 'x-------x-x-----' } }),
   },
   {
-    id: 'inspired-odd-meter', collection: 'inspired', style: 'Inspired by Danny Carey (Tool)', feel: '7/8 in sixteenths, grouped 3 + 2 + 2',
+    id: 'inspired-odd-meter', collection: 'inspired', style: 'Inspired by Danny Carey (Tool)',
+    artist: 'Tool', track: 'Forty Six & 2', section: 'bridge groove',
+    fidelity: { meter: '7/8', feel: 'alternating 4/4 groove with a 7/8 bridge and rolling sixteenths', tempo: 158 },
+    feel: '7/8 in sixteenths, grouped 3 + 2 + 2',
     level: 8, title: 'Odd-meter phrase in 7/8', meter: { numerator: 7, denominator: 8 },
     goal: 'Phrase seven eighth notes as 3 + 2 + 2 with the kick on each group, then move the right hand to the floor tom.',
     tempo: { start: 112, target: 160 }, limbs: 'Right hand: hi-hat, then floor tom · Left hand: snare · Right foot: kick',
