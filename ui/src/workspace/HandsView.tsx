@@ -3,11 +3,18 @@ import type { Engine } from './engine'
 import { useFrame, useReducedMotion } from './hooks'
 import { keyOf, suggestFingers, type Finger } from './fingers'
 import { barStart, measures, pulseBeats } from './meter'
-import { noteName, type PianoNote, type Song } from './song'
+import { keyLetter, noteName, type PianoNote, type Song } from './song'
 import type { KeyTarget, Vec3 } from './kitAsset'
 import { feedbackAt, type Strike } from './kitFeedback'
 
-type Props = { song: Song; engine: Engine }
+type Props = {
+  song: Song
+  engine: Engine
+  /** Finger numbers on the keys (written, or suggested where none are written). */
+  fingering?: boolean
+  /** Note letters on the keys that are sounding or about to be played. */
+  letters?: boolean
+}
 
 // The hand colours of the score letters and the 3D piano: blue left, orange right.
 const RIGHT = '#a64800'
@@ -20,8 +27,11 @@ const mix = (hex: string, tint: Vec3, amount: number) => {
 }
 const BLACK = new Set([1, 3, 6, 8, 10])
 
-/** A playback-synced keyboard: keys sounding now, by hand, with estimated finger numbers. */
-export function HandsView({ song, engine }: Props) {
+/** A white key's width as a share of its length: about a real piano's, so few notes never stretch a handful of keys across the view. */
+const KEY_SHAPE = 1 / 4.6
+
+/** A playback-synced keyboard: keys sounding now, by hand, with finger numbers and note letters when they are switched on. */
+export function HandsView({ song, engine, fingering = true, letters = false }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const reduced = useReducedMotion()
   const section = useRef<HTMLElement>(null)
@@ -46,14 +56,19 @@ export function HandsView({ song, engine }: Props) {
     return map
   }, [ordered])
   const longest = useMemo(() => ordered.reduce((value, note) => Math.max(value, note.beats), 0), [ordered])
-  const range = useMemo(() => {
+  // Each key's notes in time order, to name the note a glowing key is about to play.
+  const byKey = useMemo(() => {
+    const map = new Map<number, PianoNote[]>()
+    for (const note of ordered) map.set(keyOf(note.midi), [...map.get(keyOf(note.midi)) ?? [], note])
+    return map
+  }, [ordered])
+  // The octaves the music needs; the drawn keyboard adds octaves around them to fill the view at a natural key shape.
+  const needed = useMemo(() => {
     const keys = notes.map((note) => keyOf(note.midi))
     let low = keys.length ? Math.floor(Math.min(...keys) / 12) * 12 : 48
     let high = keys.length ? Math.ceil((Math.max(...keys) + 1) / 12) * 12 - 1 : 83
     if (high - low < 23) high = low + 23
-    low = Math.max(21, low)
-    high = Math.min(108, high)
-    return { low, high }
+    return { low: Math.max(21, low), high: Math.min(108, high) }
   }, [notes])
   const lastActive = useRef('')
   const lastDrawn = useRef('')
@@ -114,7 +129,7 @@ export function HandsView({ song, engine }: Props) {
     const state = [...pressed].sort(([a], [b]) => a - b)
       .map(([key, { note, finger }]) => `${key}:${note.hand}:${finger?.finger ?? ''}:${Math.round((note.midi - key) * 100)}`).join(',')
     const glow = [...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 20)}:${Math.round(f.upcoming * 20)}`).join(',')
-    const signature = `${element.width}x${element.height}|${range.low}-${range.high}|${state}|${glow}|${sounding}`
+    const signature = `${element.width}x${element.height}|${needed.low}-${needed.high}|${state}|${glow}|${sounding}|${fingering}|${letters}`
     if (signature === lastDrawn.current) return
     lastDrawn.current = signature
     const ratio = window.devicePixelRatio || 1
@@ -123,17 +138,29 @@ export function HandsView({ song, engine }: Props) {
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, width, height)
 
-    const whites: number[] = []
-    for (let key = range.low; key <= range.high; key++) if (!BLACK.has(key % 12)) whites.push(key)
     const top = 34
     const keyHeight = height - top - 6
-    const whiteWidth = width / whites.length
+    // Keys keep a piano's proportions: the range grows by octaves, alternately below and above the music, until the
+    // keyboard fills the width; if all 88 keys fit with room to spare, they are drawn at the natural width and centred.
+    const natural = Math.max(14, Math.min(34, keyHeight * KEY_SHAPE))
+    const whiteCount = (low: number, high: number) => { let count = 0; for (let key = low; key <= high; key++) if (!BLACK.has(key % 12)) count++; return count }
+    let low = needed.low, high = needed.high
+    for (let below = true; whiteCount(low, high) * natural < width && (low > 21 || high < 108); below = !below) {
+      if (below && low > 21) low = Math.max(21, low - 12)
+      else if (high < 108) high = Math.min(108, high + 12)
+      else low = Math.max(21, low - 12)
+    }
+    const range = { low, high }
+    const whites: number[] = []
+    for (let key = range.low; key <= range.high; key++) if (!BLACK.has(key % 12)) whites.push(key)
+    const whiteWidth = Math.min(width / whites.length, natural * 1.25)
+    const left = (width - whiteWidth * whites.length) / 2
     const xOf = new Map<number, { x: number; w: number; black: boolean }>()
-    whites.forEach((key, index) => xOf.set(key, { x: index * whiteWidth, w: whiteWidth, black: false }))
+    whites.forEach((key, index) => xOf.set(key, { x: left + index * whiteWidth, w: whiteWidth, black: false }))
     for (let key = range.low; key <= range.high; key++) {
       if (!BLACK.has(key % 12)) continue
-      const left = xOf.get(key - 1)
-      if (left) xOf.set(key, { x: left.x + whiteWidth * 0.68, w: whiteWidth * 0.64, black: true })
+      const below = xOf.get(key - 1)
+      if (below) xOf.set(key, { x: below.x + whiteWidth * 0.68, w: whiteWidth * 0.64, black: true })
     }
     // A key at the playhead takes its hand's colour, brightened by the hit pulse; a coming note tints its key as it nears.
     const fill = (key: number, rest: string) => {
@@ -154,6 +181,16 @@ export function HandsView({ song, engine }: Props) {
       context.strokeRect(x + 1, y + 1, w - 2, h - 2)
       context.restore()
     }
+    // Letters on the keys sounding now and on the keys whose next note is coming (the ones that glow), when switched on.
+    const named = new Map<number, { letter: string; upcoming: boolean }>()
+    if (letters) {
+      for (const [key, { note }] of pressed) named.set(key, { letter: keyLetter(note, song.key), upcoming: false })
+      for (let key = range.low; key <= range.high; key++) {
+        if (pressed.has(key) || !((lit(key)?.upcoming ?? 0) > 0.05)) continue
+        const next = byKey.get(key)?.find((note) => note.startBeat >= beat - 1e-9)
+        if (next) named.set(key, { letter: keyLetter(next, song.key), upcoming: true })
+      }
+    }
     for (const key of whites) {
       const box = xOf.get(key)!
       context.fillStyle = fill(key, '#ffffff')
@@ -161,7 +198,7 @@ export function HandsView({ song, engine }: Props) {
       context.strokeStyle = '#c9cdd1'
       context.strokeRect(box.x + 0.5, top + 0.5, box.w - 1, keyHeight - 1)
       halo(key, box.x + 0.5, top, box.w - 1, keyHeight)
-      if (key % 12 === 0 && !pressed.has(key)) {
+      if (key % 12 === 0 && !pressed.has(key) && !named.has(key)) {
         context.fillStyle = '#6b7177'
         context.font = '500 10px "Archivo Variable", sans-serif'
         context.textAlign = 'center'
@@ -181,7 +218,7 @@ export function HandsView({ song, engine }: Props) {
       const box = xOf.get(key)
       if (!box) continue
       const y = box.black ? top + keyHeight * 0.5 : top + keyHeight - 16
-      if (finger) {
+      if (finger && fingering) {
         context.fillStyle = '#ffffff'
         context.font = '700 13px "Archivo Variable", sans-serif'
         context.fillText(String(finger.finger), box.x + box.w / 2, y)
@@ -192,6 +229,20 @@ export function HandsView({ song, engine }: Props) {
         context.font = '600 10px "Archivo Variable", sans-serif'
         context.fillText(`${cents > 0 ? '+' : ''}${cents}¢`, box.x + box.w / 2, top - 6)
       }
+    }
+    for (const [key, { letter, upcoming }] of named) {
+      const box = xOf.get(key)
+      if (!box) continue
+      const lifted = pressed.get(key)?.finger && fingering
+      const y = box.black ? top + keyHeight * (lifted ? 0.28 : 0.5) : top + keyHeight - (lifted ? 34 : 16)
+      context.fillStyle = upcoming ? box.black ? '#ffffff' : '#111111' : '#ffffff'
+      context.font = `${upcoming ? 600 : 700} ${Math.max(9, Math.min(12, box.w * 0.5))}px "Archivo Variable", sans-serif`
+      context.fillText(letter, box.x + box.w / 2, y)
+    }
+    if (section.current) {
+      section.current.dataset.letters = [...named].sort(([a], [b]) => a - b).map(([key, { letter, upcoming }]) => `${key}:${letter}${upcoming ? ':next' : ''}`).join(',')
+      section.current.dataset.fingers = fingering ? [...pressed].filter(([, { finger }]) => finger).map(([key, { finger }]) => `${key}:${finger!.finger}`).join(',') : ''
+      section.current.dataset.range = `${range.low}-${range.high}:${Math.round(whiteWidth * 10) / 10}`
     }
     // Illustrative hand spans above the keys, labelled so hands never rely on colour alone.
     for (const hand of ['left', 'right'] as const) {
@@ -233,7 +284,7 @@ export function HandsView({ song, engine }: Props) {
       <p className="practice-legend">
         <span className="legend-key legend-right" aria-hidden="true" /> right hand
         <span className="legend-key legend-left" aria-hidden="true" /> left hand
-        <span className="practice-note">{written ? 'Finger numbers are the written fingering.' : 'Finger numbers are suggestions from note spacing, not detected fingering.'}</span>
+        <span className="practice-note">{!fingering ? 'Finger numbers are off.' : written ? 'Finger numbers are the written fingering.' : 'Finger numbers are suggestions from note spacing, not detected fingering.'}</span>
       </p>
     </section>
   )

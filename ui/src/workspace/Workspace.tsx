@@ -34,7 +34,9 @@ type Props = {
   onDeleteTrack?: (trackId: string) => Promise<void>
   analysisNotice?: ReactNode
   /** Starting choices for this song only, e.g. a drum lesson opens with the click on and the 3D kit. */
-  defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView }
+  defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView; noteNames?: boolean; fingering?: boolean }
+  /** Told when Note letters or Fingering change, so the next lesson can keep them. */
+  onGuides?: (guides: { noteNames: boolean; fingering: boolean }) => void
   /** Told when the player picks a piano or drum practice view, so the next lesson can open on it. */
   onPracticeView?: (instrument: 'piano' | 'drums', view: PracticeView) => void
 }
@@ -45,7 +47,7 @@ const EMPTY_STEMS: Stem[] = []
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onPracticeView,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onPracticeView, onGuides,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
@@ -71,7 +73,10 @@ export function Workspace({
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
   const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: defaults?.piano ?? 'score', drums: defaults?.drums ?? 'score' })
-  const [noteNames, setNoteNames] = useState(false)
+  const [noteNames, setNoteNames] = useState(defaults?.noteNames ?? false)
+  // Finger numbers on the piano keyboards; on unless the player turned them off.
+  const [fingering, setFingering] = useState(defaults?.fingering ?? true)
+  useEffect(() => { onGuides?.({ noteNames, fingering }) }, [noteNames, fingering, onGuides])
   const [smooth, setSmooth] = useState(false)
   // The accompaniment as played: with smooth voicing, each chord in the inversion nearest the one before (read as C/E).
   const voiced = useMemo(() => {
@@ -403,6 +408,7 @@ export function Workspace({
         m: () => track && toggleMute(track.id),
         c: toggleClick,
         n: () => pitched && setNoteNames((v) => !v),
+        f: () => instrument === 'piano' && setFingering((v) => !v),
         s: () => track && toggleSolo(track.id),
         k: () => playAlong && setChordMode((v) => (v === 'names' ? 'shapes' : 'names')),
         v: () => instrument === 'chords' && setSmooth((v) => !v),
@@ -456,6 +462,8 @@ export function Workspace({
             </>
           )}
         </p>
+        {/* The view and track controls share one column that wraps, however many a track brings, so the title keeps its room. */}
+        <div className="ws-controls">
         {playAlong && (
           <ChordView value={chordMode} onChange={setChordMode} smooth={instrument === 'chords' ? smooth : null} onSmooth={() => setSmooth((v) => !v)} />
         )}
@@ -485,6 +493,7 @@ export function Workspace({
           onSynthOnly={synthOnly}
           onOriginalOnly={originalOnly}
         />
+        </div>
         {analysisNotice}
       </header>
 
@@ -501,12 +510,12 @@ export function Workspace({
         <div className="ws-split">
           <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames} instrument="piano" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="keyboard" onPick={pick} previewId={track?.id ?? 'chords'} />
           {/* Like the kit, the 3D keyboard sits beside the score so redrawing the score never restarts it. */}
-          <PianoView song={viewed} engine={engine} />
+          <PianoView song={viewed} engine={engine} fingering={fingering} letters={noteNames} />
         </div>
       ) : chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} onPick={pick} previewId={track?.id ?? 'chords'} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} fingering={fingering} onPick={pick} previewId={track?.id ?? 'chords'} />
       )}
 
       <footer className="ws-foot">
@@ -519,6 +528,8 @@ export function Workspace({
           click={click}
           noteNames={pitched ? noteNames : null}
           onNoteNames={() => setNoteNames((v) => !v)}
+          fingering={instrument === 'piano' ? fingering : null}
+          onFingering={() => setFingering((v) => !v)}
           onPlay={togglePlay}
           onStep={(d) => jump(pos.bar + d)}
           onRate={setSpeed}

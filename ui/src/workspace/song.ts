@@ -333,6 +333,13 @@ export function noteName(midi: number, flats = false): string {
   return `${(flats ? NAMES_FLAT : NAMES_SHARP)[((base % 12) + 12) % 12]}${cents ? ` ${cents > 0 ? '+' : ''}${cents}¢` : ''}`
 }
 
+const FLAT_KEYS = { major: ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'], minor: ['D', 'G', 'C', 'F', 'Bb', 'Eb'] }
+/** A key's letter for the keyboard guides: the lesson's own spelling where written, else sharps or flats by the key; no octave. */
+export function keyLetter(note: Pick<PianoNote, 'midi' | 'spell'>, key: Song['key']): string {
+  const name = note.spell ?? noteName(Math.round(note.midi), !!key && FLAT_KEYS[key.mode].includes(key.tonic))
+  return name[0] + name.slice(1).replace(/#/g, '♯').replace(/b/g, '♭')
+}
+
 export function displaySymbol(symbol: string): string {
   return symbol.replace(/#/g, '♯').replace(/([A-G])b/g, '$1♭')
 }

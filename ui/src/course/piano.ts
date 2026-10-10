@@ -244,14 +244,13 @@ function build(genre: Genre, stage: number): PianoLesson {
   const title = `${name} piano: ${[rh[0], rh[1], `${lh[1]} in the left hand`, 'fill', 'four-bar phrase', ...advanced][stage]}`
   const leftWords = [lh[0], lh[0], lh[1], lh[0], lh[1], lh[0], lh[1], lh[0], 'a moving bass line', `${lh[1]} and a moving bass`][stage]
   const rightWords = [rh[0], rh[1], rh[0], rh[0], rh[1], advanced[0], advanced[1], advanced[2], rh[0], `${rh[1]}, ${advanced[1]} and ${advanced[2]}`][stage]
-  const written = chords.join(' – ')
   const goal = [
-    `Hold the ${lh[0]} in the left hand while the right hand plays ${rh[0]} through an eight-bar phrase over ${written}; bars 4 and 8 close each half with a held chord.`,
+    `Hold the ${lh[0]} in the left hand while the right hand plays ${rh[0]} through an eight-bar phrase; bars 4 and 8 close each half with a held chord.`,
     `Keep the ${lh[0]} steady while the right hand changes to ${rh[1]}; bar 7 answers with the first rhythm before the closing chord.`,
     `The left hand takes the ${lh[1]}, walking up into the next chord in bars 4 and 8; the right hand returns to ${rh[0]} on top.`,
     'Groove for three bars, then fill: chord tones climb in bar 4, and in bar 8 the right hand runs five notes down the scale while the left hand holds the root.',
     `Put it together as a four-bar phrase and its answer: ${rh[1]} over the ${lh[1]}, a contrasting rhythm in bars 3 and 7, a held chord in bar 4 and the fill into the top.`,
-    `Sixteen bars in two sections over ${written}: ${advanced[0]} that move to the nearest notes of each new chord, a contrasting answer in each half and a run back to the top.`,
+    `Sixteen bars in two sections: ${advanced[0]} that move to the nearest notes of each new chord, a contrasting answer in each half and a run back to the top.`,
     `Push the chords off the beat (${advanced[1]}) over the ${lh[1]}, with plainer answer bars, held chords every four bars and a run back to the top.`,
     `Break each chord into ${advanced[2]}, the hand staying in one position per chord; held chords mark the A section and block chords break up the B section.`,
     `The left hand plays ${advanced[3]}, leading into each chord change from a half step above, under a steady right hand that moves to the second rhythm in the B section.`,

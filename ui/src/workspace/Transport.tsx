@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CaseUpper, Hand, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, Timer } from 'lucide-react'
+import { CaseUpper, Hand, Hash, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, Timer } from 'lucide-react'
 
 type Props = {
   playing: boolean
@@ -10,6 +10,8 @@ type Props = {
   click: boolean
   /** Null when the current track has no pitched notes to name. */
   noteNames: boolean | null
+  /** Finger numbers on the piano keyboards (never on the score); null when the track is not a piano part. */
+  fingering: boolean | null
   /** Sticking letters and hand colours; null when the current track is not drums. */
   sticking: boolean | null
   onPlay: () => void
@@ -19,6 +21,7 @@ type Props = {
   onCountIn: () => void
   onClick: () => void
   onNoteNames: () => void
+  onFingering: () => void
   onSticking: () => void
   onGo: (query: string) => boolean
 }
@@ -122,6 +125,9 @@ export function Transport(p: Props) {
         )}
         {p.noteNames !== null && (
           <Toggle on={p.noteNames} onPress={p.onNoteNames} icon={<CaseUpper aria-hidden="true" />} label="Note letters" keyHint="N" state={p.noteNames ? 'on' : 'off'} />
+        )}
+        {p.fingering !== null && (
+          <Toggle on={p.fingering} onPress={p.onFingering} icon={<Hash aria-hidden="true" />} label="Fingering" keyHint="F" state={p.fingering ? 'on' : 'off'} />
         )}
       </div>
     </div>

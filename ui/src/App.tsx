@@ -16,7 +16,7 @@ import { pianoLessonById, pianoLessonNote, pianoLessonSong } from './course/pian
 import { lessonPosition, saveLessonPosition } from './course/state'
 
 type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
-type LessonViews = { piano?: PracticeView; drums?: PracticeView }
+type LessonViews = { piano?: PracticeView; drums?: PracticeView; noteNames?: boolean; fingering?: boolean }
 
 const NOTE: Record<Entry['source'], string> = { youtube: 'Draft transcription', midi: 'Imported MIDI', musicxml: 'Imported MusicXML' }
 
@@ -55,10 +55,12 @@ export default function App() {
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('songs')
   // Where the Course tab is (instrument, drum list, genre); Back shows the list a lesson came from. Not stored.
   const [courseBrowse, setCourseBrowse] = useState<CourseBrowse>(DEFAULT_BROWSE)
-  // The practice view chosen in this run of lessons, so Next and Previous keep it; cleared on Back. Not stored.
+  // The practice view, Note letters and Fingering chosen in this run of lessons, so Next and Previous keep them; cleared on Back. Not stored.
   const [lessonViews, setLessonViews] = useState<LessonViews>({})
   const keepLessonView = useCallback((instrument: 'piano' | 'drums', practice: PracticeView) =>
     setLessonViews((current) => current[instrument] === practice ? current : { ...current, [instrument]: practice }), [])
+  const keepGuides = useCallback(({ noteNames, fingering }: { noteNames: boolean; fingering: boolean }) =>
+    setLessonViews((current) => current.noteNames === noteNames && current.fingering === fingering ? current : { ...current, noteNames, fingering }), [])
   const openLesson = useCallback((id: string) => {
     setCourseBrowse((current) => browseTo(id, current))
     setView({ kind: 'lesson', id })
@@ -134,8 +136,9 @@ export default function App() {
             songId={`course:${lesson.id}`}
             start={practised.start}
             note={lessonNote(lesson)}
-            defaults={{ click: true, drums: lessonViews.drums ?? 'kit' }}
+            defaults={{ click: true, drums: lessonViews.drums ?? 'kit', noteNames: lessonViews.noteNames, fingering: lessonViews.fingering }}
             onPracticeView={keepLessonView}
+            onGuides={keepGuides}
             onPosition={(position) => saveLessonPosition(lesson, position)}
             onBack={back}
             analysisNotice={<LessonPanel lesson={lesson} onLesson={openLesson} />}
@@ -149,8 +152,9 @@ export default function App() {
             songId={`course:${pianoLesson.id}`}
             start={practised.start}
             note={pianoLessonNote(pianoLesson)}
-            defaults={{ click: true, piano: lessonViews.piano ?? 'keyboard', drums: lessonViews.drums }}
+            defaults={{ click: true, piano: lessonViews.piano ?? 'keyboard', drums: lessonViews.drums, noteNames: lessonViews.noteNames, fingering: lessonViews.fingering }}
             onPracticeView={keepLessonView}
+            onGuides={keepGuides}
             onPosition={(position) => saveLessonPosition(pianoLesson, position)}
             onBack={back}
             analysisNotice={<PianoLessonPanel lesson={pianoLesson} onLesson={openLesson} />}

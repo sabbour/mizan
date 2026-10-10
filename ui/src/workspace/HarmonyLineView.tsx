@@ -50,10 +50,15 @@ const INTERVALS: Option<HarmonyOptions['interval']>[] = [
   { id: 10, label: '10ths', hint: 'Wide, a classic piano sound; below, it moves to the left hand' },
 ]
 
-/** How the Harmony line is generated: where it sits, how far from the melody, and how many notes. */
+/** How the Harmony line is generated: where it sits, how far from the melody, and how many notes. The choices open
+ * from one compact button that names the current setting, so they never crowd the title and track. */
 export function HarmonyLineView({ value, onChange }: { value: HarmonyOptions; onChange: (v: HarmonyOptions) => void }) {
+  const current = [SOURCES.find((o) => o.id === value.source)?.label, value.above ? 'above' : 'below',
+    INTERVALS.find((o) => o.id === value.interval)?.label, value.source === 'melody' && value.sparse ? 'long notes' : null].filter(Boolean).join(' · ')
   return (
-    <div className="chordview-bar">
+    <details className="harmony-options">
+      <summary className="harmony-summary" title="How the harmony line is made">Harmony: {current}</summary>
+    <div className="chordview-bar harmony-options-panel">
       <Choice label="Follow" options={SOURCES} value={value.source} onChange={(source) => onChange({ ...value, source })} />
       <Choice label="Harmony" options={PLACES} value={value.above ? 'above' : 'below'} onChange={(p) => onChange({ ...value, above: p === 'above' })} />
       <Choice label="In" options={INTERVALS} value={value.interval} onChange={(interval) => onChange({ ...value, interval })} />
@@ -67,5 +72,6 @@ export function HarmonyLineView({ value, onChange }: { value: HarmonyOptions; on
         Long notes only
       </button>}
     </div>
+    </details>
   )
 }

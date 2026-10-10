@@ -246,6 +246,8 @@ type Props = {
   instrumentGuide?: string
   /** A practice guide docked under the score: a keyboard for piano (the 3D kit sits beside the score, in Workspace). */
   practice?: PracticeView
+  /** Finger numbers on the Hands & keys keyboard (never on the score itself). */
+  fingering?: boolean
   onPick: (bar: number, extend: boolean) => void
   previewId: string
 }
@@ -330,7 +332,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', fingering = true, onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -384,6 +386,8 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
               drawPartNames: false,
               drawPartAbbreviations: false,
               drawMetronomeMarks: true,
+              // Finger numbers belong on the keyboards (Hands & keys, 3D keyboard), never on the score; they stay in the MusicXML.
+              drawFingerings: false,
               // Bars pack to the page width; forced 4-bar lines left most of each bar empty.
               newSystemFromXML: false,
               autoBeam: true,
@@ -574,7 +578,7 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
       </div>
       {vocalGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="vocals" study showWave={false} />}
       {instrumentGuide && status === 'ready' && <Guide song={song} engine={engine} layout={layout} instrument="other" trackId={instrumentGuide} study showWave={false} />}
-      {practice === 'hands' && instrument === 'piano' && status === 'ready' && <HandsView song={song} engine={engine} />}
+      {practice === 'hands' && instrument === 'piano' && status === 'ready' && <HandsView song={song} engine={engine} fingering={fingering} letters={noteNames} />}
       {status === 'loading' && (
         <div className="score-skeleton" role="status">
           <span className="visually-hidden">Drawing the score</span>

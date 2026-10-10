@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Engine } from './engine'
 import { useFrame, useReducedMotion } from './hooks'
 import { barStart, measures, pulseBeats } from './meter'
-import { noteName, type PianoNote, type Song } from './song'
+import { keyLetter, noteName, type PianoNote, type Song } from './song'
 import { LOOKS, type Look } from './prefs'
 import type { KeyTarget } from './kitAsset'
 import { KitRenderer, stageBackground, type Feedback } from './kitRenderer'
@@ -10,7 +10,14 @@ import { feedbackAt, HAND_GLOW, type Strike } from './kitFeedback'
 import { loadPiano, loadPianoManifest, preparedPiano, type PianoManifest, type PreparedPiano } from './pianoAsset'
 import { HandsView } from './HandsView'
 
-type Props = { song: Song; engine: Engine }
+type Props = {
+  song: Song
+  engine: Engine
+  /** Written finger numbers over the keys that are down. */
+  fingering?: boolean
+  /** Note letters over the keys that are down and the keys about to be played. */
+  letters?: boolean
+}
 
 const LOOK_LABEL: Record<Look, string> = {
   Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
@@ -45,7 +52,7 @@ const lookAt = (eye: number[], target: number[]) => {
 type Held = { start: number; end: number; note: PianoNote }
 
 /** A 3D piano that follows the shared transport: keys glow as their notes approach and press while they sound. */
-export function PianoView({ song, engine }: Props) {
+export function PianoView({ song, engine, fingering = true, letters = false }: Props) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null)
   const attachCanvas = useCallback((element: HTMLCanvasElement | null) => { canvas.current = element; setCanvasElement(element) }, [])
@@ -279,29 +286,51 @@ export function PianoView({ song, engine }: Props) {
       }
       ;(globalThis as { __mizanPianoFrame?: (canvas: HTMLCanvasElement, state: { feedback: typeof feedback }) => void }).__mizanPianoFrame?.(canvas.current!, { feedback })
     }
-    // Written finger numbers over the keys that are down, in the hand's colour; nothing where none is written.
-    const labels = down.filter(({ note }) => note.finger).map(({ key, note }) => `${key}:${note.hand}:${note.finger}`).sort().join(',')
+    // Labels over the keys: for keys that are down, the written finger (when Fingering is on) and the letter (when Note
+    // letters is on), in the hand's colour; for keys whose next note is coming (the ones that glow), the letter only.
+    const labelled: { key: number; hand: PianoNote['hand']; finger?: number; letter?: string; upcoming: boolean }[] = []
+    for (const { key, note } of down) {
+      const finger = fingering ? note.finger : undefined
+      const letter = letters ? keyLetter(note, song.key) : undefined
+      if (finger || letter) labelled.push({ key, hand: note.hand, finger, letter, upcoming: false })
+    }
+    if (letters) for (const [target, f] of feedback) {
+      if (!target.startsWith('key:') || f.upcoming <= 0.05) continue
+      const key = Number(target.slice(4))
+      if (down.some((item) => item.key === key)) continue
+      const next = plan.held.get(key)?.find((item) => item.start >= beat - 1e-9)?.note
+      if (next) labelled.push({ key, hand: next.hand, letter: keyLetter(next, song.key), upcoming: true })
+    }
+    const labels = labelled.map(({ key, hand, finger, letter, upcoming }) => `${key}:${hand}:${finger ?? ''}:${letter ?? ''}:${upcoming}`).sort().join(',')
     const view = camera.current
     if (fingersLayer.current && scene && view && labels !== lastLabels.current) {
       lastLabels.current = labels
-      // Each number sits over its key; where keys are too close for their numbers, numbers stack upward in rows, each
-      // joined to its key by a short line, so every finger stays readable however small the keyboard is drawn.
-      const placed = down.filter(({ note, key }) => note.finger && scene.prepared.keys.has(key)).map(({ key, note }) => {
-        const [x, y, z] = scene.prepared.keys.get(key)!.label
+      // Each label sits over its key; where keys are too close for their labels, labels stack upward in rows, each
+      // joined to its key by a short line, so every label stays readable however small the keyboard is drawn.
+      const placed = labelled.filter(({ key }) => scene.prepared.keys.has(key)).map((label) => {
+        const [x, y, z] = scene.prepared.keys.get(label.key)!.label
         const m = view.view
         const [px, py, , pw] = [0, 1, 2, 3].map((row) => m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row])
-        return { note, x: (px / pw * 0.5 + 0.5) * view.width, y: (0.5 - py / pw * 0.5) * view.height, row: 0 }
+        return { ...label, x: (px / pw * 0.5 + 0.5) * view.width, y: (0.5 - py / pw * 0.5) * view.height, row: 0 }
       }).sort((a, b) => a.x - b.x)
+      const gap = letters ? (fingering ? 34 : 26) : 20
       const rows: number[] = []
       for (const label of placed) {
-        label.row = rows.findIndex((right) => label.x - right >= 20)
+        label.row = rows.findIndex((right) => label.x - right >= gap)
         if (label.row < 0) label.row = rows.length
         rows[label.row] = label.x
       }
-      fingersLayer.current.replaceChildren(...placed.map(({ note, x, y, row }) => {
+      fingersLayer.current.replaceChildren(...placed.map(({ key, hand, finger, letter, upcoming, x, y, row }) => {
         const span = document.createElement('span')
-        span.className = `piano-finger piano-finger-${note.hand}`
-        span.textContent = String(note.finger)
+        span.className = upcoming ? 'piano-finger piano-finger-next' : `piano-finger piano-finger-${hand}`
+        span.dataset.key = String(key)
+        if (letter) {
+          const name = document.createElement('i')
+          name.className = 'piano-letter'
+          name.textContent = letter
+          span.append(name)
+        }
+        if (finger) span.append(String(finger))
         span.style.left = `${x}px`
         span.style.top = `${y}px`
         span.style.setProperty('--lift', `${row * 21}px`)
@@ -329,7 +358,7 @@ export function PianoView({ song, engine }: Props) {
       }
     }
   })
-  useEffect(() => { lastSignature.current = ''; lastLabels.current = '' }, [scene, failure, lost])
+  useEffect(() => { lastSignature.current = ''; lastLabels.current = '' }, [scene, failure, lost, fingering, letters])
 
   // Loading until the scene for the chosen instrument and look has arrived.
   const loading = !failure && !lost && (!scene || scene.variant !== variantId || scene.look !== look)
@@ -351,7 +380,7 @@ export function PianoView({ song, engine }: Props) {
       {failure ? (
         <>
           <p className="practice-failure" role="status">{failure}</p>
-          <HandsView song={song} engine={engine} />
+          <HandsView song={song} engine={engine} fingering={fingering} letters={letters} />
         </>
       ) : (
         <div className="practice-stage" hidden={lost}>
@@ -362,7 +391,7 @@ export function PianoView({ song, engine }: Props) {
       )}
       {lost && !failure && <>
         <p className="practice-failure" role="status">The 3D piano lost its graphics context. It comes back when the device restores it; this flat keyboard follows the same notes meanwhile.</p>
-        <HandsView song={song} engine={engine} />
+        <HandsView song={song} engine={engine} fingering={fingering} letters={letters} />
       </>}
       <p ref={described} className="visually-hidden">No notes at the playhead.</p>
       <p className="practice-legend kit-legend">
@@ -374,8 +403,9 @@ export function PianoView({ song, engine }: Props) {
             <span key={controller} className="kit-pill" data-pedal={controller}>{PEDAL_LABEL[controller]}</span>)
           : <span className="kit-pill kit-state">No pedalling written</span>}
         <span className="practice-note">
-          {plan.fingered ? 'Finger numbers are the lesson\'s written fingering (1 thumb to 5 little finger). '
+          {!fingering ? 'Finger numbers are off. ' : plan.fingered ? 'Finger numbers are the lesson\'s written fingering (1 thumb to 5 little finger). '
             : 'No fingering is written for this music, so no finger numbers are shown. '}
+          {letters ? 'Letters name the keys that are down and the next keys to play. ' : ''}
           {outside ? `${outside} note${outside === 1 ? ' is' : 's are'} outside the piano's ${variant!.keys} keys and cannot be shown. ` : ''}
           Keys light as their notes approach and go down while they sound, in their hand&apos;s colour; paused, the notes at the playhead stay lit.
         </span>
