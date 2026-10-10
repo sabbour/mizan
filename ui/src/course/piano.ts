@@ -1,7 +1,7 @@
 import { backingKey, GENRE_STYLE, parseChord, progression } from './accompaniment'
 import { lessonById, lessonMeter } from './curriculum'
 import { PIANO_INSPIRED } from './pianoInspired'
-import { arrange, pianoSong, type Arp, type Finger, type LeftCell, type LeftPalette, type Mode, type PianoLesson, type RightPalette, type Strokes } from './pianoParts'
+import { arrange, pianoSong, type Arp, type FillRhythm, type Finger, type LeftCell, type LeftPalette, type Mode, type PianoLesson, type RightPalette, type Strokes } from './pianoParts'
 import { tonalLesson, tonalList } from './pianoTonal'
 
 export type { PianoLesson } from './pianoParts'
@@ -22,6 +22,10 @@ type Genre = {
   left: LeftPalette
   /** Steps (from 0) whose chords are held with the sustain pedal, changed with each chord. */
   pedal?: number[]
+  /** The style's fills: their rhythms, and whether the run climbs. */
+  fill: { run: FillRhythm; climb: FillRhythm; up?: boolean }
+  /** Which phrase shape the voicings' top notes follow (see CONTOURS). */
+  shape: number
   words: { right: [string, string]; left: [string, string]; feel: string; advanced: [string, string, string, string, string] }
 }
 
@@ -29,18 +33,26 @@ const each = (beats: number[], length: number): Strokes => beats.map((beat) => [
 const quarters = (degrees: LeftCell[number][2], fingers: Finger[], length = 1): LeftCell => [0, 1, 2, 3].map((beat) => [beat, length, degrees, fingers])
 /** A broken chord in even notes: the voicing's notes from the bottom in this order, `length` beats each. */
 const broken = (order: number[], length = 0.5): Arp => order.map((index, step) => [step * length, length, index])
+/** Phrase shapes for the voicings' top notes, one per style family, so styles don't share one melodic arc. */
+const CONTOURS = [
+  [72, 74, 77, 71, 79, 81, 76, 72, 76, 79, 82, 77, 74, 77, 79, 72],
+  [79, 77, 74, 72, 76, 74, 71, 72, 81, 79, 77, 76, 74, 76, 77, 72],
+  [72, 76, 79, 76, 74, 77, 81, 72, 74, 77, 79, 82, 79, 76, 74, 72],
+  [69, 72, 71, 74, 72, 76, 74, 71, 76, 74, 79, 77, 76, 72, 74, 69],
+]
 const walk = (degrees: LeftCell[number][2][number][], length = 1): LeftCell => degrees.map((degree, step) => [step * length, length, [degree]])
 
 const GENRES: Genre[] = [
   {
-    drums: 'genre-rock', mode: 'mixolydian',
+    drums: 'genre-rock', mode: 'mixolydian', shape: 0,
+    fill: { run: [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.25], [1.75, 0.25]], climb: [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5]] },
     right: {
       A: [each([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5], 0.5)], B: [[[0, 1.5], [1.5, 1], [2.5, 1.5]]],
       C: [[[0, 0.5], [0.5, 0.5], [1, 1], [2.5, 0.5], [3, 1]]], K: [[[0, 1.5], [1.5, 2.5]]],
       S: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2.5, 0.75], [3.25, 0.75]]], P: [broken([0, 2, 1, 2, 0, 2, 1, 2])],
     },
     left: {
-      b: [[0, 2, ['R', '8'], [5, 1]], [2, 2, ['R', '8'], [5, 1]]],
+      b: [[0, 1.5, ['R', '8'], [5, 1]], [1.5, 2.5, ['R', '8'], [5, 1]]],
       o: [0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.5, [beat % 2 ? '5' : '8'], [beat % 2 ? 2 : 1]]] as LeftCell),
       t: walk(['R', '3', '5', '>']), m: walk(['R', '8', 'R', '8', '5', '8', '5', '>'], 0.5),
     },
@@ -48,21 +60,26 @@ const GENRES: Genre[] = [
       advanced: ['add9 and sus4 voicings', 'pushed off-beat chords', 'broken-chord eighths', 'walking octave bass', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-blues-shuffle', mode: 'mixolydian',
+    drums: 'genre-blues-shuffle', mode: 'mixolydian', shape: 1,
+    fill: { run: [[0, 0.75], [0.75, 0.25], [1, 0.5], [1.5, 0.25], [1.75, 0.25]], climb: [[0, 0.75], [0.75, 0.25], [1, 0.75], [1.75, 0.25]] },
     right: {
-      A: [each([1, 3], 0.75)], B: [each([0, 1, 2, 3], 0.75)], C: [[[0, 0.75], [1, 0.75], [2.5, 0.5], [3, 0.75]]], K: [[[0, 0.75], [1, 3]]],
-      S: [each([0.5, 1.5, 2.5, 3.5], 0.5)], P: [broken([0, 1, 2, 3, 2, 1, 0, 1])],
+      A: [each([1, 3], 1)], B: [each([0, 1, 2, 3], 0.75)], C: [[[0, 0.75], [1, 0.75], [2.5, 0.5], [3, 0.75]]], K: [[[0, 0.75], [1, 3]]],
+      S: [[[0.5, 0.5], [1.5, 0.25], [2.5, 0.5], [3.75, 0.25]]],
+      P: [[[0, 0.75, 0], [0.75, 0.25, 1], [1, 0.75, 2], [1.75, 0.25, 3], [2, 0.75, 2], [2.75, 0.25, 1], [3, 1, 0]]],
     },
     left: {
-      b: [[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]],
+      b: [[0, 2, ['R', '5'], [5, 1]], [2, 1, ['R', '6'], [5, 1]], [3, 1, ['R', '5'], [5, 1]]],
       o: [0, 1, 2, 3].map((beat) => [beat, 1, ['R', beat % 2 ? '6' : '5'], [5, beat % 2 ? 1 : 2]]),
-      t: walk(['R', '3', '5', '>']), m: walk(['R', '8', '6', '5']),
+      t: walk(['R', '3', '5', '>']),
+      // Boogie-woogie: the left hand climbs and falls the chord with its sixth in a long-short shuffle pattern.
+      m: [[0, 0.75, ['R']], [0.75, 0.25, ['3']], [1, 0.75, ['5']], [1.75, 0.25, ['6']], [2, 0.75, ['8']], [2.75, 0.25, ['6']], [3, 0.75, ['5']], [3.75, 0.25, ['3']]],
     },
     words: { right: ['chords on 2 and 4', 'four chords to the bar'], left: ['open fifths', 'shuffle fifth and sixth'], feel: 'Shuffle feel, written in straight quarters',
-      advanced: ['four-note seventh voicings', 'off-beat organ stabs', 'broken seventh chords', 'boogie walk', 'sixteen-bar blues arrangement'] },
+      advanced: ['four-note seventh voicings', 'off-beat organ stabs', 'broken seventh chords in shuffle rhythm', 'boogie-woogie eighths', 'sixteen-bar blues arrangement'] },
   },
   {
-    drums: 'genre-reggae', mode: 'minor',
+    drums: 'genre-reggae', mode: 'minor', shape: 3,
+    fill: { run: [[0.5, 0.25], [0.75, 0.25], [1, 0.5], [1.5, 0.25], [1.75, 0.25]], climb: [[0.5, 0.5], [1, 0.5], [1.5, 0.25], [1.75, 0.25]] },
     right: {
       A: [each([1, 3], 0.5)], B: [each([1, 1.25, 3, 3.25], 0.25)], C: [[[1, 0.5], [2.5, 0.25], [3, 0.5]]], K: [[[1, 0.5], [3, 1]]],
       S: [[[0.5, 0.25], [1, 0.5], [2.5, 0.25], [3, 0.5]]], P: [[[0.5, 0.25, 0], [1, 0.5, 2], [1.5, 0.25, 1], [2.5, 0.25, 0], [3, 0.5, 2], [3.5, 0.25, 1]]],
@@ -75,11 +92,12 @@ const GENRES: Genre[] = [
       advanced: ['seventh-chord skanks', 'pushed skanks', 'organ bubble', 'melodic bass line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-pop', mode: 'major', pedal: [0, 5, 7],
+    drums: 'genre-pop', mode: 'major', pedal: [0, 5, 7], shape: 2,
+    fill: { run: [[0, 0.5], [0.5, 0.5], [1, 0.25], [1.25, 0.25], [1.5, 0.5]], climb: [[0, 0.75], [0.75, 0.75], [1.5, 0.25], [1.75, 0.25]], up: true },
     right: {
-      A: [each([0, 2], 2)], B: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]],
-      C: [[[0, 1], [1, 1], [2, 1.5], [3.5, 0.5]]], K: [[[0, 4]]], S: [[[0, 0.75], [0.75, 1.25], [2.5, 0.5], [3, 1]]],
-      P: [broken([0, 1, 2, 3, 0, 1, 2, 3])],
+      A: [[[0, 2], [2, 1.5], [3.5, 0.5]]], B: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]],
+      C: [[[0, 1], [1, 1], [2, 1.5], [3.5, 0.5]]], K: [[[0, 2.5], [2.5, 1.5]]], S: [[[0, 0.75], [0.75, 1.25], [2.5, 0.5], [3, 1]]],
+      P: [[[0, 0.5, 0], [0.5, 0.5, 2], [1, 0.5, 1], [1.5, 0.5, 3], [2, 1, 2], [3, 0.5, 1], [3.5, 0.5, 3]]],
     },
     left: {
       b: [[0, 4, ['R', '8'], [5, 1]]],
@@ -90,11 +108,12 @@ const GENRES: Genre[] = [
       advanced: ['add9 and seventh voicings', 'syncopated pushes', 'broken-chord eighths', 'moving bass line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-disco', mode: 'dorian',
+    drums: 'genre-disco', mode: 'dorian', shape: 1,
+    fill: { run: [[0, 0.25], [0.25, 0.25], [0.5, 0.25], [0.75, 0.25], [1, 1]], climb: [[0, 0.25], [0.25, 0.25], [0.5, 0.25], [0.75, 1.25]], up: true },
     right: {
       A: [each([0.5, 1.5, 2.5, 3.5], 0.5)], B: [[[0, 0.5], [0.75, 0.25], [1.5, 0.5], [2.5, 0.25], [2.75, 0.25], [3.5, 0.5]]],
       C: [[[0, 0.25], [0.5, 0.5], [1.5, 0.25], [2, 0.5], [3.5, 0.5]]], K: [[[0.5, 0.5], [1.5, 2.5]]],
-      S: [[[0.25, 0.25], [0.75, 0.5], [1.5, 0.25], [2.25, 0.25], [2.75, 0.5], [3.5, 0.5]]], P: [broken([0, 1, 2, 3, 2, 1, 2, 3])],
+      S: [[[0.25, 0.25], [0.75, 0.5], [1.5, 0.25], [2.25, 0.25], [2.75, 0.5], [3.5, 0.5]]], P: [[[0, 0.25, 0], [0.25, 0.25, 3], [0.5, 0.5, 1], [1, 0.25, 0], [1.25, 0.25, 3], [1.5, 0.5, 2], [2, 0.25, 0], [2.25, 0.25, 3], [2.5, 0.5, 1], [3, 1, 2]]],
     },
     left: {
       b: quarters(['R'], [5], 0.75),
@@ -103,30 +122,33 @@ const GENRES: Genre[] = [
       m: walk(['R', '8', '5', '8', 'R', '8', '7', '8'], 0.5),
     },
     words: { right: ['off-beat chords', 'sixteenth-note stabs'], left: ['four on the floor', 'octave bounce'], feel: 'Four on the floor, chords between the beats',
-      advanced: ['ninth-chord voicings', 'sixteenth-note pushes', 'broken-chord eighths', 'octave-and-seventh bass', 'sixteen-bar arrangement'] },
+      advanced: ['ninth-chord voicings', 'sixteenth-note pushes', 'broken-chord sixteenths', 'octave-and-seventh bass', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-jazz-swing', mode: 'major',
+    drums: 'genre-jazz-swing', mode: 'major', shape: 3,
+    fill: { run: [[0, 0.25], [0.25, 0.25], [0.5, 0.5], [1, 0.5], [1.5, 0.5]], climb: [[0, 0.5], [0.5, 0.25], [0.75, 0.75], [1.5, 0.5]] },
     right: {
-      A: [each([0, 2], 2)], B: [each([1, 3], 0.75)], C: [[[0, 0.75], [1.5, 1]]], K: [[[0, 4]]], S: [[[0, 0.5], [1.5, 1], [3.5, 0.5]]],
-      P: [broken([0, 1, 2, 3, 2, 1, 0, 1])],
+      A: [each([0, 2], 2)], B: [each([1, 3], 0.75)], C: [[[0, 0.75], [1.5, 1]]], K: [[[0, 0.5], [1.5, 2.5]]], S: [[[0, 0.5], [1.5, 1], [3.5, 0.5]]],
+      // Comping broken across the beat: a quarter, two eighths, then quarters, the way a pianist spreads a voicing.
+      P: [[[0, 1, 0], [1, 0.5, 2], [1.5, 0.5, 3], [2, 1, 1], [3, 1, 2]]],
     },
     left: {
-      b: [[0, 2, ['R', '7'], [5, 1]], [2, 2, ['R', '7'], [5, 1]]],
+      b: [[0, 1.5, ['R', '7'], [5, 1]], [2.5, 1.5, ['R', '3'], [5, 2]]],
       o: [[0, 1, ['R'], [5]], [1, 1, ['3'], [3]], [2, 1, ['5'], [2]], [3, 1, ['6'], [1]]],
       t: walk(['R', '3', '5', '>']), m: walk(['R', '5', '3', '>']),
     },
     words: { right: ['half-note voicings', 'comping on 2 and 4'], left: ['root and seventh shells', 'walking quarters'], feel: 'Swing, written in straight quarters',
-      advanced: ['ninth-chord voicings', 'anticipated comping', 'broken-chord eighths', 'walking bass line', 'sixteen-bar arrangement'] },
+      advanced: ['ninth-chord voicings', 'anticipated comping', 'spread comping voicings', 'walking bass line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-bossa-nova', mode: 'major', pedal: [0, 5],
+    drums: 'genre-bossa-nova', mode: 'major', pedal: [0, 5], shape: 2,
+    fill: { run: [[0, 0.75], [0.75, 0.25], [1, 0.25], [1.25, 0.25], [1.5, 0.5]], climb: [[0, 1], [1, 0.5], [1.5, 0.25], [1.75, 0.25]] },
     right: {
-      A: [each([0], 4)], B: [[[0, 1], [1.5, 1], [3, 1]], [[1, 1], [2.5, 1.5]]], C: [[[0.5, 1], [2, 1], [3.5, 0.5]]], K: [[[0, 4]]],
+      A: [[[0, 3], [3, 1]]], B: [[[0, 1], [1.5, 1], [3, 1]], [[1, 1], [2.5, 1.5]]], C: [[[0.5, 1], [2, 1], [3.5, 0.5]]], K: [[[0, 1], [1.5, 2.5]]],
       S: [[[0, 0.5], [1, 1], [2.5, 1.5]]], P: [[[0, 0.5, 0], [0.5, 0.5, 1], [1, 0.5, 2], [1.5, 0.5, 3], [2, 1, 2], [3, 1, 1]]],
     },
     left: {
-      b: [[0, 2, ['R'], [5]], [2, 2, ['5'], [1]]],
+      b: [[0, 3, ['R'], [5]], [3, 1, ['5'], [1]]],
       o: [[0, 1.5, ['R'], [5]], [1.5, 0.5, ['5'], [1]], [2, 1.5, ['5'], [1]], [3.5, 0.5, ['R'], [5]]],
       t: [[0, 1.5, ['R']], [1.5, 0.5, ['5']], [2, 1, ['5']], [3, 1, ['>']]], m: [[0, 1.5, ['R']], [1.5, 0.5, ['3']], [2, 1.5, ['5']], [3.5, 0.5, ['>']]],
     },
@@ -134,36 +156,40 @@ const GENRES: Genre[] = [
       advanced: ['ninth-chord voicings', 'anticipated bossa figure', 'broken-chord guitar figure', 'moving bossa bass', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-metal', mode: 'minor',
+    drums: 'genre-metal', mode: 'minor', shape: 0,
+    fill: { run: [[0, 0.25], [0.25, 0.25], [0.5, 0.5], [1, 0.25], [1.25, 0.75]], climb: [[0, 0.5], [0.5, 0.25], [0.75, 0.25], [1, 1]] },
     right: {
       A: [each([0, 1, 2, 3], 1)], B: [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5], [beat + 0.5, 0.25], [beat + 0.75, 0.25]] as Strokes)],
-      C: [[[0, 0.5], [0.5, 0.5], [1, 1], [2, 0.5], [2.5, 0.5], [3, 1]]], K: [[[0, 2], [2, 2]]],
-      S: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]], P: [broken([0, 1, 2, 1, 0, 1, 2, 1])],
+      C: [[[0, 0.5], [0.5, 0.5], [1, 1], [2, 0.5], [2.5, 0.5], [3, 1]]], K: [[[0, 1.5], [1.5, 0.5], [2, 2]]],
+      S: [[[0, 0.5], [0.75, 0.75], [1.5, 0.25], [2, 0.5], [2.75, 0.75], [3.5, 0.5]]], P: [[[0, 0.25, 0], [0.25, 0.25, 1], [0.5, 0.25, 0], [0.75, 0.25, 1], [1, 0.5, 2], [1.5, 0.5, 1], [2, 0.25, 0], [2.25, 0.25, 1], [2.5, 0.25, 0], [2.75, 0.25, 1], [3, 1, 2]]],
     },
     left: {
       b: quarters(['R', '8'], [5, 1]),
       o: [0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.25, ['R'], [5]], [beat + 0.75, 0.25, ['R'], [5]]] as LeftCell),
       t: [[0, 0.5, ['R']], [0.5, 0.5, ['R']], [1, 0.5, ['R']], [1.5, 0.5, ['R']], [2, 1, ['5']], [3, 1, ['>']]],
-      m: walk(['R', 'R', '8', 'R', '5', 'R', '8', '5'], 0.5),
+      m: [[0, 0.5, ['R']], [0.5, 0.25, ['R']], [0.75, 0.25, ['R']], [1, 0.5, ['8']], [1.5, 0.25, ['R']], [1.75, 0.25, ['R']], [2, 0.5, ['5']], [2.5, 0.25, ['R']], [2.75, 0.25, ['R']], [3, 1, ['8']]],
     },
     words: { right: ['quarter-note power chords', 'galloping power chords'], left: ['quarter-note octaves', 'gallop'], feel: 'Sixteenth-note gallop',
-      advanced: ['full triad voicings', 'syncopated gallop', 'broken-chord eighths', 'pedal-point bass', 'sixteen-bar arrangement'] },
+      advanced: ['full triad voicings', 'syncopated gallop', 'tremolo broken chords', 'pedal-point gallop bass', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-drum-and-bass', mode: 'minor',
+    drums: 'genre-drum-and-bass', mode: 'minor', shape: 1,
+    fill: { run: [[0, 0.25], [0.75, 0.25], [1, 0.25], [1.5, 0.25], [1.75, 0.25]], climb: [[0, 0.75], [0.75, 0.25], [1.5, 0.25], [1.75, 0.25]] },
     right: {
-      A: [each([0], 4)], B: [[[0, 0.5], [1.5, 0.5], [2.5, 1]]], C: [[[0, 1.5], [2, 0.5], [3, 1]]], K: [[[0, 4]]],
-      S: [[[0.75, 0.75], [2.5, 0.5], [3.25, 0.75]]], P: [broken([0, 1, 2, 3, 2, 1, 2, 3])],
+      A: [each([0], 4)], B: [[[0, 0.5], [1.5, 0.5], [2.5, 1]]], C: [[[0, 1.5], [2, 0.5], [3, 1]]], K: [[[0, 3.5], [3.5, 0.5]]],
+      // Broken chords against the break: syncopated sixteenths that skip, never even eighths.
+      S: [[[0.75, 0.75], [2.5, 0.5], [3.25, 0.75]]], P: [[[0, 0.5, 0], [0.75, 0.25, 2], [1.5, 0.5, 1], [2.5, 0.5, 3], [3.25, 0.75, 2]]],
     },
     left: {
-      b: [[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]], o: [[0, 1.75, ['R'], [5]], [2.5, 1, ['8'], [1]], [3.5, 0.5, ['7'], [2]]],
+      b: [[0, 3, ['R', '5'], [5, 1]], [3.5, 0.5, ['8'], [1]]], o: [[0, 1.75, ['R'], [5]], [2.5, 1, ['8'], [1]], [3.5, 0.5, ['7'], [2]]],
       t: [[0, 1.75, ['R']], [2.5, 1, ['5']], [3.5, 0.5, ['>']]], m: [[0, 1.5, ['R']], [1.5, 0.5, ['8']], [2.5, 0.75, ['5']], [3.25, 0.75, ['7']]],
     },
     words: { right: ['held pads', 'syncopated stabs'], left: ['open fifths', 'two-step bass'], feel: 'Fast two-step, chords felt in half time',
-      advanced: ['ninth-chord pads', 'syncopated stabs over the break', 'broken-chord eighths', 'moving sub line', 'sixteen-bar arrangement'] },
+      advanced: ['ninth-chord pads', 'syncopated stabs over the break', 'syncopated broken chords', 'moving sub line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-soul-ballad', mode: 'major', pedal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    drums: 'genre-soul-ballad', mode: 'major', pedal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], shape: 2,
+    fill: { run: [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5], [2, 1]], climb: [[0, 1], [1, 0.5], [1.5, 1], [2.5, 0.5]] },
     right: {
       A: [each([0, 1.5, 3, 4.5], 1.5)], B: [Array.from({ length: 12 }, (_, eighth) => [eighth / 2, 0.5] as [number, number])],
       C: [[[0, 1], [1, 0.5], [1.5, 1.5], [3, 1], [4, 0.5], [4.5, 1.5]]], K: [[[0, 3], [3, 3]]],
@@ -178,11 +204,13 @@ const GENRES: Genre[] = [
       advanced: ['seventh-chord voicings', 'pushed triplet chords', 'triplet arpeggios', 'walking 12/8 bass', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-funk', mode: 'mixolydian',
+    drums: 'genre-funk', mode: 'mixolydian', shape: 3,
+    fill: { run: [[0, 0.25], [0.25, 0.25], [0.75, 0.25], [1, 0.25], [1.5, 0.5]], climb: [[0, 0.25], [0.5, 0.25], [0.75, 0.25], [1.25, 0.75]], up: true },
     right: {
       A: [each([0, 1.5, 2.5], 0.5)], B: [each([0.25, 0.75, 1.5, 2.25, 2.75, 3.5], 0.25)],
-      C: [[[0, 0.25], [0.5, 0.25], [1, 0.5], [2, 0.25], [2.5, 0.25], [3, 0.5]]], K: [[[0, 0.5], [1.5, 2.5]]],
-      S: [each([0.25, 1, 1.75, 2.5, 3.25, 3.75], 0.25)], P: [broken([0, 2, 1, 3, 0, 2, 1, 3])],
+      C: [[[0, 0.25], [0.5, 0.25], [1, 0.5], [2, 0.25], [2.5, 0.25], [3, 0.5]]], K: [[[0, 0.25], [0.75, 0.25], [1.5, 2.5]]],
+      S: [each([0.25, 1, 1.75, 2.5, 3.25, 3.75], 0.25)],
+      P: [[[0, 0.25, 0], [0.5, 0.25, 2], [0.75, 0.25, 1], [1.25, 0.25, 3], [1.5, 0.5, 2], [2.25, 0.25, 0], [2.75, 0.25, 1], [3, 0.25, 3], [3.5, 0.5, 2]]],
     },
     left: {
       b: [[0, 1, ['R'], [5]], [2, 1, ['R'], [5]]],
@@ -238,7 +266,7 @@ function build(genre: Genre, stage: number): PianoLesson {
   const id = `piano-${SLUG[genre.drums]}-${SUFFIX[stage]}`
   const { notes, pedals, fills } = arrange({
     id, beatsPerBar, chords, right: plan.right, left: plan.left, fills: plan.fills, palette: { right: genre.right, left: genre.left },
-    rich: stage >= 5, pedal: pedalled, tonic: parseChord(backingKey(style).tonic).root, mode: genre.mode,
+    rich: stage >= 5, pedal: pedalled, tonic: parseChord(backingKey(style).tonic).root, mode: genre.mode, contour: CONTOURS[genre.shape], fill: genre.fill,
   })
   const { right: rh, left: lh, feel, advanced } = genre.words
   const title = `${name} piano: ${[rh[0], rh[1], `${lh[1]} in the left hand`, 'fill', 'four-bar phrase', ...advanced][stage]}`

@@ -222,9 +222,10 @@ export function Workspace({
     engine.refresh()
   }, [engine, rate, loop, click, voiced, song, creative])
   useEffect(() => {
-    Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)) })
+    // The selected part leads the mix a little; a part alone (solo) has nothing to lead over.
+    Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)), selectedPart: track?.id ?? null })
     engine.refreshMix()
-  }, [engine, silent, volumes])
+  }, [engine, silent, volumes, track?.id])
   useEffect(() => {
     engine.countIn = countIn
   }, [engine, countIn])

@@ -183,30 +183,44 @@ export function fingerLine(hand: 'right' | 'left', notes: (PianoNote & { prefer?
   for (const note of notes) delete note.prefer
 }
 
-/** Five notes down the scale from the first scale note at or above A4 (and above the note before), fingers 5 to 1, over the second half of a bar. */
-export function scaleRun(tonic: number, mode: Mode, start: number, half: number, above = 0): PianoNote[] {
+/** A fill's rhythm: each note's start and length in quarter-note beats from the middle of the bar; the last note rings to the bar line. */
+export type FillRhythm = [start: number, beats: number][]
+
+const ringOut = (rhythm: FillRhythm, half: number): FillRhythm => rhythm.map(([at, beats], index) => [at, index === rhythm.length - 1 ? half - at : beats])
+
+/**
+ * Five steps of the scale over the second half of a bar: down from the first scale note at or above A4 (and above the
+ * note before) with fingers 5 to 1, or, when `up`, up from near the note before with fingers 1 to 5.
+ */
+export function scaleRun(tonic: number, mode: Mode, start: number, half: number, above = 0, rhythm?: FillRhythm, up = false): PianoNote[] {
   const scale = MODES[mode].map((step) => (tonic + step) % 12)
-  // It starts above the note before it, so the little finger can reach it from where the hand is.
-  let top = Math.max(69, above + 1)
-  while (!scale.includes(pc(top))) top++
-  const run = [top]
-  for (let pitch = top - 1; run.length < 5; pitch--) if (scale.includes(pc(pitch))) run.push(pitch)
-  const rhythm: [number, number][] = half === 3 ? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5], [2, 1]] : half >= 2
-    ? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.25], [1.75, half - 1.75]] : [[0, 0.25], [0.25, 0.25], [0.5, 0.25], [0.75, 0.25], [1, half - 1]]
-  return run.map((midi, index) => ({ trackId: 'piano', hand: 'right', midi, startBeat: start + rhythm[index][0], beats: rhythm[index][1],
-    velocity: index ? 0.6 : 0.7, finger: (5 - index) as Finger }))
+  const run: number[] = []
+  if (up) {
+    let low = Math.max(62, Math.min(76, above - 4))
+    while (!scale.includes(pc(low))) low++
+    for (let pitch = low; run.length < 5; pitch++) if (scale.includes(pc(pitch))) run.push(pitch)
+  } else {
+    // It starts above the note before it, so the little finger can reach it from where the hand is.
+    let top = Math.max(69, above + 1)
+    while (!scale.includes(pc(top))) top++
+    for (let pitch = top; run.length < 5; pitch--) if (scale.includes(pc(pitch))) run.push(pitch)
+  }
+  const timing = ringOut(rhythm ?? (half === 3 ? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5], [2, 1]] : half >= 2
+    ? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.25], [1.75, 0.25]] : [[0, 0.25], [0.25, 0.25], [0.5, 0.25], [0.75, 0.25], [1, 0.25]]), half)
+  return run.map((midi, index) => ({ trackId: 'piano', hand: 'right', midi, startBeat: start + timing[index][0], beats: timing[index][1],
+    velocity: index ? 0.6 : 0.7, finger: (up ? index + 1 : 5 - index) as Finger }))
 }
 
 /** Chord tones climbing to the octave over the second half of a bar, fingered by the solver from 1-2-3-5 (or 1-3-5) as the shape allows. */
-export function chordClimb(symbol: string, previous: number[] | null, start: number, half: number): (PianoNote & { prefer: Finger })[] {
+export function chordClimb(symbol: string, previous: number[] | null, start: number, half: number, rhythm?: FillRhythm): (PianoNote & { prefer: Finger })[] {
   const options = voicings(symbol, false).map((voiced) => voiced.filter((midi, index) => voiced.findIndex((other) => pc(other) === pc(midi)) === index))
     .filter((voiced) => voiced[0] + 12 <= 84)
   const voiced = chooseVoicing(symbol, false, previous, 76, options)
   const climb = [...voiced.slice(0, 3), voiced[0] + 12]
   const fingers: Finger[] = climb.length === 4 ? [1, 2, 3, 5] : [1, 3, 5]
-  const step = 0.5
-  return climb.map((midi, index) => ({ trackId: 'piano', hand: 'right', midi, startBeat: start + index * step,
-    beats: index === climb.length - 1 ? half - index * step : step, velocity: 0.62, prefer: fingers[index] }))
+  const timing = ringOut((rhythm ?? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5]]).slice(0, climb.length), half)
+  return climb.map((midi, index) => ({ trackId: 'piano', hand: 'right', midi, startBeat: start + timing[index][0],
+    beats: timing[index][1], velocity: 0.62, prefer: fingers[index] }))
 }
 
 export const spanAt = (spans: ChordSpan[], beat: number) => spans.findLast((span) => span.start <= beat + 1e-9)!
@@ -287,6 +301,8 @@ export type PhraseSpec = {
   mode: Mode
   /** The top note each bar's voicing aims for, so the phrase rises and falls; repeats if shorter than the phrase. */
   contour?: number[]
+  /** The style's own fill rhythms, and whether its run climbs instead of falling. */
+  fill?: { run?: FillRhythm; climb?: FillRhythm; up?: boolean }
 }
 
 // The first half stays low and rises; the answer starts higher and comes home; a sixteen-bar B section climbs again.
@@ -371,8 +387,9 @@ export function arrange(spec: PhraseSpec): { notes: PianoNote[]; pedals?: Pedal[
     if (fill[bar] !== '.') {
       const half = bpb / 2
       const span = spanAt(spans, start + half)
-      notes.push(...(fill[bar] === '1' ? chordClimb(span.symbol, previous, start + half, half) : scaleRun(spec.tonic, spec.mode, start + half, half,
-        notes.filter((note) => note.hand === 'right' && note.startBeat < start + half).sort((a, b) => a.startBeat - b.startBeat).at(-1)?.midi)))
+      notes.push(...(fill[bar] === '1' ? chordClimb(span.symbol, previous, start + half, half, spec.fill?.climb) : scaleRun(spec.tonic, spec.mode, start + half, half,
+        notes.filter((note) => note.hand === 'right' && note.startBeat < start + half).sort((a, b) => a.startBeat - b.startBeat).at(-1)?.midi,
+        spec.fill?.run, spec.fill?.up)))
       notes.push({ trackId: 'piano', hand: 'left', midi: leftPitch(span.symbol, 'R'), startBeat: start + half, beats: half, prefer: 5, velocity: 0.55 } as PianoNote)
     }
   }

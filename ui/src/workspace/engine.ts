@@ -66,6 +66,9 @@ function loadGmManifest(): Promise<GmManifest> {
  * One transport clock schedules local instrument samples and keeps recording stems
  * aligned to the score. Vocal melody uses a soft, formant-shaped vowel synth.
  */
+/** The other parts sit 2 dB under the selected one. */
+export const BACKGROUND = 10 ** (-2 / 20)
+
 export class Engine {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
@@ -102,6 +105,11 @@ export class Engine {
   click = false
   /** Ids of muted synth tracks and `stem:<id>` recording tracks. */
   muted = new Set<string>()
+  /**
+   * The selected part: it leads the synth mix by about 2 dB, made by turning the other parts down (never by boosting
+   * it), on top of the player's own levels. The click and count-in are not parts and are never changed.
+   */
+  selectedPart: string | null = null
   trackGains = new Map<string, number>()
   /** Chord voicings replaced by harmonize choices, by chord index. */
   swaps = new Map<number, number[]>()
@@ -533,11 +541,17 @@ export class Engine {
     }
   }
 
+  /** A part's bus level: muted, the player's fader, and the lead's emphasis over the other parts. */
+  level(id: string): number {
+    if (this.muted.has(id)) return 0
+    return (this.trackGains.get(id) ?? 1) * (this.selectedPart && id !== this.selectedPart ? BACKGROUND : 1)
+  }
+
   private bus(id: string): GainNode {
     let bus = this.buses.get(id)
     if (!bus) {
       bus = this.ctx!.createGain()
-      bus.gain.value = this.muted.has(id) ? 0 : this.trackGains.get(id) ?? 1
+      bus.gain.value = this.level(id)
       bus.connect(this.master!)
       this.buses.set(id, bus)
     }
@@ -547,7 +561,8 @@ export class Engine {
   private updateMix(): void {
     if (!this.ctx) return
     for (const [id, bus] of this.buses) {
-      bus.gain.setTargetAtTime(this.muted.has(id) ? 0 : this.trackGains.get(id) ?? 1, this.ctx.currentTime, 0.012)
+      // A short glide, so changing the selection while playing never clicks or restarts anything.
+      bus.gain.setTargetAtTime(this.level(id), this.ctx.currentTime, 0.04)
     }
   }
 

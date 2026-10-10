@@ -134,8 +134,11 @@ try {
       const run = lesson.notes.filter((n) => n.hand === 'right' && n.startBeat >= half - 1e-9 && n.startBeat < (bar + 1) * beatsPerBar)
       const span = chordAt(half)
       if (run.length === 5) {
-        assert.deepEqual(run.map((n) => n.finger), [5, 4, 3, 2, 1], `${where} fill fingering`)
-        assert.ok(run.every((n, i) => i === 0 || (run[i - 1].midi - n.midi >= 1 && run[i - 1].midi - n.midi <= 2)), `${where} fill steps down the scale`)
+        // A run of five scale steps: down with fingers 5 to 1, or (in some styles) up with 1 to 5.
+        const up = run[1].midi > run[0].midi
+        assert.deepEqual(run.map((n) => n.finger), up ? [1, 2, 3, 4, 5] : [5, 4, 3, 2, 1], `${where} fill fingering`)
+        assert.ok(run.every((n, i) => i === 0 || (Math.abs(run[i - 1].midi - n.midi) >= 1 && Math.abs(run[i - 1].midi - n.midi) <= 2 && (n.midi > run[i - 1].midi) === up)),
+          `${where} fill steps along the scale`)
       } else {
         const { root, intervals } = parseChord(span.symbol)
         assert.ok(run.length >= 3 && run.every((n, i) => (i === 0 || n.midi > run[i - 1].midi) && intervals.map((x) => pc(root + x)).includes(pc(n.midi))), `${where} bar ${bar + 1}: chord tones climb`)
@@ -188,6 +191,28 @@ try {
     assert.deepEqual(freshPosition(lesson).loop, { startBar: 1, endBar: lesson.bars })
   }
   assert.deepEqual([...pedalled].sort(), ['Latin: bossa nova', 'Pop', 'R&B and soul'], 'pedalling is written where the style needs it')
+  // Across styles, no motif is reused: compared with key, chords, tempo, fingers and velocity taken out (rhythms in beats,
+  // pitches as intervals), no right-hand bar rhythm belongs to two styles, no two styles' left-hand parts share a rhythm,
+  // and no two lessons open with the same four bars of two-hand rhythm and voicing size.
+  {
+    const bars = (lesson, read) => {
+      const { beatsPerBar } = lessonMeter(lesson)
+      return Array.from({ length: lesson.bars }, (_, bar) => read(lesson.notes.filter((n) => Math.floor(n.startBeat / beatsPerBar + 1e-9) === bar), bar * beatsPerBar))
+    }
+    const at = (n, start) => +(n.startBeat - start).toFixed(3)
+    const rightRhythm = (notes, start) => JSON.stringify([...new Set(notes.filter((n) => n.hand === 'right').map((n) => `${at(n, start)}/${n.beats}`))])
+    const leftRhythm = (notes, start) => JSON.stringify(notes.filter((n) => n.hand === 'left').map((n) => `${at(n, start)}/${n.beats}`))
+    const twoHands = (notes, start) => JSON.stringify([...Map.groupBy(notes, (n) => `${n.hand}@${at(n, start)}/${n.beats}`)].map(([key, group]) => `${key}x${group.length}`).sort())
+    const owners = new Map()
+    for (const lesson of PIANO_LESSONS) for (const rhythm of new Set(bars(lesson, rightRhythm))) owners.set(rhythm, new Set([...owners.get(rhythm) ?? [], lesson.style]))
+    const shared = [...owners].filter(([, styles]) => styles.size > 1)
+    assert.equal(shared.length, 0, `right-hand bar rhythms shared across styles: ${shared.map(([r, s]) => `${r} in ${[...s]}`).slice(0, 3)}`)
+    for (const [i, a] of PIANO_LESSONS.entries()) for (const b of PIANO_LESSONS.slice(i + 1)) {
+      if (a.style === b.style) continue
+      assert.notEqual(JSON.stringify(bars(a, leftRhythm)), JSON.stringify(bars(b, leftRhythm)), `${a.id} and ${b.id} share a left-hand part`)
+      assert.notEqual(JSON.stringify(bars(a, twoHands).slice(0, 4)), JSON.stringify(bars(b, twoHands).slice(0, 4)), `${a.id} and ${b.id} open with the same four bars`)
+    }
+  }
   // Flat keys are spelled in flats (Eb major, F minor), sharp keys in sharps.
   for (const id of ['piano-soul-phrase', 'piano-drum-and-bass-phrase']) assert.doesNotMatch(pianoXml(pianoLessonSong(pianoLessonById(id))), /<alter>1<\/alter>/, `${id} is spelled in flats`)
   assert.doesNotMatch(pianoXml(pianoLessonSong(pianoLessonById('piano-rock-phrase'))), /<alter>-1<\/alter>/, 'A major is spelled in sharps')
