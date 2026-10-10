@@ -387,7 +387,7 @@ export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; on
         </table>
           <h4 className="lesson-subhead">How to practise</h4>
           <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
-          <p className="lesson-note">Finger numbers are written over the notes (1 thumb to 5 little finger) and shown on the 3D keyboard as each key plays:
+          <p className="lesson-note">With Fingering on, finger numbers (1 thumb to 5 little finger) show on the keys in Hands & keys and on the 3D keyboard as each key plays:
             <b className="hand-left"> left hand in blue</b>, <b className="hand-right">right hand in orange</b>. Speed starts at the lesson&apos;s starting tempo;
             raise it with ] as it gets comfortable.</p>
         </details>

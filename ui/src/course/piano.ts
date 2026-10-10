@@ -291,7 +291,7 @@ function build(genre: Genre, stage: number): PianoLesson {
     meter: drums.meter, tempo: { start: Math.round(drums.tempo.target * (stage < 5 ? 0.6 : 0.55)), target: drums.tempo.target },
     hands: `Right hand: ${rightWords}, written fingers 1–5 · Left hand: ${leftWords}${pedalled ? ' · Right foot: sustain pedal' : ''}`,
     steps: [
-      'Play each hand alone first, with the drums and bass, reading the finger numbers over the notes.',
+      'Play each hand alone first, with the drums and bass, following the finger numbers on the keyboard (Hands & keys or the 3D keyboard).',
       ...pedalStep,
       fills.length ? 'In a fill the right hand plays alone over the held root; land back on the next chord with the next bar.'
         : 'Keep the chords short where they are written short: the rests are part of the groove.',
