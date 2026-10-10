@@ -505,6 +505,19 @@ try {
         assert.equal(loadPrefs().kitStyle, style, `the ${style} kit and look are remembered`)
       }
       assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: true, sticking: false, kitStyle: 'electronic:Realistic' })
+      for (const view of ['score', 'hands', 'keyboard']) {
+        savePref('pianoView', view)
+        assert.equal(loadPrefs().pianoView, view, `the ${view} piano view is remembered`)
+      }
+      for (const view of ['score', 'kit']) {
+        savePref('drumsView', view)
+        assert.equal(loadPrefs().drumsView, view, `the ${view} drum view is remembered`)
+        assert.equal(loadPrefs().pianoView, 'keyboard', 'the drum view does not replace the piano view')
+      }
+      savePref('pianoView', 'hands')
+      savePref('click', false)
+      assert.deepEqual(loadPrefs(), { countIn: false, rate: 0.65, click: false, sticking: false, kitStyle: 'electronic:Realistic',
+        pianoView: 'hands', drumsView: 'kit' }, 'saving another preference keeps both view choices')
       assert.deepEqual([...store.keys()], ['mizan:practice'], 'one key, and nothing else is written')
       assert.equal(warnings.length, 0)
       for (const [stored, expected] of [
@@ -514,11 +527,14 @@ try {
         ['{"kitStyle":"illustrated"}', { kitStyle: 'acoustic:ClayStudyModel' }], ['{"kitStyle":"electronic:LowPoly"}', { kitStyle: 'electronic:ClayStudyModel' }],
         ['{"kitStyle":"acoustic:HandPaintedAnime"}', { kitStyle: 'acoustic:ClayStudyModel' }], ['{"kitStyle":"electronic:StylizedAnimated3D"}', { kitStyle: 'electronic:ClayStudyModel' }], ['{"kitStyle":"studio"}', { kitStyle: 'electronic:Realistic' }],
         ['{"kitStyle":"acoustic"}', { kitStyle: 'acoustic:Realistic' }],
+        ['{"pianoView":"kit","drumsView":"hands","click":true}', { click: true }],
+        ['{"pianoView":false,"drumsView":null,"rate":0.75}', { rate: 0.75 }],
+        ['{"pianoView":"hands","drumsView":"score"}', { pianoView: 'hands', drumsView: 'score' }],
       ]) {
         store.set('mizan:practice', stored)
         assert.deepEqual(loadPrefs(), expected, `restores what it can from ${stored}`)
       }
-      assert.equal(warnings.length, 6, 'each unusable value is reported')
+      assert.equal(warnings.length, 10, 'each unusable value is reported')
     } finally {
       console.warn = warn
       delete globalThis.localStorage
