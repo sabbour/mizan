@@ -88,6 +88,7 @@ try {
   const readabilityOnly = process.argv.includes('--cairokee-readability')
   const courseOnly = process.argv.includes('--course')
   if (courseOnly) {
+    console.log(await evaluate(`(${backingChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
       console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'session')`))
@@ -1642,6 +1643,109 @@ async function realHostChecks(opened) {
   } finally { engine.dispose() }
 }
 
+async function backingChecks() {
+  const { Engine } = await import('/src/workspace/engine.ts')
+  const { LESSONS, lessonSong } = await import('/src/course/curriculum.ts')
+  const check = (value, message) => { if (!value) throw new Error(message) }
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const genre = LESSONS.filter((lesson) => lesson.collection === 'genre')
+  check(genre.length === 55 && genre.every((lesson) => lessonSong(lesson).tracks.map((t) => t.id).join() === 'drums,bass,harmony'), 'All 55 genre lessons carry drums, bass and chords')
+  const song = lessonSong(LESSONS.find((lesson) => lesson.id === 'genre-funk-phrase'))
+  const engine = new Engine(song)
+  engine.countIn = false
+  const errors = []
+  engine.onError = (message) => errors.push(message)
+  const calls = []
+  const gmNote = engine.gmNote.bind(engine)
+  engine.gmNote = (time, midi, duration, velocity, id, program) => { calls.push({ id, time, midi }); return gmNote(time, midi, duration, velocity, id, program) }
+  const drum = engine.drum.bind(engine)
+  engine.drum = (time, hit, id) => { calls.push({ id, time, beat: hit.startBeat }); return drum(time, hit, id) }
+  const requests = []
+  const originalFetch = window.fetch
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args)
+    if (String(args[0]).startsWith('/samples/fluidr3/')) requests.push({ url: String(args[0]), status: response.status })
+    return response
+  }
+  try {
+    await engine.play()
+    check(errors.length === 0, errors.join('; '))
+    const programs = song.tracks.slice(1).map((track) => track.gmProgram)
+    check(programs.every((program) => engine.gmSamples.get(program)?.length), `Backing samples decode for GM programs ${programs}`)
+    check(requests.length > 0 && requests.every(({ status }) => status === 200), `Backing samples load locally: ${JSON.stringify(requests.map((r) => r.status))}`)
+    // One clock: the bass and the drums at beat 0 are scheduled for the same instant; the chords follow at their written offset.
+    await wait(200)
+    const first = (id) => calls.find((call) => call.id === id)
+    const spb = engine.seconds(0, 1)
+    const kick = calls.find((call) => call.id === 'drums' && call.beat === 0)
+    check(Math.abs(first('bass').time - kick.time) < 1e-6, `Bass and drums share beat 0 (${first('bass').time} vs ${kick.time})`)
+    check(Math.abs(first('harmony').time - (kick.time + 0.25 * spb)) < 1e-6, 'The clavinet chop lands on "1 e" by the same clock')
+    // Mixer: each part is heard alone, and muting everything is silence.
+    const analyser = engine.ctx.createAnalyser()
+    engine.master.connect(analyser)
+    const data = new Float32Array(analyser.fftSize)
+    const peak = async (milliseconds) => {
+      let most = 0
+      const until = performance.now() + milliseconds
+      do {
+        await wait(20)
+        analyser.getFloatTimeDomainData(data)
+        most = Math.max(most, Math.sqrt(data.reduce((sum, value) => sum + value * value, 0) / data.length))
+      } while (performance.now() < until)
+      return most
+    }
+    const alone = {}
+    for (const only of ['drums', 'bass', 'harmony', 'none']) {
+      engine.muted = new Set(['drums', 'bass', 'harmony'].filter((id) => id !== only))
+      engine.refreshMix()
+      await wait(150)
+      engine.seek(0)
+      alone[only] = await peak(1200)
+    }
+    check(alone.drums > 0.001 && alone.bass > 0.0005 && alone.harmony > 0.0005 && alone.none < 0.00001, `Each part sounds alone and all-muted is silent: ${JSON.stringify(alone)}`)
+    engine.muted = new Set()
+    engine.refreshMix()
+    // Pause stops every voice, including held bass and chord notes.
+    engine.seek(0)
+    await wait(400)
+    engine.pause()
+    await wait(450)
+    const paused = await peak(300)
+    check(paused < 0.00001 && engine.nodes.size === 0, `Pause silences the backing (${paused}, ${engine.nodes.size} voices)`)
+    // Seek and loop: scheduling restarts from the new place on the same clock, and the loop repeats the backing.
+    engine.loop = { startBar: 4, endBar: 4 }
+    engine.rate = 0.5
+    calls.length = 0
+    engine.seek(12)
+    await engine.play()
+    await wait(200)
+    const slow = engine.seconds(0, 1)
+    check(Math.abs(slow - 2 * spb) < 1e-6, `Half speed doubles the beat (${slow} vs ${spb})`)
+    const bass = calls.filter((call) => call.id === 'bass')
+    const drums = calls.filter((call) => call.id === 'drums' && call.beat === 12)
+    check(bass.length && drums.length && Math.abs(bass[0].time - drums[0].time) < 1e-6, 'After a seek the bass and drums restart together on bar 4')
+    check(bass.every((call) => call.time >= bass[0].time - 1e-9), 'Nothing before the seek point is scheduled')
+    const loopBeats = 4 * slow
+    await wait(loopBeats * 1000 + 400)
+    const again = calls.filter((call) => call.id === 'bass' && Math.abs(call.time - (bass[0].time + loopBeats)) < 1e-6)
+    check(again.length === 1, `The loop repeats the bass from bar 4 (${calls.filter((c) => c.id === 'bass').map((c) => c.time.toFixed(3))})`)
+    // The fill bar stops the backing at its half bar.
+    check(calls.filter((call) => call.id !== 'drums').every((call) => ((call.time - bass[0].time) / slow + 1e-6) % 4 < 2 + 1e-5),
+      `The backing rests during the fill (${calls.filter((c) => c.id !== 'drums').map((c) => ((c.time - bass[0].time) / slow).toFixed(3))})`)
+    // Changing lesson disposes the old engine: its context closes and its voices stop.
+    const ctx = engine.ctx
+    engine.dispose()
+    await wait(100)
+    check(ctx.state === 'closed' && engine.nodes.size === 0, `The old lesson's sound stops (${ctx.state})`)
+    check(errors.length === 0, errors.join('; '))
+    return `Backing checks passed: 55 lessons with bass and chords; local GM samples ${programs}; one clock with the drums; solo/mute per part ${JSON.stringify(alone)}; ` +
+      'pause, seek, half speed, loop and lesson change stop and restart every voice; backing rests for the fill.'
+  } finally {
+    window.fetch = originalFetch
+    engine.dispose()
+  }
+}
+
 async function courseChecks(width, phase) {
   const check = (value, message) => { if (!value) throw new Error(message) }
   const wait = async (test, message) => {
@@ -1719,9 +1823,30 @@ async function courseChecks(width, phase) {
   check(document.querySelectorAll('.course-level').length === 8, 'Lessons are grouped in eight levels')
   check(document.querySelector('#course-inspired')?.textContent.startsWith('Inspired by great drummers') &&
     document.querySelector('#course-genre')?.textContent.startsWith('Grooves by genre'), 'The two style collections are separate sections')
-  check(document.querySelectorAll('.course-collection .course-lesson').length === 19, 'The collections list their lessons')
+  check(document.querySelectorAll('.course-collection .course-lesson').length === 8, 'The inspired collection lists its lessons')
+  check(document.querySelectorAll('.course-genre').length === 11 && document.querySelectorAll('.course-genre .course-lesson').length === 55 &&
+    [...document.querySelectorAll('.course-genre')].every((group) => group.querySelectorAll('.course-lesson').length === 5 &&
+      [...group.querySelectorAll('.course-style')].map((item) => item.textContent).join('|') === ' · Basic groove| · Variation| · Variation| · Fill| · Four-bar phrase'),
+    'The genre lessons are grouped by style, five each, from the basic groove to a four-bar phrase')
   const lessons = [...document.querySelectorAll('.course-lesson')]
   check(lessons.every((button) => button.getBoundingClientRect().right <= innerWidth), `Course rows fit at ${width}px`)
+  // A genre lesson: drums are the score, the kit and the selected track; the original bass and chords play along and mute on their own.
+  await openLesson('Rock kick variations')
+  check(document.querySelector('.ws-song').textContent === 'Rock kick variations' && document.querySelector('.track-button')?.textContent.includes('Drum kit'),
+    `The genre lesson opens on the drums: ${document.querySelector('.track-button')?.textContent}`)
+  check(document.querySelector('.lesson-panel')?.textContent.includes('Backing') && document.querySelector('.lesson-panel').textContent.includes('A5 – D5'),
+    'The lesson names its backing and chords')
+  await wait(() => document.querySelector('.practice-kit'), 'The kit shows for the genre lesson')
+  document.querySelector('.track-button').click()
+  await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
+  const muteButton = (name) => document.querySelector(`[aria-label="Mute ${name}"]`)
+  check(muteButton('Drum kit') && muteButton('Bass (picked)') && muteButton('Guitar (overdriven power chords)'), 'Drums, bass and chords are each in the mixer, all audible')
+  muteButton('Bass (picked)').click()
+  await wait(() => document.querySelector('[aria-label="Unmute Bass (picked)"]') && muteButton('Guitar (overdriven power chords)') && muteButton('Drum kit'), 'The bass mutes alone')
+  document.querySelector('[aria-label="Unmute Bass (picked)"]').click()
+  await wait(() => muteButton('Bass (picked)'), 'The bass unmutes')
+  document.querySelector('.track-button').click()
+  await back()
   await openLesson('Groove, fill, crash')
   check(document.querySelector('.ws-song').textContent === 'Lesson 23: Groove, fill, crash', `Lesson title: ${document.querySelector('.ws-song').textContent}`)
   check(/70 bpm · 70%/.test(where()), `The lesson starts at its starting tempo: ${where()}`)

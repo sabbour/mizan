@@ -1,4 +1,6 @@
 import type { BarMeter, DrumHit, DrumLane, Song } from '../workspace/song'
+import { backingKey, GENRE_STYLE, genreBacking, type Backing } from './accompaniment'
+import { GENRE_LESSONS } from './genres'
 
 /**
  * A built-in, offline drum course. Each lesson is authored as a few bars on a step grid and opens as an ordinary
@@ -65,7 +67,8 @@ export type Collection = 'inspired' | 'genre'
 export const COLLECTIONS: Record<Collection, { title: string; intro: string }> = {
   inspired: { title: 'Inspired by great drummers',
     intro: 'Original exercises on a hallmark of a famous drummer or band. They teach a style; they are not transcriptions of any recording.' },
-  genre: { title: 'Grooves by genre', intro: 'One short loop per style, with the feel and subdivision that make it recognisable.' },
+  genre: { title: 'Grooves by genre',
+    intro: 'Five lessons per style: the basic groove, two variations, a fill and a four-bar phrase. Each plays with an original bass line and chords in the style; mute or turn them down in the track list.' },
 }
 
 export const LEVELS = ['Pulse and rests', 'Subdivision', 'Rudiments', 'Grooves', 'Limb independence', 'Fills', 'Meter', 'Advanced']
@@ -81,7 +84,7 @@ const SEXTUPLETS = '1 la li & la li 2 la li & la li 3 la li & la li 4 la li & la
 const ALTERNATE = (notes: number) => Array.from({ length: notes }, (_, i) => (i % 2 ? 'L' : 'R')).join(' ')
 const twice = (bar: LessonBar) => [bar, bar]
 
-export const LESSONS: Lesson[] = [
+const BASE_LESSONS: Lesson[] = [
   {
     id: 'quarter-pulse', level: 1, title: 'Steady quarter notes', meter: { numerator: 4, denominator: 4 },
     goal: 'Play exactly with the click: one even stroke on every beat, the first one a little stronger.',
@@ -647,6 +650,27 @@ export const LESSONS: Lesson[] = [
   },
 ]
 
+/** The course, then each collection; every genre's first lesson is followed by the rest of that genre's lessons. */
+export const LESSONS: Lesson[] = BASE_LESSONS.flatMap((lesson) => lesson.collection === 'genre' ? [lesson, ...GENRE_LESSONS[lesson.id]] : [lesson])
+
+/** What each of a genre's five lessons teaches, in order. */
+export const GENRE_STAGES = ['Basic groove', 'Variation', 'Variation', 'Fill', 'Four-bar phrase']
+
+/** A genre's lessons, in order. */
+export const genreLessons = (style: string) => LESSONS.filter((lesson) => lesson.collection === 'genre' && lesson.style === style)
+
+/** Each genre with its lessons, in course order. */
+export const genres = () => [...new Set(lessonList({ collection: 'genre' }).map((lesson) => lesson.style!))]
+  .map((style) => ({ style, lessons: genreLessons(style) }))
+
+/** Where a genre lesson sits among its genre's five, and what that step teaches. */
+export function lessonStage(lesson: Lesson): { index: number; of: number; name: string } | null {
+  if (lesson.collection !== 'genre') return null
+  const lessons = genreLessons(lesson.style!)
+  const index = lessons.indexOf(lesson)
+  return { index, of: lessons.length, name: GENRE_STAGES[index] }
+}
+
 export const lessonById = (id: string) => LESSONS.find((lesson) => lesson.id === id)
 
 /** The lessons in the same list as this one: the progressive course or one collection, in order. */
@@ -656,6 +680,8 @@ export const lessonList = (lesson: Pick<Lesson, 'collection'>) => LESSONS.filter
 export const lessonNote = (lesson: Lesson) => {
   const list = lessonList(lesson)
   const where = `${list.indexOf(lesson) + 1} of ${list.length}`
+  const stage = lessonStage(lesson)
+  if (stage) return `${COLLECTIONS.genre.title} · ${lesson.style} · ${stage.name}, ${stage.index + 1} of ${stage.of} · Level ${lesson.level}`
   return lesson.collection
     ? `${COLLECTIONS[lesson.collection].title} · ${lesson.style} · Level ${lesson.level} · ${where}`
     : `Drum course · Level ${lesson.level} · ${where}`
@@ -729,10 +755,22 @@ export function lessonHits(lesson: Lesson): DrumHit[] {
   return hits.sort((a, b) => a.startBeat - b.startBeat)
 }
 
-/** The lesson as a song for the practice workspace: one authored drum track, no recording, nothing analysed. */
+/** The original bass and chord backing of a genre lesson; other lessons have none. */
+export function lessonBacking(lesson: Lesson): Backing | null {
+  if (lesson.collection !== 'genre') return null
+  const style = GENRE_STYLE[lesson.style!]
+  if (!style) throw new Error(`${lesson.id}: no backing for the ${lesson.style} genre`)
+  const fills: boolean[] = []
+  for (const { name, bars } of lesson.sections ?? [{ name: 'Groove', bars: lesson.bars.length }])
+    for (let bar = 0; bar < bars; bar++) fills.push(name === 'Fill')
+  return genreBacking(style, lesson.bars.length, lessonMeter(lesson).beatsPerBar, fills)
+}
+
+/** The lesson as a song for the practice workspace: the authored drum track and, for a genre, its backing; no recording, nothing analysed. */
 export function lessonSong(lesson: Lesson): Song {
   const { beatsPerBar, pulse } = lessonMeter(lesson)
   const bars = lesson.bars.length
+  const backing = lessonBacking(lesson)
   const barMap: BarMeter[] = lesson.bars.map((_, index) => ({
     startBeat: index * beatsPerBar, beats: beatsPerBar, numerator: lesson.meter.numerator,
     denominator: lesson.meter.denominator, status: 'explicit',
@@ -748,18 +786,20 @@ export function lessonSong(lesson: Lesson): Song {
     title: lesson.collection ? lesson.title : `Lesson ${lessonList(lesson).indexOf(lesson) + 1}: ${lesson.title}`,
     source: 'course',
     tracks: [{ id: 'drums', instrument: 'drums', name: 'Drum kit', detail: lesson.collection
-      ? 'Original practice pattern in this style (authored, not transcribed)' : 'Lesson pattern (authored, not transcribed)' }],
+      ? 'Original practice pattern in this style (authored, not transcribed)' : 'Lesson pattern (authored, not transcribed)' },
+    ...backing?.tracks ?? []],
     bpm: lesson.tempo.target * pulse,
     beatsPerBar,
     beatUnit: lesson.meter.denominator,
     barMap,
     bars,
-    key: null,
+    key: backing ? backingKey(backing.style) : null,
     sections,
     chords: [],
     piano: [],
     vocals: [],
     drums: lessonHits(lesson),
-    confidence: { piano: high, drums: high, chords: high, vocals: high },
+    ...backing ? { instrumentNotes: backing.notes } : {},
+    confidence: { piano: high, drums: high, chords: high, vocals: high, ...backing ? { other: high } : {} },
   }
 }

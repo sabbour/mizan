@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { COLLECTIONS, LEVELS, lessonList, type Collection, type Lesson, type LessonBar } from './curriculum'
+import { COLLECTIONS, genres, LEVELS, lessonBacking, lessonList, lessonStage, type Collection, type Lesson, type LessonBar } from './curriculum'
 import { tempoLabel } from './state'
 
 /** Consecutive identical bars share one count and sticking line. */
@@ -35,6 +35,8 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
   const previous = list[index - 1]
   const next = list[index + 1]
   const meter = `${lesson.meter.numerator}/${lesson.meter.denominator}`
+  const stage = lessonStage(lesson)
+  const backing = lessonBacking(lesson)
   return (
     <aside className="lesson-panel" aria-label={`Lesson ${index + 1} instructions`}>
       <div className="lesson-main">
@@ -42,10 +44,13 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
         <dl className="lesson-facts">
           {lesson.style && <div><dt>Style</dt><dd>{lesson.style}</dd></div>}
           {lesson.feel && <div><dt>Feel</dt><dd>{lesson.feel}</dd></div>}
+          {stage && <div><dt>Step</dt><dd>{stage.name}, <span className="num">{stage.index + 1} of {stage.of}</span> in {lesson.style}</dd></div>}
           <div><dt>{lesson.collection ? 'Difficulty' : 'Level'}</dt><dd>{lesson.collection ? 'after ' : ''}Level {lesson.level}, {LEVELS[lesson.level - 1]}</dd></div>
           <div><dt>Meter</dt><dd className="num">{meter}</dd></div>
           <div><dt>Tempo</dt><dd className="num">start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</dd></div>
           {lesson.limbs && <div><dt>Limbs</dt><dd>{lesson.limbs}</dd></div>}
+          {backing && <div><dt>Backing</dt><dd>{backing.tracks.map((track) => track.name).join(' and ')}, playing <span className="num">{backing.chords.join(' – ')}</span>.
+            Original parts made for this lesson; mute or turn them down in the track list.</dd></div>}
         </dl>
         <table className="lesson-counts">
           <tbody>
@@ -82,11 +87,14 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
 }
 
 function LessonButton({ lesson, onLesson }: { lesson: Lesson; onLesson: (id: string) => void }) {
+  const stage = lessonStage(lesson)
   return (
     <li>
       <button className="course-lesson" onClick={() => onLesson(lesson.id)}>
-        <span className="course-number num">{lessonList(lesson).indexOf(lesson) + 1}</span>
-        <span className="course-title">{lesson.title}{lesson.style && <span className="course-style"> · {lesson.style}</span>}</span>
+        <span className="course-number num">{stage ? stage.index + 1 : lessonList(lesson).indexOf(lesson) + 1}</span>
+        <span className="course-title">{lesson.title}{stage
+          ? <span className="course-style"> · {stage.name}</span>
+          : lesson.style && <span className="course-style"> · {lesson.style}</span>}</span>
         <span className="course-meta num">{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.tempo.start}–{tempoLabel(lesson, lesson.tempo.target)}
           {lesson.collection && ` · Level ${lesson.level}`}</span>
       </button>
@@ -120,9 +128,20 @@ export function CourseSection({ onLesson }: { onLesson: (id: string) => void }) 
           <section key={collection} className="course" aria-labelledby={`course-${collection}`}>
             <h2 id={`course-${collection}`} className="lib-h2">{COLLECTIONS[collection].title} <span className="dim num">{lessons.length}</span></h2>
             <p className="course-intro">{COLLECTIONS[collection].intro}</p>
-            <ol className="course-levels course-collection">
-              {lessons.map((lesson) => <LessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}
-            </ol>
+            {collection === 'genre' ? (
+              <ol className="course-levels course-genres">
+                {genres().map(({ style, lessons: steps }) => (
+                  <li key={style} className="course-genre">
+                    <h3>{style} <span className="dim num">{steps.length} lessons · Level {steps[0].level}–{steps.at(-1)!.level}</span></h3>
+                    <ol>{steps.map((lesson) => <LessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <ol className="course-levels course-collection">
+                {lessons.map((lesson) => <LessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}
+              </ol>
+            )}
           </section>
         )
       })}

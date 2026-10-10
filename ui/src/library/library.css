@@ -1906,8 +1906,9 @@
   list-style: none;
   border-top: 1px solid var(--line);
 }
-.course-level h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--ink); }
-.course-level ol { margin: 0; padding: 0; list-style: none; }
+.course-level h3, .course-genre h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--ink); }
+.course-genre h3 .dim { font-weight: 400; margin-left: 6px; }
+.course-level ol, .course-genre ol { margin: 0; padding: 0; list-style: none; }
 .course-lesson {
   display: grid;
   grid-template-columns: 2.2ch minmax(0, 1fr) auto;

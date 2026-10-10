@@ -5,11 +5,12 @@ import { createServer } from 'vite'
 globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
-  const { LESSONS, LEVELS, COLLECTIONS, FOOT_VOICES, VELOCITY, lessonHits, lessonList, lessonMeter, lessonNote, lessonSong } =
+  const { LESSONS, LEVELS, COLLECTIONS, FOOT_VOICES, VELOCITY, GENRE_STAGES, genres, lessonBacking, lessonHits, lessonList, lessonMeter, lessonNote, lessonSong, lessonStage } =
     await vite.ssrLoadModule('/src/course/curriculum.ts')
+  const { parseChord } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
   const { freshPosition, tempoLabel } = await vite.ssrLoadModule('/src/course/state.ts')
   const { measures, songBeats } = await vite.ssrLoadModule('/src/workspace/meter.ts')
-  const { drumXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
+  const { drumXml, instrumentXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
   const { kitStrike } = await vite.ssrLoadModule('/src/workspace/kit.ts')
   const { stickingFor, suggestSticking } = await vite.ssrLoadModule('/src/workspace/sticking.ts')
   const { loadPrefs, savePref } = await vite.ssrLoadModule('/src/workspace/prefs.ts')
@@ -19,8 +20,7 @@ try {
   const genre = lessonList({ collection: 'genre' })
   assert.deepEqual(Object.keys(COLLECTIONS), ['inspired', 'genre'])
   assert.equal(course.length + inspired.length + genre.length, LESSONS.length, 'every lesson is in the course or one collection')
-  assert.ok(course.length >= 30 && course.length <= 45, `a focused course (${course.length} lessons)`)
-  assert.ok(inspired.length >= 6 && inspired.length <= 12 && genre.length >= 8 && genre.length <= 14, 'balanced collections')
+  assert.deepEqual([course.length, inspired.length, genre.length, LESSONS.length], [37, 8, 55, 100], 'exact lesson counts')
   assert.equal(new Set(LESSONS.map((lesson) => lesson.id)).size, LESSONS.length, 'lesson ids are unique')
   assert.ok(course.every((lesson, i) => i === 0 || lesson.level >= course[i - 1].level), 'the course runs beginner to advanced')
   for (let level = 1; level <= LEVELS.length; level++)
@@ -41,7 +41,35 @@ try {
     assert.match(lesson.id, /^genre-/)
     assert.ok(lesson.style && lesson.feel, `${lesson.id} names its genre and feel`)
   }
-  assert.ok(new Set(genre.map((lesson) => lesson.style)).size === genre.length, 'one lesson per genre')
+  // Five lessons per genre, each genre's original lesson first: groove, two variations, a fill, a four-bar phrase.
+  const FIRST = ['genre-rock', 'genre-blues-shuffle', 'genre-reggae', 'genre-pop', 'genre-disco', 'genre-jazz-swing', 'genre-bossa-nova',
+    'genre-metal', 'genre-drum-and-bass', 'genre-soul-ballad', 'genre-funk']
+  const groups = genres()
+  assert.deepEqual(groups.map(({ lessons }) => lessons[0].id), FIRST, 'eleven genres, in their original order, each opening with its original lesson')
+  assert.deepEqual(groups.flatMap(({ lessons }) => lessons), genre, 'each genre\'s lessons are listed together')
+  assert.equal(new Set(genre.map((lesson) => lesson.feel)).size, genre.length, 'every genre lesson names its own feel')
+  for (const { style, lessons } of groups) {
+    assert.equal(lessons.length, 5, `${style} has five lessons`)
+    assert.deepEqual(lessons.map((lesson) => lessonStage(lesson).name), GENRE_STAGES)
+    assert.deepEqual(GENRE_STAGES, ['Basic groove', 'Variation', 'Variation', 'Fill', 'Four-bar phrase'])
+    assert.ok(lessons.every((lesson, i) => i === 0 || lesson.level >= lessons[i - 1].level), `${style} never gets easier`)
+    assert.ok(lessons.at(-1).level > lessons[0].level || lessons[0].level === 8, `${style} ends harder than it starts`)
+    assert.ok(lessons.every((lesson) => lesson.meter.numerator === lessons[0].meter.numerator), `${style} keeps its meter`)
+    const [, one, two, fill, phrase] = lessons
+    for (const variation of [one, two]) {
+      assert.ok(!variation.sections, `${variation.id} is a groove without a fill`)
+      assert.ok(JSON.stringify(variation.bars.map((b) => b.notes)) !== JSON.stringify(lessons[0].bars.map((b) => b.notes)), `${variation.id} changes the rhythm`)
+    }
+    assert.deepEqual(fill.sections, [{ name: 'Groove', bars: 1 }, { name: 'Fill', bars: 1 }], `${fill.id} is a groove bar and a fill bar`)
+    assert.deepEqual(phrase.sections, [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }], `${phrase.id} is three groove bars and a fill`)
+    assert.equal(phrase.bars.length, 4)
+    // A fill plays toms or a run of single strokes; the groove bars before it do not end the same way.
+    for (const lesson of [fill, phrase]) {
+      const last = lesson.bars.at(-1)
+      assert.ok(last.sticking.split(' ').length >= 4 && JSON.stringify(last.notes) !== JSON.stringify(lesson.bars[0].notes), `${lesson.id} ends with a fill`)
+    }
+    assert.match(lessonNote(fill), new RegExp(`^Grooves by genre · ${style.replace(/[&]/g, '\\$&')} · Fill, 4 of 5 · Level \\d$`))
+  }
   for (const lesson of [...inspired, ...genre]) {
     assert.ok(lesson.level >= 1 && lesson.level <= LEVELS.length, `${lesson.id} has a difficulty`)
     assert.ok(!/^Lesson \d/.test(lessonSong(lesson).title), 'collection lessons are not numbered as course lessons')
@@ -126,6 +154,73 @@ try {
     assert.doesNotMatch(drumXml(song, false), /<lyric/, 'no letters when sticking is off')
   }
   assert.equal(patterns.size, LESSONS.length, 'every lesson plays a different pattern')
+
+  // The 45 course and inspired lessons, and the 11 original genre lessons, are exactly as before (fingerprints from 7bc6089).
+  {
+    const { createHash } = await import('node:crypto')
+    const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+    const kept = LESSONS.filter((item) => item.collection !== 'genre')
+    assert.equal(hash(kept.map((item) => [item, lessonSong(item)])), '4c6f3a52ddac0fe7a9e09b74a2b968311d010b85f7f02f83e56147dfea7b0999', 'course and inspired lessons and their songs are unchanged')
+    assert.equal(hash(groups.map(({ lessons }) => lessons[0])), '2eaaef81f24b1ea4f0ba74e1a6be9dcdba192532824c7ad92835aad8e3fa0423', 'the original genre lessons are unchanged')
+    for (const item of kept) {
+      assert.equal(lessonBacking(item), null)
+      assert.deepEqual(lessonSong(item).tracks.map((track) => track.id), ['drums'], `${item.id} has no backing`)
+    }
+  }
+
+  // Every genre lesson has an original bass line and chord part: in time, in range, on the written chords, stopping for fills.
+  {
+    const { readFileSync } = await import('node:fs')
+    const manifest = JSON.parse(readFileSync(new URL('../public/samples/fluidr3/manifest.json', import.meta.url)))
+    const programs = new Set(manifest.instruments.map((item) => item.program))
+    const pc = (midi) => ((midi % 12) + 12) % 12
+    const onGrid = (beat) => Math.abs(beat * 4 - Math.round(beat * 4)) < 1e-9
+    const sounds = new Set()
+    for (const item of genre) {
+      const song = lessonSong(item)
+      const backing = lessonBacking(item)
+      const { beatsPerBar } = lessonMeter(item)
+      assert.deepEqual(song.tracks.map((track) => `${track.id}:${track.instrument}`), ['drums:drums', 'bass:other', 'harmony:other'], `${item.id}: drums first, then the backing`)
+      assert.ok(song.tracks.slice(1).every((track) => programs.has(track.gmProgram) && track.group !== 'creative' && /original/.test(track.detail) && /not transcribed/.test(track.detail)),
+        `${item.id}: backing plays from the local sound bank, is audible by default and is labelled as original`)
+      assert.ok(song.key && song.chords.length === 0 && song.piano.length === 0, `${item.id}: a key, and no generated chord track on top of the backing`)
+      assert.equal(backing.chords.length, item.bars.length, `${item.id}: one chord per bar`)
+      sounds.add(song.tracks.slice(1).map((track) => track.gmProgram).join('/'))
+      const fills = (item.sections ?? []).flatMap(({ name, bars }) => Array(bars).fill(name === 'Fill'))
+      for (const id of ['bass', 'harmony']) {
+        const notes = song.instrumentNotes[id]
+        assert.ok(notes.length >= item.bars.length, `${item.id} ${id} plays`)
+        const [low, high] = id === 'bass' ? [28, 55] : [40, 84]
+        for (const note of notes) {
+          const index = Math.floor(note.startBeat / beatsPerBar)
+          const end = note.startBeat + note.beats
+          assert.ok(note.trackId === id && Number.isInteger(note.midi) && note.midi >= low && note.midi <= high, `${item.id} ${id} pitch ${note.midi} in range`)
+          assert.ok(note.beats > 0 && onGrid(note.startBeat) && onGrid(note.beats) && note.velocity > 0 && note.velocity <= 1, `${item.id} ${id} note on the sixteenth grid`)
+          assert.ok(end <= (index + (fills[index] ? 0.5 : 1)) * beatsPerBar + 1e-9, `${item.id} ${id} stays in its bar${fills[index] ? ' and stops for the fill' : ''}`)
+          if (id === 'harmony') assert.ok(parseChord(backing.chords[index]).intervals.map((i) => pc(parseChord(backing.chords[index]).root + i)).includes(pc(note.midi)),
+            `${item.id} chord tone ${note.midi} belongs to ${backing.chords[index]}`)
+        }
+        // Monophonic bass and repeated chord tones never overlap themselves, so no voice is cut off or doubled.
+        const byPitch = Map.groupBy(notes, (note) => note.midi)
+        for (const [midi, same] of byPitch) same.sort((a, b) => a.startBeat - b.startBeat).forEach((note, i) =>
+          assert.ok(i === 0 || same[i - 1].startBeat + same[i - 1].beats <= note.startBeat + 1e-9, `${item.id} ${id} ${midi} does not overlap`))
+        if (id === 'bass') {
+          notes.forEach((note, i) => assert.ok(i === 0 || notes[i - 1].startBeat + notes[i - 1].beats <= note.startBeat + 1e-9, `${item.id} bass is one line`))
+          for (let bar = 0; bar < item.bars.length; bar++) {
+            const first = notes.find((note) => note.startBeat === bar * beatsPerBar)
+            assert.ok(first && pc(first.midi) === parseChord(backing.chords[bar]).root, `${item.id} bass starts bar ${bar + 1} on the root of ${backing.chords[bar]}`)
+          }
+        }
+        const xml = instrumentXml(song, song.tracks.find((track) => track.id === id))
+        assert.equal((xml.match(/<measure /g) ?? []).length, song.bars, `${item.id} ${id} engraves every bar`)
+        assert.doesNotMatch(xml, /NaN|undefined/, `${item.id} ${id} engraves cleanly`)
+      }
+      assert.deepEqual(song.drums, lessonHits(item), `${item.id}: the drums are unchanged by the backing`)
+    }
+    assert.equal(sounds.size, 11, 'each genre has its own pair of backing instruments')
+    // Same genre, same sound; the backing follows the lesson's length and fill.
+    for (const { lessons } of groups) assert.equal(new Set(lessons.map((item) => lessonSong(item).tracks.slice(1).map((t) => t.gmProgram).join())).size, 1)
+  }
 
   const lesson = (id) => LESSONS.find((item) => item.id === id)
   const bar = (id, index = 0) => lesson(id).bars[index]
@@ -325,8 +420,8 @@ try {
       delete globalThis.localStorage
     }
   }
-  console.log(`Drum course checks passed: ${course.length} course lessons in ${LEVELS.length} levels, ${inspired.length} inspired and ${genre.length} genre lessons; ` +
-    'counts, stickings and hands, five-piece kit, rests, dynamics, articulations, meters, notation, suggested sticking and preferences.')
+  console.log(`Drum course checks passed: ${course.length} course lessons in ${LEVELS.length} levels, ${inspired.length} inspired and ${genre.length} genre lessons in ${groups.length} genres; ` +
+    'counts, stickings and hands, five-piece kit, rests, dynamics, articulations, meters, notation, genre progression, original bass and chord backing, unchanged earlier lessons, suggested sticking and preferences.')
 } finally {
   await vite.close()
 }
