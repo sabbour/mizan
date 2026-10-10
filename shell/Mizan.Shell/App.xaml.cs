@@ -37,10 +37,11 @@ public partial class App : Application
             {
                 var current = AppInstance.GetCurrent();
                 var main = AppInstance.FindOrRegisterForKey("mizan-single-instance");
+                var activation = current.GetActivatedEventArgs();
                 if (!main.IsCurrent)
                 {
                     ShellLog.Write("Redirecting activation to the main instance.");
-                    await main.RedirectActivationToAsync(current.GetActivatedEventArgs());
+                    await main.RedirectActivationToAsync(activation);
                     using var process = Process.GetProcessById((int)main.ProcessId);
                     var hwnd = process.MainWindowHandle;
                     if (hwnd != 0 && IsIconic(hwnd)) ShowWindow(hwnd, 9);
@@ -49,11 +50,45 @@ public partial class App : Application
                     Exit();
                     return;
                 }
-                main.Activated += (_, _) => _window?.DispatcherQueue.TryEnqueue(() => _window.Activate());
+                var pendingActivations = new Queue<AppActivationArguments>();
+                var activationLock = new Lock();
+                main.Activated += (_, redirected) =>
+                {
+                    MainWindow? window;
+                    lock (activationLock)
+                    {
+                        window = _window;
+                        if (window is null)
+                        {
+                            pendingActivations.Enqueue(redirected);
+                            return;
+                        }
+                    }
+                    window.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        window.Activate();
+                        _ = window.HandleActivationAsync(redirected);
+                    });
+                };
+
+                var createdWindow = new MainWindow();
+                AppActivationArguments[] queued;
+                lock (activationLock)
+                {
+                    _window = createdWindow;
+                    queued = pendingActivations.ToArray();
+                    pendingActivations.Clear();
+                }
+                createdWindow.Activate();
+                _ = createdWindow.HandleActivationAsync(activation);
+                foreach (var redirected in queued) _ = createdWindow.HandleActivationAsync(redirected);
+                ShellLog.Write("Main window activated.");
+                return;
             }
 
             _window = new MainWindow();
             _window.Activate();
+            _ = _window.HandleActivationAsync(AppInstance.GetCurrent().GetActivatedEventArgs());
             ShellLog.Write("Main window activated.");
         }
         catch (Exception error)

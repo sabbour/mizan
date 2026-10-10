@@ -638,7 +638,12 @@ the source beat.
 Remaining limits: Beat This! cannot distinguish 3/4 from 6/8 or a tempo octave;
 without downbeat evidence analysis retains 4/4. MIDI/MusicXML imports
 preserve explicit meters such as 6/8, including changes within a file, pickups
-and partial final bars. There are no reliable semantic
+and partial final bars. Public MIDI search offers only files with confirmed
+per-file Public Domain, CC0, CC BY, or CC BY-SA terms from Wikimedia Commons,
+Mutopia, or Internet Archive. Archive imports require the item's exact CC0
+license URL and an original MIDI file with checked size and hashes. The imported
+library entry retains the source page, artist, license, and attribution;
+public-domain composition age is not used to infer a file license. There are no reliable semantic
 verse/chorus labels or validated meter-accuracy claims; no pedal modelling, imperfect learned
 piano isolation, heuristic velocities (not measured performance MIDI velocity), and
 no validated real-music benchmark set. Long audio is not capped

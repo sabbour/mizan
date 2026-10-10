@@ -21,6 +21,21 @@ class YoutubeSearchFailed(MizanError):
     message = "YouTube search is unavailable right now. Your library search still works."
 
 
+class YoutubeMusicSearchFailed(MizanError):
+    code = "youtube_music_search_failed"
+    message = "YouTube Music search is unavailable right now."
+
+
+class PopularChartUnavailable(MizanError):
+    code = "popular_chart_unavailable"
+    message = "The official YouTube music chart is unavailable right now."
+
+
+class MidiSearchFailed(MizanError):
+    code = "midi_search_failed"
+    message = "MIDI search is unavailable right now. Try again."
+
+
 class VideoUnavailable(MizanError):
     code = "video_unavailable"
     message = "This YouTube video is unavailable."

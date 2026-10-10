@@ -1,13 +1,17 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.IO;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Windows.AppLifecycle;
 using Windows.UI;
 using WinRT.Interop;
+using Windows.ApplicationModel.Activation;
+using Windows.Storage;
 
 namespace Mizan.Shell;
 
@@ -24,6 +28,8 @@ public sealed class MainWindow : Window
     private readonly WebView2 _browser = new();
     private readonly Grid _errorPanel = new();
     private readonly TextBlock _errorMessage = new();
+    private readonly Queue<string> _pendingMidiFiles = new();
+    private bool _webReady;
 
     public MainWindow()
     {
@@ -71,6 +77,13 @@ public sealed class MainWindow : Window
                     ShowError("Could not send a request to Mizan's background host.");
                 }
             };
+            _browser.CoreWebView2.NavigationStarting += (_, _) => _webReady = false;
+            _browser.CoreWebView2.NavigationCompleted += (_, _) =>
+            {
+                _webReady = true;
+                while (_pendingMidiFiles.TryDequeue(out var message))
+                    _browser.CoreWebView2.PostWebMessageAsJson(message);
+            };
 
             var devUrl = Environment.GetEnvironmentVariable("MIZAN_DEV_URL");
             if (!string.IsNullOrWhiteSpace(devUrl))
@@ -87,6 +100,36 @@ public sealed class MainWindow : Window
         catch (Exception error)
         {
             ShowError(error.Message);
+        }
+    }
+
+    public async Task HandleActivationAsync(AppActivationArguments activation)
+    {
+        if (activation.Kind != ExtendedActivationKind.File || activation.Data is not IFileActivatedEventArgs files)
+            return;
+        foreach (var item in files.Files)
+        {
+            if (item is not StorageFile file || !Path.GetExtension(file.Name).Equals(".mid", StringComparison.OrdinalIgnoreCase)
+                && !Path.GetExtension(file.Name).Equals(".midi", StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                await using var input = await file.OpenStreamForReadAsync();
+                using var content = new MemoryStream();
+                await input.CopyToAsync(content);
+                var message = JsonSerializer.Serialize(new
+                {
+                    type = "mizan-open-midi",
+                    name = file.Name,
+                    dataBase64 = Convert.ToBase64String(content.ToArray()),
+                });
+                if (_webReady) _browser.CoreWebView2.PostWebMessageAsJson(message);
+                else _pendingMidiFiles.Enqueue(message);
+            }
+            catch (Exception error)
+            {
+                ShellLog.Write($"Could not open MIDI activation '{file.Name}': {error.Message}");
+            }
         }
     }
 

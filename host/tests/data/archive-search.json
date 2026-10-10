@@ -1,0 +1,13 @@
+{
+  "response": {
+    "numFound": 1,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "guido-von-arezzo-ut-queant-laxis",
+        "title": "Guido von Arezzo — Ut queant laxis",
+        "licenseurl": "http://creativecommons.org/publicdomain/zero/1.0/"
+      }
+    ]
+  }
+}

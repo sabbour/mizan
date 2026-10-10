@@ -49,6 +49,39 @@ Stems whose isolated signal is too weak are omitted, including vocal leakage
 whose brief peaks would otherwise appear as a false vocal listening track.
 Unknown jobs return `job_not_found`; invalid instruments return `invalid_instrument`.
 
+### Score imports and public MIDI search
+
+`import_file(name, dataBase64)` uses the existing MIDI/MusicXML parser and library
+path. The UI asks before it imports a MIDI file opened from Windows, selected in
+the picker, or dropped onto the app. `search_midi_commons` and
+`search_midi_mutopia` and `search_midi_archive` are separate provider calls so
+one slow or failed source does not block YouTube or the other MIDI sources.
+They offer only per-file Public Domain, CC0, CC BY, and CC BY-SA results.
+Archive search currently accepts only the exact per-item CC0 URL and only
+original MIDI files with verified size and any listed hashes.
+`import_midi_result` accepts
+only a result returned by those searches, follows HTTPS redirects only on the
+approved provider hosts (including Archive storage subdomains), limits downloads
+to 2 MiB, checks the MIDI header, and then uses the same score-import parser and
+storage path. Imported provider entries retain the source page, artist, license,
+and attribution.
+
+Video search also calls `search_youtube_music` independently. It uses yt-dlp
+against `music.youtube.com/search` without credentials, keeps only video IDs,
+and returns canonical YouTube watch URLs for the existing transcription path.
+The UI merges the two video lists by ID and keeps each provider's loading or
+error status visible.
+
+The Library landing page lazily requests the official global **Top Songs**
+chart through the keyless YouTube Charts browse endpoint used by
+`artists.youtube.com/charts/tracks`. The `WEB_MUSIC_ANALYTICS` chart response
+supplies ranks, market, period, end date, titles, artists, and video IDs;
+YouTube Music uses the same ranks. The host caches the response in memory for
+six hours and shows the last successful chart with its date if refresh fails.
+The legacy chart page is a JavaScript shell and yt-dlp does not extract its
+entries; the first-party chart browse request uses no key or new dependency.
+Video links use the existing explicit Transcribe path.
+
 ### Single-user Azure GPU offload
 
 See the editable [Cloud architecture diagram](../docs/cloud-architecture.drawio)

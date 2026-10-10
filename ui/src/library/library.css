@@ -1051,6 +1051,142 @@
   font-size: 13px;
 }
 
+.popular-music {
+  max-width: 1056px;
+  margin: 0 auto 28px;
+}
+.popular-music-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.popular-music-heading .lib-h2 { margin: 0 0 6px; }
+.popular-music-summary,
+.popular-freshness,
+.popular-chart-source {
+  margin: 0 0 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.popular-freshness { margin-left: auto; }
+.popular-chart-warning { color: var(--ink-2); font-size: 12px; }
+.popular-chart-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 13px;
+}
+.popular-music-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.popular-music-card {
+  display: grid;
+  grid-template-columns: 24px 88px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px 10px 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.popular-rank { color: var(--ink-3); font-size: 13px; text-align: center; }
+.popular-music-card .thumb { width: 88px; height: 50px; }
+.popular-music-copy { min-width: 0; }
+.popular-song-title {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popular-song-title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.popular-music-copy .song-meta { margin: 3px 0 0; }
+.popular-music-copy .video-sources { margin-top: 5px; }
+.popular-music-copy .video-source { text-decoration: none; }
+.popular-music-copy .video-source:hover { color: var(--ink); text-decoration: underline; }
+.popular-chart-source a { color: var(--accent-deep); text-underline-offset: 3px; }
+.popular-chart-source svg { vertical-align: -2px; }
+
+.provider-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.provider-status-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.provider-status-list li[role='alert'] { color: var(--danger); }
+.provider-status-list .btn { padding: 3px 7px; font-size: 11px; }
+.video-sources { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 0; }
+.video-source { padding: 2px 6px; border-radius: 4px; background: var(--chrome); color: var(--ink-2); font-size: 10px; }
+
+.midi-results { margin-top: 32px; }
+.midi-results .lib-h2 { margin-bottom: 10px; }
+.midi-results .youtube-help { margin-bottom: 12px; }
+.midi-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.midi-result-copy { min-width: 0; }
+.midi-result .song-title,
+.midi-result .song-meta { margin: 0 0 4px; }
+.midi-provenance + .midi-provenance { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.midi-result a,
+.song-source-link { color: var(--accent-deep); text-underline-offset: 3px; }
+.midi-result a svg { vertical-align: -2px; }
+
+.midi-import-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(640px, calc(100dvh - 32px));
+  box-sizing: border-box;
+  margin: auto;
+  padding: 24px;
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 22px 60px #15191f36;
+  color: var(--ink);
+  background: #fff;
+  overflow-y: auto;
+}
+.midi-import-dialog::backdrop { background: #15191f99; }
+.midi-import-dialog h2 { margin: 0 0 12px; font-size: 20px; overflow-wrap: anywhere; }
+.midi-import-dialog p { color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.midi-offer-details { padding: 8px 12px; border-radius: 6px; background: var(--chrome); }
+.midi-offer-details p { margin: 4px 0; }
+.midi-import-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.midi-import-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.song-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .songs-note {
   margin: 16px 0;
   color: var(--ink-3);
@@ -1338,6 +1474,12 @@
 }
 
 @media (max-width: 760px) {
+  .popular-music-list { grid-template-columns: minmax(0, 1fr); }
+  .popular-music-card { grid-template-columns: 22px 72px minmax(0, 1fr) auto; gap: 8px; padding-right: 0; }
+  .popular-music-card .thumb { width: 72px; height: 42px; }
+  .popular-music-card > .btn { padding-inline: 8px; }
+  .popular-music-heading { display: block; }
+  .popular-freshness { margin: 0 0 10px; }
   .songs-empty { grid-template-columns: 24px minmax(0, 1fr); }
   .songs-empty .btn { grid-column: 2; justify-self: start; }
   .lib-head {

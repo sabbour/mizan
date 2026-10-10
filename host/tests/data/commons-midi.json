@@ -1,0 +1,78 @@
+{
+  "query": {
+    "pages": [
+      {
+        "pageid": 11,
+        "index": 2,
+        "title": "File:PD Piece.mid",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/a/a1/PD_Piece.mid",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:PD_Piece.mid",
+            "mime": "audio/midi",
+            "size": 412,
+            "extmetadata": {
+              "LicenseShortName": { "value": "Public domain" },
+              "LicenseUrl": { "value": "" },
+              "Artist": { "value": "Composer <b>Example</b>" },
+              "Credit": { "value": "Sequenced by &lt;strong&gt;A. Musician&lt;/strong&gt;" },
+              "UsageTerms": { "value": "Public domain" },
+              "AttributionRequired": { "value": "false" }
+            }
+          }
+        ]
+      },
+      {
+        "pageid": 10,
+        "index": 1,
+        "title": "File:Share Alike.midi",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/b/b2/Share_Alike.midi",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Share_Alike.midi",
+            "mime": "audio/midi",
+            "size": 512,
+            "extmetadata": {
+              "LicenseShortName": { "value": "CC BY-SA 4.0" },
+              "LicenseUrl": { "value": "https://creativecommons.org/licenses/by-sa/4.0/" },
+              "Artist": { "value": "Another Composer" },
+              "Credit": { "value": "Another Composer" },
+              "UsageTerms": { "value": "Creative Commons Attribution-ShareAlike" },
+              "AttributionRequired": { "value": "true" }
+            }
+          }
+        ]
+      },
+      {
+        "pageid": 12,
+        "index": 3,
+        "title": "File:Restricted.mid",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/c/c3/Restricted.mid",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Restricted.mid",
+            "mime": "audio/midi",
+            "size": 512,
+            "extmetadata": {
+              "LicenseShortName": { "value": "CC BY-NC 4.0" },
+              "Artist": { "value": "Unknown" }
+            }
+          }
+        ]
+      },
+      {
+        "pageid": 13,
+        "index": 4,
+        "title": "File:No rights.mid",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/d/d4/No_rights.mid",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:No_rights.mid",
+            "mime": "audio/midi",
+            "extmetadata": {}
+          }
+        ]
+      }
+    ]
+  }
+}

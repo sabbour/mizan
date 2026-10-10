@@ -110,10 +110,51 @@ export type Entry = {
   outdated: boolean
   transcriptionModel: TranscriptionModel | null
   separationMethod: string | null
+  sourceUrl?: string | null
+  license?: string | null
+  attribution?: string | null
 }
 export type Folder = { id: string; name: string; count: number }
 export type ResourceUsage = { cpu: number | null; ramBytes: number | null; gpu: null; npu: null }
-export type YouTubeResult = { id: string; title: string; channel: string; duration: number | null; thumbnail: string; url: string }
+export type YouTubeResult = {
+  id: string
+  title: string
+  channel: string
+  duration: number | null
+  thumbnail: string
+  url: string
+  source: 'youtube' | 'youtube_music'
+}
+export type PopularChartRow = {
+  videoId: string
+  title: string
+  artist: string
+  rank: number
+  thumbnail: string
+}
+export type PopularChart = {
+  title: string
+  period: string
+  market: string
+  chartDate: string
+  fetchedAt: string
+  sourceUrl: string
+  rows: PopularChartRow[]
+  warning?: string
+  sample?: boolean
+}
+export type MidiSearchResult = {
+  id: string
+  provider: 'commons' | 'mutopia' | 'archive'
+  dedupeKey: string
+  source: 'Wikimedia Commons' | 'Mutopia Project' | 'Internet Archive'
+  title: string
+  artist: string | null
+  license: string
+  licenseUrl: string | null
+  attribution: string | null
+  sourceUrl: string
+}
 export type Stage = 'inspect' | 'download' | 'decode' | 'detect' | 'separate' | 'transcribe' | 'chords' | 'notation' | 'align' | 'finalize'
 export type QueueJob = {
   id: string
@@ -188,6 +229,16 @@ export class HostError extends Error {
 
 type Api = Record<string, (...args: unknown[]) => Promise<unknown>>
 type WebViewReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: Fail['error'] }
+export type OpenedMidiFile = { name: string; dataBase64: string }
+const openedMidiQueue: OpenedMidiFile[] = []
+const openedMidiListeners = new Set<(file: OpenedMidiFile) => void>()
+
+export function onMidiFileOpened(listener: (file: OpenedMidiFile) => void): () => void {
+  openedMidiListeners.add(listener)
+  for (const file of openedMidiQueue.splice(0)) listener(file)
+  return () => openedMidiListeners.delete(listener)
+}
+
 declare global {
   interface Window {
     __mizanNativeShell?: boolean
@@ -207,6 +258,13 @@ const webviewApi = (): Api | null => {
   let nextId = 0
   const pending = new Map<number, { resolve(value: unknown): void; reject(reason: unknown): void }>()
   webview.addEventListener('message', ({ data }) => {
+    if ((data as { type?: string }).type === 'mizan-open-midi') {
+      const file = data as unknown as OpenedMidiFile
+      if (openedMidiListeners.size)
+        for (const listener of openedMidiListeners) listener(file)
+      else openedMidiQueue.push(file)
+      return
+    }
     const request = pending.get(data.id)
     if (!request) return
     pending.delete(data.id)
@@ -288,7 +346,19 @@ export const host = {
   hfTokenStatus: () => call<{ configured: boolean }>('hf_token_status').then((r) => r.configured),
   setHfToken: (token: string) => call<{ configured: boolean }>('set_hf_token', token).then((r) => r.configured),
   clearHfToken: () => call<{ configured: boolean }>('clear_hf_token').then((r) => r.configured),
-  searchYouTube: (query: string) => call<{ results: YouTubeResult[] }>('search_youtube', query).then((r) => r.results),
+  searchYouTube: (query: string) =>
+    call<{ results: YouTubeResult[] }>('search_youtube', query).then((r) => r.results),
+  searchYouTubeMusic: (query: string) =>
+    call<{ results: YouTubeResult[] }>('search_youtube_music', query).then((r) => r.results),
+  popularSongs: () => call<PopularChart>('popular_songs'),
+  searchMidiCommons: (query: string) =>
+    call<{ results: MidiSearchResult[] }>('search_midi_commons', query).then((r) => r.results),
+  searchMidiMutopia: (query: string, startAt = 0) =>
+    call<{ results: MidiSearchResult[]; nextStart: number | null }>('search_midi_mutopia', query, startAt),
+  searchMidiArchive: (query: string) =>
+    call<{ results: MidiSearchResult[] }>('search_midi_archive', query).then((r) => r.results),
+  importMidiResult: (resultId: string) =>
+    call<{ entry: Entry }>('import_midi_result', resultId).then((r) => r.entry),
   addLink: (url: string) => call<{ job: QueueJob }>('add_link', url).then((r) => r.job),
   importFile: (name: string, dataBase64: string) => call<{ entry: Entry }>('import_file', name, dataBase64).then((r) => r.entry),
   library: () => call<{ entries: Entry[] }>('list_library').then((r) => r.entries),

@@ -56,7 +56,7 @@ export function resumeParts(p: Position | null): string[] {
 export function sourceLine(e: Entry): string {
   if (e.source === 'youtube') return 'YouTube'
   const file = e.source === 'midi' ? 'MIDI file' : 'MusicXML file'
-  return e.recording ? `${file} · linked recording` : `${file} · no recording`
+  return `${e.recording ? `${file} · linked recording` : `${file} · no recording`}${e.license ? ` · ${e.license}` : ''}`
 }
 
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })

@@ -1,5 +1,6 @@
 import { buildSong } from '../workspace/song'
-import type { Entry, Folder, ModelDownloads, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
+import type { Entry, Folder, MidiSearchResult, ModelDownloads, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
+import { foldSearchText } from './searchText'
 
 // A stand-in host for the browser dev server: same calls and shapes as the Python bridge.
 
@@ -274,9 +275,92 @@ export const mockHost = {
       { id: 'aGSKrC7dGcY', title: 'Tears for Fears — Everybody Wants to Rule the World', channel: 'Tears for Fears', duration: 249 },
       { id: 'hTWKbfoikeg', title: 'Nirvana — Smells Like Teen Spirit', channel: 'Nirvana', duration: 278 },
     ]
-    return ok({ results: samples.filter((video) => `${video.title} ${video.channel}`.toLowerCase().includes(query.trim().toLowerCase())).map((video) => ({
-      ...video, url: `https://www.youtube.com/watch?v=${video.id}`, thumbnail: `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`,
+    const needle = foldSearchText(query.trim())
+    return ok({ results: samples.filter((video) => foldSearchText(`${video.title} ${video.channel}`).includes(needle)).map((video) => ({
+      ...video, source: 'youtube', url: `https://www.youtube.com/watch?v=${video.id}`, thumbnail: `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`,
     })) })
+  },
+  search_youtube_music(query: string) {
+    const samples = [
+      { id: 'wfF0zHeU3Zs', title: 'Beethoven — Für Elise', channel: 'Lang Lang', duration: 175 },
+      { id: 'NMW9ik7KSWw', title: 'Für Elise (Piano)', channel: 'YouTube Music', duration: null },
+    ]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: samples.filter((video) => foldSearchText(`${video.title} ${video.channel}`).includes(needle)).map((video) => ({
+      ...video, source: 'youtube_music', url: `https://www.youtube.com/watch?v=${video.id}`,
+      thumbnail: `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`,
+    })) })
+  },
+  popular_songs() {
+    const videos = [
+      { videoId: 'fOT0BUpITw8', title: 'BELLAKEO (Video Oficial) - Peso Pluma, Anitta', artist: 'Peso Pluma', thumbnail: 'https://i.ytimg.com/vi/fOT0BUpITw8/mqdefault.jpg' },
+      { videoId: 'NFvDHYMzj9U', title: 'Arcángel - FN8 (Video Lyric)', artist: 'Arcangel', thumbnail: 'https://i.ytimg.com/vi/NFvDHYMzj9U/mqdefault.jpg' },
+      { videoId: '8c7KOGxeY3w', title: 'POR EL CONTRARIO', artist: 'Becky G', thumbnail: 'https://i.ytimg.com/vi/8c7KOGxeY3w/mqdefault.jpg' },
+      { videoId: 'jWdxXdp8sZI', title: 'The Type', artist: 'Real Boston Richey', thumbnail: 'https://i.ytimg.com/vi/jWdxXdp8sZI/mqdefault.jpg' },
+      { videoId: 's6cdjJvGM2o', title: 'La Diabla', artist: 'Xavi Oficial', thumbnail: 'https://i.ytimg.com/vi/s6cdjJvGM2o/mqdefault.jpg' },
+      { videoId: 'w1-jss2mZlY', title: 'You Broke My Heart', artist: 'Drake', thumbnail: 'https://i.ytimg.com/vi/w1-jss2mZlY/mqdefault.jpg' },
+      { videoId: '885j2xO9VB8', title: 'Crazy', artist: 'Finesse2Tymes', thumbnail: 'https://i.ytimg.com/vi/885j2xO9VB8/mqdefault.jpg' },
+      { videoId: 'muzQ0r14L2Y', title: 'Shotta Flow 7 “FINAL”', artist: 'NLE Choppa', thumbnail: 'https://i.ytimg.com/vi/muzQ0r14L2Y/mqdefault.jpg' },
+    ]
+    return ok({
+      title: 'Popular Music Videos',
+      period: 'PLAYLIST',
+      market: 'global',
+      chartDate: '2026-07-17',
+      fetchedAt: '2026-07-17T00:00:00Z',
+      sourceUrl: 'https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+      sample: true,
+      rows: videos.map((video) => ({ ...video, rank: 0 })),
+    })
+  },
+  search_midi_commons(query: string) {
+    const results: MidiSearchResult[] = [{
+      id: 'commons:mock-fur-elise',
+      provider: 'commons',
+      dedupeKey: 'mock-file:commons-fur-elise',
+      source: 'Wikimedia Commons',
+      title: 'Für Elise, WoO 59',
+      artist: 'Ludwig van Beethoven',
+      license: 'Public Domain',
+      licenseUrl: null,
+      attribution: 'Wikimedia Commons contributor',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:Beethoven_Fur_Elise.mid',
+    }]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: results.filter((item) => foldSearchText(`${item.title} ${item.artist}`).includes(needle)) })
+  },
+  search_midi_mutopia(query: string, startAt = 0) {
+    const results: MidiSearchResult[] = [{
+      id: 'mutopia:mock-moonlight',
+      provider: 'mutopia',
+      dedupeKey: 'mock-file:mutopia-moonlight',
+      source: 'Mutopia Project',
+      title: 'Piano Sonata No. 14, Op. 27 No. 2',
+      artist: 'Ludwig van Beethoven',
+      license: 'Public Domain',
+      licenseUrl: 'https://www.mutopiaproject.org/legal.html#publicdomain',
+      attribution: 'Composer: Ludwig van Beethoven',
+      sourceUrl: 'https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=mock-moonlight',
+    }]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: startAt === 0 ? results.filter((item) =>
+      foldSearchText(`${item.title} ${item.artist}`).includes(needle)) : [], nextStart: null })
+  },
+  search_midi_archive(query: string) {
+    const results: MidiSearchResult[] = [{
+      id: 'archive:mock-ut-queant-laxis',
+      provider: 'archive',
+      dedupeKey: 'mock-file:archive-ut-queant-laxis',
+      source: 'Internet Archive',
+      title: 'Ut queant laxis',
+      artist: 'Guido von Arezzo',
+      license: 'CC0',
+      licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+      attribution: 'Creator: Guido von Arezzo',
+      sourceUrl: 'https://archive.org/details/guido-von-arezzo-ut-queant-laxis',
+    }]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: results.filter((item) => foldSearchText(`${item.title} ${item.artist}`).includes(needle)) })
   },
   async add_link(url: string) {
     const id = /(?:youtu\.be\/|v=|shorts\/)([\w-]{11})/.exec(url)?.[1]
@@ -301,6 +385,42 @@ export const mockHost = {
     const entry: Entry = {
       id: `s${seq++}`, title: name.replace(/\.[^.]+$/, ''), artist: null, thumbnail: null, source, parts: ['Piano'], recording: false, duration: 180,
       createdAt: ago(0), practicedAt: null, outdated: false, transcriptionModel: null, separationMethod: null, position: null, folders: [],
+    }
+    entries.unshift(entry)
+    return ok({ entry })
+  },
+  import_midi_result(resultId: string) {
+    const results: MidiSearchResult[] = [
+      {
+        id: 'commons:mock-fur-elise', provider: 'commons', source: 'Wikimedia Commons', title: 'Für Elise, WoO 59',
+        dedupeKey: 'mock-file:commons-fur-elise',
+        artist: 'Ludwig van Beethoven', license: 'Public Domain', licenseUrl: null,
+        attribution: 'Wikimedia Commons contributor',
+        sourceUrl: 'https://commons.wikimedia.org/wiki/File:Beethoven_Fur_Elise.mid',
+      },
+      {
+        id: 'mutopia:mock-moonlight', provider: 'mutopia', source: 'Mutopia Project',
+        dedupeKey: 'mock-file:mutopia-moonlight',
+        title: 'Piano Sonata No. 14, Op. 27 No. 2', artist: 'Ludwig van Beethoven',
+        license: 'Public Domain', licenseUrl: 'https://www.mutopiaproject.org/legal.html#publicdomain',
+        attribution: 'Composer: Ludwig van Beethoven',
+        sourceUrl: 'https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=mock-moonlight',
+      },
+      {
+        id: 'archive:mock-ut-queant-laxis', provider: 'archive', source: 'Internet Archive',
+        dedupeKey: 'mock-file:archive-ut-queant-laxis', title: 'Ut queant laxis', artist: 'Guido von Arezzo',
+        license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        attribution: 'Creator: Guido von Arezzo',
+        sourceUrl: 'https://archive.org/details/guido-von-arezzo-ut-queant-laxis',
+      },
+    ]
+    const result = results.find((item) => item.id === resultId)
+    if (!result) return fail('invalid_file', 'Search for this MIDI again before importing it.')
+    const entry: Entry = {
+      id: `s${seq++}`, title: result.title, artist: result.artist, thumbnail: null, source: 'midi',
+      parts: ['Piano'], recording: false, duration: 180, createdAt: ago(0), practicedAt: null,
+      outdated: false, transcriptionModel: null, separationMethod: null, position: null, folders: [],
+      sourceUrl: result.sourceUrl, license: result.license, attribution: result.attribution,
     }
     entries.unshift(entry)
     return ok({ entry })

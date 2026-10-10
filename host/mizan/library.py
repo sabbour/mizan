@@ -41,7 +41,9 @@ class LibraryStore:
                     song_path TEXT NOT NULL,
                     tempo_map TEXT,
                     transcription_model TEXT,
-                    separation_method TEXT
+                    separation_method TEXT,
+                    license TEXT,
+                    attribution TEXT
                 )
             """)
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(songs)")}
@@ -52,6 +54,10 @@ class LibraryStore:
                 connection.execute("ALTER TABLE songs ADD COLUMN transcription_model TEXT")
             if "separation_method" not in columns:
                 connection.execute("ALTER TABLE songs ADD COLUMN separation_method TEXT")
+            if "license" not in columns:
+                connection.execute("ALTER TABLE songs ADD COLUMN license TEXT")
+            if "attribution" not in columns:
+                connection.execute("ALTER TABLE songs ADD COLUMN attribution TEXT")
             job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
             if migrating_processing and {"transcription_model", "kind"} <= job_columns:
                 for job in connection.execute("""
@@ -102,18 +108,21 @@ class LibraryStore:
         return song
 
     def create_import(self, title: str, source: str, song: dict, artifacts: dict[str, str],
-                      pipeline_version: str, song_id: str | None = None) -> dict:
+                      pipeline_version: str, song_id: str | None = None,
+                      entry_metadata: dict | None = None) -> dict:
         song_id, timestamp = song_id or str(uuid4()), now()
         song_path = artifacts["analysis"]
         parts = [track["name"] for track in song["tracks"]]
+        metadata = entry_metadata or {}
         with closing(self._connect()) as connection, connection:
             connection.execute("""
                 INSERT INTO songs (id, title, thumbnail, source, parts, recording, duration,
                     created_at, practiced_at, position, pipeline_version, source_url,
-                    artifacts, song_path, tempo_map, artist)
-                VALUES (?, ?, NULL, ?, ?, 0, NULL, ?, NULL, NULL, ?, NULL, ?, ?, NULL, NULL)
+                    artifacts, song_path, tempo_map, artist, license, attribution)
+                VALUES (?, ?, NULL, ?, ?, 0, NULL, ?, NULL, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)
             """, (song_id, title, source, json.dumps(parts), timestamp, pipeline_version,
-                  json.dumps(artifacts), song_path))
+                  metadata.get("sourceUrl"), json.dumps(artifacts), song_path,
+                  metadata.get("artist"), metadata.get("license"), metadata.get("attribution")))
         return self.get(song_id)
 
     def upsert_job(self, job: dict, pipeline_version: str) -> dict | None:
@@ -401,6 +410,9 @@ def public_entry(entry: dict, pipeline_version: str) -> dict:
     return {
         "id": entry["id"], "title": entry["title"], "thumbnail": entry["thumbnail"],
         "artist": entry.get("artist"),
+        "sourceUrl": entry.get("source_url"),
+        "license": entry.get("license"),
+        "attribution": entry.get("attribution"),
         "source": entry["source"], "parts": entry["parts"] or [],
         "recording": entry["recording"], "duration": entry["duration"],
         "createdAt": entry["created_at"], "practicedAt": entry["practiced_at"],

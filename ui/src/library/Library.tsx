@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, AudioLines, ChevronDown, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
-import { host, HostError, IMPORTABLE, toBase64, type CloudReadinessProgress, type CloudStatus, type Entry, type Folder, type ModelDownloads, type ModelPreflight, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { host, HostError, IMPORTABLE, onMidiFileOpened, toBase64, type CloudReadinessProgress, type CloudStatus, type Entry, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { foldSearchText } from './searchText'
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
 import { activeAnalysis, analysisProgress, ago, clock, decodingErrorHeadline, jobExecutionLabel, jobQueueLabel, jobQueuePosition, jobTitle, jobStageLabel, jobStagePercent, resumeParts, sourceLine, took } from './format'
@@ -8,9 +9,14 @@ import { CourseSection } from '../course/Course'
 import type { CourseBrowse } from '../course/browse'
 import { LESSONS } from '../course/curriculum'
 import { PIANO_LESSONS } from '../course/piano'
+import { PIANO_INSPIRED } from '../course/pianoInspired'
 import './library.css'
 
 type Problem = { message: string; fix: string | null }
+type MidiOffer =
+  | { name: string; file: File; result?: never; dataBase64?: never }
+  | { name: string; dataBase64: string; result?: never; file?: never }
+  | { name: string; result: MidiSearchResult; file?: never; dataBase64?: never }
 const problem = (e: unknown): Problem =>
   e instanceof HostError ? { message: e.message, fix: e.fix } : { message: 'Something went wrong talking to Mizan.', fix: 'Try again.' }
 
@@ -77,6 +83,10 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const [error, setError] = useState<Problem | null>(null)
   const [folderFeedback, setFolderFeedback] = useState<{ message: string; error: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [midiOffers, setMidiOffers] = useState<MidiOffer[]>([])
+  const [midiOfferError, setMidiOfferError] = useState<Problem | null>(null)
+  const midiDialog = useRef<HTMLDialogElement>(null)
+  const midiOfferReturnFocus = useRef<HTMLElement | null>(null)
   const [pendingLinks, setPendingLinks] = useState<string[]>([])
   const pendingLinkRequests = useRef(new Set<string>())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -120,6 +130,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const aboutDialog = useRef<HTMLDialogElement>(null)
   const songs = useRef<HTMLElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const midiOffer = midiOffers[0] ?? null
   const isLink = /^https?:\/\//i.test(query.trim())
   const searchQuery = isLink ? '' : query
   const cloudStatusText = cloudStatusChecking
@@ -465,12 +476,19 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
       setError(null)
       const bad = files.find((f) => !IMPORTABLE.test(f.name))
       if (bad) return setError({ message: `Mizan can't read “${bad.name}”.`, fix: 'Drop a YouTube link, a MIDI file (.mid), or a MusicXML file (.musicxml, .mxl).' })
+      const midiFiles = files.filter((file) => /\.(mid|midi)$/i.test(file.name))
+      if (midiFiles.length) {
+        setMidiOfferError(null)
+        setMidiOffers((current) => [...current, ...midiFiles.map((file) => ({ name: file.name, file }))])
+      }
+      const scoreFiles = files.filter((file) => !/\.(mid|midi)$/i.test(file.name))
+      if (!scoreFiles.length) return
       setBusy(true)
       try {
         let last: Entry | null = null
-        for (const f of files) last = await host.importFile(f.name, await toBase64(f))
+        for (const f of scoreFiles) last = await host.importFile(f.name, await toBase64(f))
         await reload()
-        if (files.length === 1 && last) onOpen(last)
+        if (scoreFiles.length === 1 && files.length === 1 && last) onOpen(last)
       } catch (e) {
         setError(problem(e))
       } finally {
@@ -479,6 +497,44 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     },
     [reload, onOpen],
   )
+
+  const confirmMidiImport = async () => {
+    if (!midiOffer) return
+    setBusy(true)
+    setMidiOfferError(null)
+    try {
+      const entry = midiOffer.result
+        ? await host.importMidiResult(midiOffer.result.id)
+        : await host.importFile(midiOffer.name, midiOffer.dataBase64 ?? await toBase64(midiOffer.file!))
+      setMidiOffers((current) => current.slice(1))
+      await reload()
+      if (midiOffers.length === 1) onOpen(entry)
+    } catch (reason) {
+      setMidiOfferError(problem(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    const dialog = midiDialog.current
+    if (midiOffer && dialog && !dialog.open) {
+      midiOfferReturnFocus.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : field.current
+      dialog.showModal()
+    }
+    else if (!midiOffer && dialog?.open) dialog.close()
+    return () => { if (dialog?.open) dialog.close() }
+  }, [midiOffer])
+
+  useEffect(() => onMidiFileOpened((file) => {
+    if (!file || typeof file.name !== 'string' || !/\.(mid|midi)$/i.test(file.name)
+        || typeof file.dataBase64 !== 'string') return
+    setTab('songs')
+    setMidiOfferError(null)
+    setMidiOffers((current) => [...current, { name: file.name, dataBase64: file.dataBase64 }])
+  }), [setTab])
 
   // The whole window takes drops and pasted links.
   useEffect(() => {
@@ -531,11 +587,12 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const allFolders = useMemo(() => [...smart, ...folders.map((folder) => ({ ...folder, user: true }))], [smart, folders])
   const folderEntries = useMemo(() => (entries ?? []).filter((entry) => inFolder(entry, selectedFolder)), [entries, selectedFolder])
   const shown = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
+    const q = foldSearchText(searchQuery.trim())
     return folderEntries.filter((entry) => {
       const names = folders.filter((folder) => entry.folders.includes(folder.id)).map((folder) => folder.name)
       const source = entry.source === 'youtube' ? 'youtube' : entry.source === 'midi' ? 'midi imported' : 'musicxml imported'
-      return !q || [entry.title, entry.artist, ...entry.parts, source, ...names].some((value) => value?.toLowerCase().includes(q))
+      return !q || [entry.title, entry.artist, ...entry.parts, source, ...names]
+        .some((value) => value && foldSearchText(value).includes(q))
     })
   }, [folderEntries, folders, searchQuery])
 
@@ -825,14 +882,14 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
           >
             <label className="intake-field intake-unified">
               {isLink ? <Link2 size={18} aria-hidden /> : <Search size={18} aria-hidden />}
-              <span className="visually-hidden">Search your library and YouTube, or paste a link</span>
+              <span className="visually-hidden">Search your library, YouTube, and public MIDI, or paste a link</span>
               <input
                 ref={field}
                 name="url"
                 autoFocus
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Search your library and YouTube, or paste a link"
+                placeholder="Search your library, YouTube, and public MIDI, or paste a link"
                 value={query}
                 aria-invalid={!!error}
                 aria-describedby="intake-help"
@@ -870,7 +927,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
             ) : pendingLinks.length ? (
               <p role="status">Adding {pendingLinks.length === 1 ? 'recording' : 'recordings'} to the queue…</p>
             ) : (
-              <p>MuScriptor makes draft notes for instruments it can identify in the recording. MIDI and MusicXML files open straight away. You can also drop files or links anywhere.</p>
+              <p>MuScriptor makes draft notes for instruments it can identify in a recording. MIDI files ask before import; MusicXML imports directly. You can also drop files or links anywhere.</p>
             )}
           </div>
         </section>
@@ -889,13 +946,15 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                 ;(event.currentTarget.parentElement?.querySelector(`[data-tab="${TABS[to].id}"]`) as HTMLElement | null)?.focus()
               }}>
               {item.label}
-              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length + PIANO_LESSONS.length}</span>
+              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length + PIANO_LESSONS.length + PIANO_INSPIRED.length}</span>
               {item.id === 'songs' && queueJobs.length > 0 && tab !== 'songs' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
             </button>
           ))}
         </div>
 
         <div role="tabpanel" id="lib-panel-songs" aria-labelledby="lib-tab-songs" hidden={tab !== 'songs'}>
+        {tab === 'songs' && !query.trim() && !selectedJob && <PopularMusic jobs={jobs} busy={busy}
+          pendingLinks={pendingLinks} onTranscribe={addLink} />}
         {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails} onOpen={(id) => entries && onOpenId(id, entries, onOpen)} />}
         {empty && (
           <p className="library-first-note">
@@ -954,6 +1013,10 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               )}
               <YouTubeSearch query={searchQuery.trim()} jobs={jobs} busy={busy} pendingLinks={pendingLinks}
                 processingMode={cloud?.mode} transcriptionModel={model ?? undefined} onAdd={addLink} />
+              <MidiSearch query={searchQuery.trim()} onImport={(result) => {
+                setMidiOfferError(null)
+                setMidiOffers((current) => [...current, { name: result.title, result }])
+              }} />
             </section>
           </div>
         )}
@@ -984,7 +1047,233 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
           </p>
         </div>
       )}
+
+      {midiOffer && (
+        <dialog
+          ref={midiDialog}
+          className="midi-import-dialog"
+          aria-labelledby="midi-import-title"
+          onClose={() => {
+            if (midiOffers.length > 1) return
+            const previous = midiOfferReturnFocus.current
+            const target = previous?.isConnected && !(previous instanceof HTMLInputElement && previous.type === 'file')
+              ? previous
+              : field.current
+            target?.focus()
+          }}
+          onCancel={(event) => {
+            if (busy) {
+              event.preventDefault()
+              return
+            }
+            event.preventDefault()
+            setMidiOffers((current) => current.slice(1))
+            setMidiOfferError(null)
+          }}
+          onClick={(event) => {
+            if (!busy && event.target === event.currentTarget) {
+              setMidiOffers((current) => current.slice(1))
+              setMidiOfferError(null)
+            }
+          }}
+        >
+          <h2 id="midi-import-title">Import “{midiOffer.name}”?</h2>
+          {midiOffer.result && (
+            <div className="midi-offer-details">
+              <p>{midiOffer.result.source}{midiOffer.result.artist ? ` · ${midiOffer.result.artist}` : ''}</p>
+              <p>License: {midiOffer.result.license}</p>
+              {midiOffer.result.attribution && <p>Attribution: {midiOffer.result.attribution}</p>}
+            </div>
+          )}
+          <p>This MIDI file will be added to your library. It will not be treated as audio or transcribed.</p>
+          {midiOfferError && <p className="intake-error" role="alert">{midiOfferError.message} {midiOfferError.fix}</p>}
+          <div className="midi-import-actions">
+            <button className="btn btn-quiet" autoFocus disabled={busy} onClick={() => {
+              setMidiOffers((current) => current.slice(1))
+              setMidiOfferError(null)
+            }}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy} onClick={() => void confirmMidiImport()}>
+              {busy ? 'Importing…' : 'Import'}
+            </button>
+          </div>
+        </dialog>
+      )}
     </div>
+  )
+}
+
+type VideoProvider = 'youtube' | 'youtube_music'
+type UnifiedVideo = Omit<YouTubeResult, 'source'> & { sources: VideoProvider[] }
+
+function useVideoSearch(provider: VideoProvider, query: string) {
+  const [result, setResult] = useState<{ query: string; entries: YouTubeResult[]; error: Problem | null } | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!query) return
+    let stale = false
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      const request = provider === 'youtube'
+        ? host.searchYouTube(query)
+        : host.searchYouTubeMusic(query)
+      void request.then(
+        (entries) => { if (!stale) setResult({ query, entries, error: null }) },
+        (error) => { if (!stale) setResult({ query, entries: [], error: problem(error) }) },
+      ).finally(() => { if (!stale) setLoading(false) })
+    }, 350)
+    return () => {
+      stale = true
+      window.clearTimeout(timer)
+    }
+  }, [provider, query, retry])
+
+  const current = result?.query === query ? result : null
+  return {
+    entries: current?.entries ?? [],
+    error: current?.error ?? null,
+    loading: !!query && (loading || current === null),
+    retry: () => setRetry((value) => value + 1),
+  }
+}
+
+function mergeVideoResults(youtube: YouTubeResult[], music: YouTubeResult[]): UnifiedVideo[] {
+  const merged = new Map<string, UnifiedVideo>()
+  for (const video of [...youtube, ...music]) {
+    const source = video.source ?? 'youtube'
+    const existing = merged.get(video.id)
+    if (existing) {
+      if (!existing.sources.includes(source)) existing.sources.push(source)
+    } else {
+      const details: Omit<YouTubeResult, 'source'> = {
+        id: video.id, title: video.title, channel: video.channel,
+        duration: video.duration, thumbnail: video.thumbnail, url: video.url,
+      }
+      merged.set(video.id, { ...details, sources: [source] })
+    }
+  }
+  return [...merged.values()]
+}
+
+function chartDateLabel(value: string): string {
+  const normalized = /^\d{8}$/.test(value)
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`
+    : value
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
+}
+
+function chartPeriodLabel(value: string): string {
+  const period = value.replace(/^CHART_PERIOD_TYPE_/, '').toLowerCase()
+  return period ? `${period[0].toUpperCase()}${period.slice(1)}` : 'Period not listed'
+}
+
+function chartMarketLabel(value: string): string {
+  return value.toLowerCase() === 'global' ? 'Global' : value.toUpperCase()
+}
+
+function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
+  jobs: QueueJob[]
+  busy: boolean
+  pendingLinks: string[]
+  onTranscribe: (url: string) => Promise<void>
+}) {
+  const [chart, setChart] = useState<PopularChart | null>(null)
+  const [error, setError] = useState<Problem | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [retry, setRetry] = useState(0)
+
+  useEffect(() => {
+    let stale = false
+    setLoading(true)
+    setError(null)
+    void host.popularSongs().then(
+      (result) => { if (!stale) setChart(result) },
+      (reason) => { if (!stale) setError(problem(reason)) },
+    ).finally(() => { if (!stale) setLoading(false) })
+    return () => { stale = true }
+  }, [retry])
+
+  return (
+    <section className="popular-music" aria-labelledby="popular-music-title" aria-busy={loading}>
+      <div className="popular-music-heading">
+        <div>
+          <h2 id="popular-music-title" className="lib-h2">
+            {chart?.title ?? 'Popular songs'}
+          </h2>
+          {chart ? (
+            <p className="popular-music-summary">
+              {chart.sample
+                ? <>Popular on YouTube / YouTube Music · sample preview from “{chart.title}”; playlist order is not a chart ranking.</>
+                : <>{chartPeriodLabel(chart.period)} · {chartMarketLabel(chart.market)} chart
+                    {chart.chartDate ? ` · through ${chartDateLabel(chart.chartDate)}` : ''}
+                    {' · '}YouTube Music uses the same ranks.</>}
+            </p>
+          ) : (
+            <p className="popular-music-summary">Official YouTube Charts · YouTube and YouTube Music share the same song ranks.</p>
+          )}
+        </div>
+        {chart && <p className="popular-freshness">
+          {chart.sample
+            ? `Playlist last modified ${chartDateLabel(chart.chartDate)} · sample data`
+            : `${chart.chartDate ? `Chart data through ${chartDateLabel(chart.chartDate)}` : 'Chart update date not provided'} · fetched ${new Date(chart.fetchedAt).toLocaleString()}`}
+        </p>}
+      </div>
+
+      {loading && !chart && <p className="songs-note" role="status">Loading official music charts…</p>}
+      {error && (
+        <div className="popular-chart-error" role="alert">
+          <span>{error.message}</span>
+          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry chart</button>
+        </div>
+      )}
+      {chart?.warning && (
+        <p className="popular-chart-warning" role="status">
+          {chart.warning}{' '}
+          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry chart</button>
+        </p>
+      )}
+
+      {chart && (
+        <>
+          <ol className="popular-music-list">
+            {chart.rows.map((row) => {
+              const url = `https://www.youtube.com/watch?v=${row.videoId}`
+              const queued = jobs.some((job) => job.kind === 'transcribe' && job.url === url
+                && (job.status === 'queued' || job.status === 'running'))
+              const pending = pendingLinks.includes(url)
+              return (
+                <li key={row.videoId} className="popular-music-card">
+                  {row.rank > 0 && <span className="popular-rank num" aria-label={`Rank ${row.rank}`}>{row.rank}</span>}
+                  <Thumb entry={{ thumbnail: row.thumbnail, source: 'youtube' }} />
+                  <div className="popular-music-copy">
+                    <a className="popular-song-title" href={url} target="_blank" rel="noreferrer">{row.title}</a>
+                    <p className="song-meta">{row.artist || 'Artist not listed'}</p>
+                    <div className="video-sources">
+                      <a className="video-source" href={url} target="_blank" rel="noreferrer">YouTube</a>
+                      <a className="video-source" href={`https://music.youtube.com/watch?v=${row.videoId}`}
+                        target="_blank" rel="noreferrer">YouTube Music</a>
+                    </div>
+                  </div>
+                  <button className="btn" disabled={busy || queued || pending}
+                    aria-label={`${pending ? 'Queuing' : queued ? 'Queued' : 'Transcribe'} ${row.title}`}
+                    onClick={() => void onTranscribe(url)}>
+                    {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
+          <p className="popular-chart-source">
+            <a href={chart.sourceUrl} target="_blank" rel="noreferrer">
+              {chart.sample ? 'Popular Music Videos playlist' : 'Official YouTube Charts'} <ExternalLink size={12} aria-hidden />
+            </a>
+            {!chart.sample && <> · Chart refreshes are cached for up to 6 hours.</>}
+          </p>
+        </>
+      )}
+    </section>
   )
 }
 
@@ -997,48 +1286,43 @@ function YouTubeSearch({ query, jobs, busy, pendingLinks, processingMode, transc
   transcriptionModel?: TranscriptionModel
   onAdd: (url: string) => Promise<void>
 }) {
-  const [result, setResult] = useState<{ query: string; entries: YouTubeResult[]; error: Problem | null } | null>(null)
-  const [retry, setRetry] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const flight = useRef<Promise<void>>(Promise.resolve())
-
-  useEffect(() => {
-    if (!query) return
-    let stale = false
-    const timer = window.setTimeout(() => {
-      setLoading(true)
-      flight.current = flight.current.then(async () => {
-        if (stale) return
-        try {
-          const entries = await host.searchYouTube(query)
-          if (!stale) setResult({ query, entries, error: null })
-        } catch (error) {
-          if (!stale) setResult({ query, entries: [], error: problem(error) })
-        } finally {
-          if (!stale) setLoading(false)
-        }
-      })
-    }, 350)
-    return () => {
-      stale = true
-      window.clearTimeout(timer)
-    }
-  }, [query, retry])
+  const youtube = useVideoSearch('youtube', query)
+  const music = useVideoSearch('youtube_music', query)
 
   if (!query) return null
-  const waiting = loading || result?.query !== query
+  const results = mergeVideoResults(youtube.entries, music.entries)
+  const waiting = youtube.loading || music.loading
+  const providers = [
+    { id: 'youtube' as const, label: 'YouTube', result: youtube },
+    { id: 'youtube_music' as const, label: 'YouTube Music', result: music },
+  ]
   return (
     <section className="youtube-results" aria-labelledby="youtube-title" aria-busy={waiting}>
-      <h2 id="youtube-title" className="lib-h2">YouTube <span className="dim num">{!waiting && !result?.error ? result?.entries.length : ''}</span></h2>
+      <h2 id="youtube-title" className="lib-h2">YouTube <span className="dim num">{results.length || ''}</span></h2>
       <p className="youtube-help">Choose a recording to transcribe. Audio is only downloaded when you choose Transcribe.</p>
-      {waiting ? <p className="songs-note" role="status">Searching YouTube…</p> : result?.error ? (
-        <div className="youtube-error">
-          <p role="alert">{result.error.message} {result.error.fix}</p>
-          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry YouTube search</button>
-        </div>
-      ) : result?.entries.length === 0 ? <p className="songs-note" role="status">No YouTube videos match “{query}”. Your local results are above.</p> : (
+      <ul className="provider-status-list" aria-label="Video search sources">
+        {providers.map(({ id, label, result }) => (
+          <li key={id} role={result.error ? 'alert' : 'status'}>
+            <strong>{label}:</strong>{' '}
+            {result.error
+              ? <>Unavailable — {result.error.message} {result.error.fix}
+                  <button className="btn btn-quiet" onClick={result.retry}>Retry {label}</button>
+                </>
+              : result.loading
+                ? 'Searching…'
+                : result.entries.length
+                  ? `${result.entries.length} results`
+                  : 'No results'}
+          </li>
+        ))}
+      </ul>
+      {results.length === 0 ? (
+        <p className="songs-note" role="status">
+          {waiting ? 'Searching YouTube sources…' : 'No YouTube videos match this search. Your local results are above.'}
+        </p>
+      ) : (
         <ol className="youtube-list">
-          {result?.entries.map((video) => {
+          {results.map((video) => {
             const pending = pendingLinks.includes(video.url)
             const queued = jobs.some((job) => job.kind === 'transcribe' && job.url === video.url
               && (!processingMode || (job.processingMode ?? 'local') === processingMode)
@@ -1050,6 +1334,13 @@ function YouTubeSearch({ query, jobs, busy, pendingLinks, processingMode, transc
                 <div className="song-text">
                   <p className="song-title">{video.title}</p>
                   <p className="song-meta">{video.channel || 'YouTube'}{video.duration !== null ? ` · ${clock(video.duration)}` : ''}</p>
+                  <p className="video-sources">
+                    {video.sources.map((source) => (
+                      <span key={source} className="video-source" data-source={source}>
+                        {source === 'youtube_music' ? 'YouTube Music' : 'YouTube'}
+                      </span>
+                    ))}
+                  </p>
                 </div>
                 <button className="btn" disabled={busy || queued || pending} aria-label={`${pending ? 'Queuing' : queued ? 'Queued' : 'Transcribe'} ${video.title}`} onClick={() => void onAdd(video.url)}>
                   {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
@@ -1058,6 +1349,192 @@ function YouTubeSearch({ query, jobs, busy, pendingLinks, processingMode, transc
             )
           })}
         </ol>
+      )}
+    </section>
+  )
+}
+
+type MidiProvider = 'commons' | 'mutopia' | 'archive'
+type MidiProviderPage = { query: string; entries: MidiSearchResult[]; nextStart: number | null; error: Problem | null }
+type UnifiedMidiResult = { id: string; primary: MidiSearchResult; sources: MidiSearchResult[] }
+
+function useMidiProviderSearch(provider: MidiProvider, query: string) {
+  const [result, setResult] = useState<MidiProviderPage | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [moreLoading, setMoreLoading] = useState(false)
+  const generation = useRef(0)
+
+  useEffect(() => {
+    generation.current++
+    setMoreLoading(false)
+    if (!query) {
+      setLoading(false)
+      setResult(null)
+      return
+    }
+    let stale = false
+    setLoading(true)
+    setResult((previous) => previous?.query === query ? { ...previous, error: null } : previous)
+    const timer = window.setTimeout(() => {
+      const request = provider === 'commons'
+        ? host.searchMidiCommons(query).then((entries) => ({ entries, nextStart: null }))
+        : provider === 'mutopia'
+          ? host.searchMidiMutopia(query, 0).then(({ results, nextStart }) => ({ entries: results, nextStart }))
+          : host.searchMidiArchive(query).then((entries) => ({ entries, nextStart: null }))
+      void request.then(
+        ({ entries, nextStart }) => {
+          if (!stale) setResult({ query, entries, nextStart, error: null })
+        },
+        (error) => {
+          if (!stale) setResult((previous) => previous?.query === query
+            ? { ...previous, error: problem(error) }
+            : { query, entries: [], nextStart: null, error: problem(error) })
+        },
+      ).finally(() => { if (!stale) setLoading(false) })
+    }, 350)
+    return () => {
+      stale = true
+      window.clearTimeout(timer)
+    }
+  }, [provider, query, retry])
+
+  const current = result?.query === query ? result : null
+  const loadMore = async () => {
+    if (provider !== 'mutopia' || current?.nextStart == null || moreLoading) return
+    const requestGeneration = generation.current
+    setMoreLoading(true)
+    try {
+      const page = await host.searchMidiMutopia(query, current.nextStart)
+      if (generation.current === requestGeneration) {
+        setResult((previous) => previous?.query === query
+          ? { ...previous, entries: [...previous.entries, ...page.results], nextStart: page.nextStart, error: null }
+          : previous)
+      }
+    } catch (error) {
+      if (generation.current === requestGeneration)
+        setResult((previous) => previous?.query === query
+          ? { ...previous, error: problem(error) }
+          : previous)
+    } finally {
+      if (generation.current === requestGeneration) setMoreLoading(false)
+    }
+  }
+  return {
+    page: current,
+    loading: !!query && (loading || current === null),
+    moreLoading,
+    retry: () => setRetry((value) => value + 1),
+    loadMore,
+  }
+}
+
+function unifyMidiResults(entries: MidiSearchResult[], query: string): UnifiedMidiResult[] {
+  const groups = new Map<string, UnifiedMidiResult>()
+  const identities = new Map<string, UnifiedMidiResult>()
+  for (const entry of entries) {
+    const keys = [`url:${entry.dedupeKey}`, `provider:${entry.provider}:${entry.id}`]
+    const existing = keys.map((key) => identities.get(key)).find(Boolean)
+    const group = existing ?? { id: `${entry.provider}:${entry.id}`, primary: entry, sources: [] }
+    if (!group.sources.some((source) => source.provider === entry.provider && source.id === entry.id))
+      group.sources.push(entry)
+    groups.set(group.id, group)
+    for (const key of keys) identities.set(key, group)
+  }
+  const needle = foldSearchText(query.trim())
+  const rank = (group: UnifiedMidiResult) => {
+    if (!needle) return 0
+    const title = foldSearchText(group.primary.title)
+    const artists = group.sources.map((source) => foldSearchText(source.artist ?? ''))
+    if (title === needle) return 0
+    if (title.startsWith(needle)) return 1
+    if (title.includes(needle)) return 2
+    if (artists.some((artist) => artist === needle)) return 3
+    if (artists.some((artist) => artist.startsWith(needle))) return 4
+    if (artists.some((artist) => artist.includes(needle))) return 5
+    return 6
+  }
+  return [...groups.values()].sort((a, b) => rank(a) - rank(b)
+    || foldSearchText(a.primary.title).localeCompare(foldSearchText(b.primary.title))
+    || a.id.localeCompare(b.id))
+}
+
+function MidiSearch({ query, onImport }: {
+  query: string
+  onImport: (result: MidiSearchResult) => void
+}) {
+  const commons = useMidiProviderSearch('commons', query)
+  const mutopia = useMidiProviderSearch('mutopia', query)
+  const archive = useMidiProviderSearch('archive', query)
+
+  if (!query) return null
+  const providers = [
+    { id: 'commons' as const, label: 'Wikimedia Commons', state: commons },
+    { id: 'mutopia' as const, label: 'Mutopia', state: mutopia },
+    { id: 'archive' as const, label: 'Internet Archive', state: archive },
+  ]
+  const results = unifyMidiResults([
+    ...(commons.page?.entries ?? []),
+    ...(mutopia.page?.entries ?? []),
+    ...(archive.page?.entries ?? []),
+  ], query)
+  const waiting = commons.loading || mutopia.loading || archive.loading
+  return (
+    <section className="youtube-results midi-results" aria-label="Public MIDI results"
+      aria-busy={waiting || mutopia.moreLoading}>
+      <h2 className="lib-h2">Public MIDI <span className="dim num">{results.length || ''}</span></h2>
+      <p className="youtube-help">Only files with a confirmed Public Domain, CC0, CC BY, or CC BY-SA license are offered.</p>
+      <ul className="provider-status-list" aria-label="MIDI search sources">
+        {providers.map(({ id, label, state }) => {
+          const error = state.page?.error
+          const entries = state.page?.entries ?? []
+          return (
+            <li key={id} role={error ? 'alert' : 'status'}>
+              <strong>{label}:</strong>{' '}
+              {error
+                ? <>Unavailable — {error.message}{entries.length ? ` Showing ${entries.length} earlier results.` : ''} {error.fix}
+                    <button className="btn btn-quiet" onClick={state.retry}>Retry {label}</button>
+                  </>
+                : state.loading
+                  ? 'Searching…'
+                  : entries.length ? `${entries.length} results` : 'No eligible results'}
+              {id === 'mutopia' && state.page?.nextStart != null && (
+                <button className="btn btn-quiet" disabled={state.moreLoading} onClick={() => void state.loadMore()}>
+                  {state.moreLoading ? 'Loading…' : 'Load 10 more'}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {results.length === 0 ? (
+        <p className="songs-note" role="status">
+          {waiting ? 'Searching MIDI sources…' : 'No eligible MIDI files match this search.'}
+        </p>
+      ) : (
+        <>
+          <ol className="youtube-list">
+            {results.map((result) => (
+              <li key={result.id} className="midi-result">
+                <div className="midi-result-copy">
+                  <p className="song-title">{result.primary.title}</p>
+                  <p className="song-meta">{result.primary.artist || 'Composer/artist not listed'}</p>
+                  {result.sources.map((source) => (
+                    <div className="midi-provenance" key={`${source.provider}:${source.id}`}>
+                      <p className="song-meta">{source.source} · License: {source.license}</p>
+                      <p className="song-meta">Attribution: {source.attribution || 'Not listed'}</p>
+                      <p className="song-meta">
+                        <a href={source.sourceUrl} target="_blank" rel="noreferrer">Open source page <ExternalLink size={12} aria-hidden /></a>
+                        {source.licenseUrl && <> · <a href={source.licenseUrl} target="_blank" rel="noreferrer">License</a></>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <button className="btn" onClick={() => onImport(result.primary)}>Import</button>
+              </li>
+            ))}
+          </ol>
+        </>
       )}
     </section>
   )
@@ -1446,7 +1923,7 @@ function SongRow({
             <span className="dim"> · {sourceLine(e)}{e.duration ? ` · ${clock(e.duration)}` : ''}{folderNames.length ? ` · ${folderNames.join(', ')}` : ''}</span>
           </span>
           <span className="song-meta" title={e.source === 'youtube' ? 'The saved analysis, not the model currently selected in settings' : undefined}>
-            {imported ? `${e.source === 'midi' ? 'MIDI' : 'MusicXML'} import` :
+            {imported ? `${e.source === 'midi' ? 'MIDI' : 'MusicXML'} import${e.attribution ? ` · Credit: ${e.attribution}` : ''}` :
               `Notes: ${modelChoices.find((choice) => choice.id === e.transcriptionModel)?.label ?? 'Model not recorded'}${e.separationMethod ? ` · Stems: ${e.separationMethod === 'htdemucs-6s-onnx' ? 'HT-Demucs' : e.separationMethod}` : ''}`}
           </span>
           {(updating || (e.outdated && !imported)) && <span className="song-analysis" role="status">
@@ -1464,6 +1941,12 @@ function SongRow({
         <span className="song-when dim">{e.practicedAt ? ago(e.practicedAt) : `Added ${ago(e.createdAt)}`}</span>
       </button>
       <div className="song-actions">
+        {imported && e.sourceUrl && (
+          <a className="song-source-link" href={e.sourceUrl} target="_blank" rel="noreferrer"
+            aria-label={`Open ${e.source === 'midi' ? 'MIDI' : 'MusicXML'} source for ${e.title}`}>
+            Source <ExternalLink size={13} aria-hidden />
+          </a>
+        )}
         {confirm ? (
           <>
             <span className="song-ask">Delete this song and its transcription?</span>

@@ -4,7 +4,7 @@ import json
 import sqlite3
 import time
 import zipfile
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from xml.etree import ElementTree as ET
 from threading import Event
 from concurrent.futures import ThreadPoolExecutor
@@ -467,7 +467,7 @@ def test_existing_database_migrates_folders_and_artist(tmp_path):
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         )}
     assert "artist" in columns
-    assert {"transcription_model", "separation_method"} <= columns
+    assert {"transcription_model", "separation_method", "license", "attribution"} <= columns
     assert {"folders", "folder_songs"} <= tables
 
 
@@ -588,10 +588,10 @@ def test_youtube_search_returns_bounded_safe_results(monkeypatch):
         assert result["results"] == [
             {"id": "aB_12-cD345", "title": "Piano study", "channel": "Artist", "duration": 92,
              "url": "https://www.youtube.com/watch?v=aB_12-cD345",
-             "thumbnail": "https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg"},
+             "thumbnail": "https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg", "source": "youtube"},
             {"id": "cB_12-cD345", "title": "Unknown duration", "channel": "", "duration": None,
              "url": "https://www.youtube.com/watch?v=cB_12-cD345",
-             "thumbnail": "https://i.ytimg.com/vi/cB_12-cD345/mqdefault.jpg"},
+             "thumbnail": "https://i.ytimg.com/vi/cB_12-cD345/mqdefault.jpg", "source": "youtube"},
         ]
         assert api.search_youtube(" \t ") == {"ok": True, "results": []}
         for query in (None, [], "a" * 201):
@@ -614,6 +614,73 @@ def test_youtube_search_failure_keeps_library_available(monkeypatch):
         assert not result["ok"] and result["error"]["code"] == "youtube_search_failed"
         assert result["error"]["fix"]
         assert api.list_library() == {"ok": True, "entries": []}
+    finally:
+        runner.close()
+
+
+def test_youtube_music_search_uses_real_search_url_and_only_returns_video_ids(monkeypatch):
+    calls = []
+
+    class Search:
+        def __init__(self, options):
+            assert options["extract_flat"] and options["skip_download"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            calls.append(url)
+            assert download is False
+            return {"entries": [
+                {"id": "aB_12-cD345", "title": "Für Elise", "artist": "Beethoven"},
+                {"id": "aB_12-cD345", "title": "Duplicate"},
+                {"id": "UC1234567890123456789012", "title": "An artist page"},
+                {"id": "bB_12-cD345", "title": "Unavailable livestream", "is_live": True},
+            ]}
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", Search)
+    api, runner = api_with_idle_runner()
+    try:
+        result = api.search_youtube_music("Für Elise")
+        assert result["ok"] and len(result["results"]) == 1
+        parsed = urlparse(calls[0])
+        assert parsed.hostname == "music.youtube.com"
+        assert parse_qs(parsed.query)["q"] == ["Für Elise"]
+        video = result["results"][0]
+        assert video["source"] == "youtube_music"
+        assert video["url"] == "https://www.youtube.com/watch?v=aB_12-cD345"
+    finally:
+        runner.close()
+
+
+def test_youtube_music_failure_is_separate_from_normal_youtube_search(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    class Search:
+        def __init__(self, options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            if url.startswith("https://music.youtube.com/"):
+                raise DownloadError("Music search unavailable")
+            return {"entries": [{"id": "aB_12-cD345", "title": "Normal result"}]}
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", Search)
+    api, runner = api_with_idle_runner()
+    try:
+        normal = api.search_youtube("piano")
+        music = api.search_youtube_music("piano")
+        assert normal["ok"] and normal["results"][0]["source"] == "youtube"
+        assert music["error"]["code"] == "youtube_music_search_failed"
     finally:
         runner.close()
 

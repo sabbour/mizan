@@ -391,7 +391,8 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
 
 
 def import_score(name: str, data_base64: str, library: LibraryStore,
-                 pipeline_version: str = PIPELINE_VERSION) -> dict:
+                 pipeline_version: str = PIPELINE_VERSION,
+                 entry_metadata: dict | None = None) -> dict:
     if not isinstance(name, str) or not isinstance(data_base64, str):
         raise InvalidFile()
     suffix = Path(name).suffix.lower()
@@ -414,7 +415,7 @@ def import_score(name: str, data_base64: str, library: LibraryStore,
             {**note, "hand": hands[part["name"].strip().lower()]}
             for part in parts for note in part["notes"]
         ]}]
-    title = parsed_title or Path(name).stem
+    title = parsed_title or (entry_metadata or {}).get("title") or Path(name).stem
     source = "midi" if suffix in (".mid", ".midi") else "musicxml"
     song = notes_to_song(title, source, bpm, beats_per_bar, beat_unit, parts)
     song_id = str(uuid4())
@@ -428,4 +429,6 @@ def import_score(name: str, data_base64: str, library: LibraryStore,
     if source == "musicxml":
         export_midi(song, directory / "score.mid")
         artifacts["midi"] = str(directory / "score.mid")
-    return library.create_import(title, source, song, artifacts, pipeline_version, song_id)
+    return library.create_import(
+        title, source, song, artifacts, pipeline_version, song_id, entry_metadata=entry_metadata,
+    )

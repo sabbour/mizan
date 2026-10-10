@@ -31,9 +31,16 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   let active
   const timers = []
   const intervals = new Map()
+  const midiListeners = new Set()
   let nextInterval = 1
   const host = {
     library: async () => [], folders: async () => [],
+    searchYouTube: async () => [], searchYouTubeMusic: async () => [],
+    popularSongs: async () => ({
+      title: 'Top Songs', period: 'CHART_PERIOD_TYPE_WEEKLY', market: 'global',
+      chartDate: '2026-10-03', fetchedAt: '2026-10-10T00:00:00Z',
+      sourceUrl: 'https://artists.youtube.com/charts/tracks', rows: [],
+    }),
     getTranscriptionModel: async () => 'muscriptor-small',
     hfTokenStatus: async () => true, modelPreflight: async () => ({}),
     modelDownloadStatus: async () => ({}), resourceUsage: async () => null,
@@ -93,7 +100,7 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
     if (modules.has(name)) return modules.get(name)
     const filename = sourceRoot + name
     let source = readFileSync(filename, 'utf8').replaceAll('import.meta.env', '({})')
-    if (name === 'Library.tsx') source += '\nexport { Queue, YouTubeSearch }\n'
+    if (name === 'Library.tsx') source += '\nexport { Queue, YouTubeSearch, PopularMusic, unifyMidiResults }\n'
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2023 },
     }).outputText
@@ -109,7 +116,17 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
         if (specifier === 'react') return react
         if (specifier === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
         if (specifier === 'lucide-react') return new Proxy({}, { get: (_target, key) => key })
-        if (specifier === './bridge') return { host, HostError, IMPORTABLE: /\.(mid|musicxml)$/i }
+        if (specifier === './bridge') return {
+          host, HostError, IMPORTABLE: /\.(mid|midi|musicxml|xml|mxl)$/i,
+          onMidiFileOpened(listener) {
+            midiListeners.add(listener)
+            return () => midiListeners.delete(listener)
+          },
+        }
+        if (specifier === '../course/Course') return { CourseSection: 'course-section' }
+        if (specifier === '../course/curriculum') return { LESSONS: [] }
+        if (specifier === '../course/piano') return { PIANO_LESSONS: [] }
+        if (specifier === '../course/pianoInspired') return { PIANO_INSPIRED: [] }
         if (specifier === './CloudSetup') return loadCloudSetup
           ? load('CloudSetup.tsx') : { CloudSetup: 'cloud-setup' }
         if (specifier.endsWith('.css')) return {}
@@ -143,6 +160,7 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   }
   return {
     host, HostError, load, render,
+    openMidiFile: (file) => { for (const listener of midiListeners) listener(file) },
     runTimers: () => { for (const callback of timers.splice(0)) callback() },
     runIntervals: (ms) => {
       for (const interval of intervals.values()) if (interval.ms === ms) interval.callback()
@@ -150,7 +168,10 @@ function harness(overrides = {}, { loadCloudSetup = false } = {}) {
   }
 }
 
-const libraryProps = { jobs: [], version: 0, onQueueChange() {}, onOpen() {}, onDetails() {}, onCredits() {} }
+const libraryProps = {
+  jobs: [], version: 0, onQueueChange() {}, onOpen() {}, onDetails() {}, onCredits() {},
+  tab: 'songs', onTab() {},
+}
 const cloudReady = { mode: 'cloud', configured: true, available: true,
   supportedModels: ['muscriptor-small', 'muscriptor-medium', 'muscriptor-large'] }
 const savedCloudSetup = {
@@ -255,6 +276,84 @@ test('successful readiness clears a failed progress poll', async () => {
   await view.settle()
   assert.match(text(view.tree), /Cloud is on for new and redone analyses/)
   assert.doesNotMatch(text(view.tree), /Progress polling failed|Azure access check failed/)
+  view.unmount()
+})
+
+test('MIDI activation offers Import or Cancel before saving', async () => {
+  const imported = []
+  const entry = {
+    id: 'midi1', title: 'Piano score', artist: null, thumbnail: null, source: 'midi',
+    parts: ['Piano'], recording: false, duration: null, createdAt: new Date().toISOString(),
+    practicedAt: null, position: null, folders: [], outdated: false,
+    transcriptionModel: null, separationMethod: null,
+  }
+  const h = harness({
+    library: async () => imported.length ? [entry] : [],
+    importFile: async (name, base64) => { imported.push({ name, base64 }); return entry },
+  })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  const chooseFile = () => h.openMidiFile({ name: 'Piano score.mid', dataBase64: 'T1RoZA==' })
+
+  chooseFile()
+  view.update()
+  assert.match(text(view.tree), /Import “\s*Piano score\.mid\s*”\?/)
+  assert.equal(button(view.tree, 'Cancel').props.autoFocus, true)
+  assert.equal(imported.length, 0)
+  nodes(view.tree, (node) => node.type === 'dialog'
+    && node.props.className === 'midi-import-dialog')[0].props.onCancel({ preventDefault() {} })
+  view.update()
+  assert.equal(nodes(view.tree, (node) => node.type === 'dialog'
+    && node.props.className === 'midi-import-dialog').length, 0)
+
+  chooseFile()
+  view.update()
+  button(view.tree, 'Cancel').props.onClick()
+  view.update()
+  assert.equal(imported.length, 0)
+
+  chooseFile()
+  view.update()
+  button(view.tree, 'Import').props.onClick()
+  await view.settle()
+  assert.equal(imported.length, 1, text(view.tree))
+  assert.deepEqual(imported, [{ name: 'Piano score.mid', base64: 'T1RoZA==' }])
+  view.unmount()
+})
+
+test('search folding matches accents and canonical Unicode forms', () => {
+  const { foldSearchText } = harness().load('searchText.ts')
+  assert.equal(foldSearchText('Beyoncé').includes(foldSearchText('beyonce')), true)
+  assert.equal(foldSearchText('café'), foldSearchText('cafe\u0301'))
+  assert.equal(foldSearchText('café').includes(foldSearchText('cafe')), true)
+})
+
+test('library search finds accented titles and artists but keeps their original spelling', async () => {
+  const entries = [
+    {
+      id: 'beyonce', title: 'Live', artist: 'Beyoncé', thumbnail: null, source: 'midi',
+      parts: ['Piano'], recording: false, duration: null, createdAt: new Date().toISOString(),
+      practicedAt: null, position: null, folders: [], outdated: false,
+      transcriptionModel: null, separationMethod: null,
+    },
+    {
+      id: 'cafe', title: 'Cafe\u0301 Sonata', artist: null, thumbnail: null, source: 'midi',
+      parts: ['Piano'], recording: false, duration: null, createdAt: new Date().toISOString(),
+      practicedAt: null, position: null, folders: [], outdated: false,
+      transcriptionModel: null, separationMethod: null,
+    },
+  ]
+  const h = harness({ library: async () => entries, folders: async () => [] })
+  const view = h.render(h.load('Library.tsx').Library, libraryProps)
+  await view.settle()
+  const search = () => nodes(view.tree, (node) => node.type === 'input' && node.props.name === 'url')[0]
+  search().props.onChange({ target: { value: 'beyonce' } })
+  view.update()
+  assert.match(text(view.tree), /1 of 2 songs/)
+  search().props.onChange({ target: { value: 'cafe' } })
+  view.update()
+  assert.match(text(view.tree), /1 of 2 songs/)
+  assert.equal(entries[0].artist, 'Beyoncé')
+  assert.equal(entries[1].title, 'Cafe\u0301 Sonata')
   view.unmount()
 })
 
@@ -596,6 +695,126 @@ test('search result buttons reflect pending work and distinguish selected Cloud/
   assert.equal(button(view.tree, 'Queued Synthetic').props.disabled, true)
   view.update({ ...props, jobs: [job({ url: video.url, transcriptionModel: 'muscriptor-small' })] })
   assert.equal(button(view.tree, 'Transcribe Synthetic').props.disabled, false)
+  view.unmount()
+})
+
+test('YouTube Music failures are visible while YouTube results remain available', async () => {
+  const video = {
+    id: 'aB_12-cD345', url: 'https://www.youtube.com/watch?v=aB_12-cD345',
+    title: 'Für Elise', channel: 'Artist', duration: 92,
+    thumbnail: 'https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg', source: 'youtube',
+  }
+  const h = harness({
+    searchYouTube: async () => [video],
+    searchYouTubeMusic: async () => { throw new h.HostError('Temporary Music error') },
+  })
+  const props = { query: 'fur elise', jobs: [], busy: false, pendingLinks: [],
+    onAdd: async () => {} }
+  const view = h.render(h.load('Library.tsx').YouTubeSearch, props)
+  h.runTimers()
+  await view.settle()
+  assert.match(text(view.tree), /YouTube Music\s*:\s*Unavailable — Temporary Music error/)
+  assert.equal(nodes(view.tree, (node) => node.type === 'li' && node.props.className === 'youtube-result').length, 1)
+  assert.equal(button(view.tree, 'Transcribe Für Elise').props.disabled, false)
+  view.unmount()
+})
+
+test('YouTube and YouTube Music duplicates merge by video id and show both sources', async () => {
+  const video = {
+    id: 'aB_12-cD345', url: 'https://www.youtube.com/watch?v=aB_12-cD345',
+    title: 'Für Elise', channel: 'Artist', duration: 92,
+    thumbnail: 'https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg',
+  }
+  const h = harness({
+    searchYouTube: async () => [{ ...video, source: 'youtube' }],
+    searchYouTubeMusic: async () => [{ ...video, source: 'youtube_music' }],
+  })
+  const view = h.render(h.load('Library.tsx').YouTubeSearch,
+    { query: 'fur elise', jobs: [], busy: false, pendingLinks: [], onAdd: async () => {} })
+  h.runTimers()
+  await view.settle()
+  assert.equal(nodes(view.tree, (node) => node.type === 'li' && node.props.className === 'youtube-result').length, 1)
+  assert.deepEqual(nodes(view.tree, (node) => node.props.className === 'video-source').map((node) => text(node)),
+    ['YouTube', 'YouTube Music'])
+  view.unmount()
+})
+
+test('unified MIDI ranking folds accents and deduplicates only shared file identities', () => {
+  const { unifyMidiResults } = harness().load('Library.tsx')
+  const result = (provider, id, dedupeKey, title, artist = null) => ({
+    provider, id, dedupeKey, title, artist,
+    source: provider === 'commons' ? 'Wikimedia Commons' : 'Mutopia Project',
+    license: 'Public Domain', licenseUrl: null, attribution: artist,
+    sourceUrl: provider === 'commons' ? 'https://commons.wikimedia.org/wiki/File:score.mid'
+      : 'https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1',
+  })
+  const groups = unifyMidiResults([
+    result('commons', 'commons:one', 'file-a', 'Beyoncé Nocturne', 'Ludwig van Beethoven'),
+    result('mutopia', 'mutopia:one', 'file-a', 'Beyoncé Nocturne', 'Ludwig van Beethoven'),
+    result('mutopia', 'mutopia:arrangement', 'file-b', 'Beyoncé Nocturne', 'Ludwig van Beethoven'),
+    result('commons', 'commons:other', 'file-c', 'Chopin Study', 'Beyoncé'),
+  ], 'beyonce')
+
+  assert.equal(groups.length, 3)
+  assert.equal(groups[0].primary.title, 'Beyoncé Nocturne')
+  assert.equal(groups.find((group) => group.sources.length === 2).sources.map((source) => source.provider).join(','),
+    'commons,mutopia')
+  assert.equal(groups.find((group) => group.sources.some((source) => source.id === 'mutopia:arrangement')).sources.length, 1)
+})
+
+test('popular chart cards use the fetched ranks and require an explicit Transcribe click', async () => {
+  const chart = {
+    title: 'Top Songs', period: 'CHART_PERIOD_TYPE_WEEKLY', market: 'global',
+    chartDate: '2026-10-03', fetchedAt: '2026-10-10T00:00:00Z',
+    sourceUrl: 'https://artists.youtube.com/charts/tracks',
+    rows: [{
+      videoId: 'aB_12-cD345', title: 'Chart song', artist: 'Chart artist',
+      rank: 1, thumbnail: 'https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg',
+    }],
+  }
+  const queued = []
+  const h = harness({ popularSongs: async () => chart })
+  const view = h.render(h.load('Library.tsx').PopularMusic, {
+    jobs: [], busy: false, pendingLinks: [], onTranscribe: async (url) => queued.push(url),
+  })
+  await view.settle()
+
+  assert.match(text(view.tree), /Weekly · Global chart · through/)
+  assert.match(text(view.tree), /YouTube Music uses the same ranks/)
+  assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 1)
+  assert.ok(nodes(view.tree, (node) => node.type === 'a'
+    && node.props.href === 'https://music.youtube.com/watch?v=aB_12-cD345').length)
+  assert.equal(queued.length, 0)
+  button(view.tree, 'Transcribe Chart song').props.onClick()
+  await view.settle()
+  assert.equal(queued[0], 'https://www.youtube.com/watch?v=aB_12-cD345')
+  view.unmount()
+})
+
+test('popular chart errors remain visible and retryable without rendering fake songs', async () => {
+  let attempts = 0
+  const chart = {
+    title: 'Top Songs', period: 'CHART_PERIOD_TYPE_WEEKLY', market: 'global',
+    chartDate: '2026-10-03', fetchedAt: '2026-10-10T00:00:00Z',
+    sourceUrl: 'https://artists.youtube.com/charts/tracks', rows: [],
+  }
+  const h = harness({
+    popularSongs: async () => {
+      if (attempts++ === 0) throw new h.HostError('Chart is rate limited')
+      return chart
+    },
+  })
+  const view = h.render(h.load('Library.tsx').PopularMusic, {
+    jobs: [], busy: false, pendingLinks: [], onTranscribe: async () => {},
+  })
+  await view.settle()
+  assert.match(text(view.tree), /Chart is rate limited/)
+  assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 0)
+  button(view.tree, 'Retry chart').props.onClick()
+  await view.settle()
+  await view.settle()
+  assert.match(text(view.tree), /Top Songs/)
+  assert.equal(attempts, 2)
   view.unmount()
 })
 

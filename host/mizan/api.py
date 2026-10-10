@@ -4,20 +4,26 @@ import math
 import re
 import shutil
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock
+from time import monotonic
 from typing import Any
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from .artifacts import ArtifactServer
-from .errors import InvalidSearch, MizanError, PipelineNotReady, YoutubeSearchFailed
+from .errors import (InvalidSearch, MizanError, PipelineNotReady, YoutubeMusicSearchFailed,
+                     YoutubeSearchFailed)
 from .jobs import ALL_STAGES, Job, JobRunner, JobStore
 from .library import public_entry
 from .paths import app_dir
+from .popular import CHARTS_URL, fetch_chart
 from .telemetry import UsageSampler
 from .youtube import parse_video_id
 
 logger = logging.getLogger(__name__)
+POPULAR_CHART_CACHE_SECONDS = 6 * 60 * 60
 STEM_LABELS = {
     "mix": "Full mix", "vocals": "Vocals", "piano": "Piano", "guitar": "Guitar",
     "bass": "Bass", "drums": "Drums", "other": "Other",
@@ -35,6 +41,8 @@ FIXES = {
     "folder_name_exists": "Choose a different folder name.",
     "folder_not_found": "Refresh the library and try again.",
     "youtube_search_failed": "Check your connection and retry.",
+    "youtube_music_search_failed": "Check your connection and retry.",
+    "popular_chart_unavailable": "Try again later.",
 }
 
 
@@ -109,6 +117,34 @@ def queue_job(job: Job, order: int | None = None) -> dict[str, Any]:
     }
 
 
+def _youtube_results(entries: list, source: str, limit: int = 6) -> list[dict]:
+    results, seen = [], set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        video_id = entry.get("id")
+        if (not isinstance(video_id, str) or not re.fullmatch(r"[\w-]{11}", video_id, re.ASCII)
+                or video_id in seen or entry.get("is_live")):
+            continue
+        seen.add(video_id)
+        duration = entry.get("duration")
+        channel = entry.get("channel") or entry.get("uploader") or entry.get("artist") or ""
+        if isinstance(channel, list):
+            channel = " · ".join(str(name) for name in channel if name)
+        results.append({
+            "id": video_id, "title": str(entry.get("title") or video_id)[:300],
+            "channel": str(channel)[:200],
+            "duration": duration if isinstance(duration, (int, float)) and not isinstance(duration, bool)
+            and math.isfinite(duration) and duration > 0 else None,
+            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "source": source,
+        })
+        if len(results) == limit:
+            break
+    return results
+
+
 def response(action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     try:
         return action()
@@ -138,6 +174,12 @@ class Api:
         self._artifacts = artifacts
         self._add_link_lock = Lock()
         self._search_lock = Lock()
+        self._youtube_music_search_lock = Lock()
+        self._popular_chart_lock = Lock()
+        self._popular_chart_fetch_lock = Lock()
+        self._popular_chart_cache: tuple[float, dict[str, Any]] | None = None
+        self._midi_result_lock = Lock()
+        self._midi_results: dict[str, dict[str, Any]] = {}
         self._usage = UsageSampler()
 
     def cloud_status(self, request_id: str | None = None) -> dict[str, Any]:
@@ -297,50 +339,127 @@ class Api:
             return {"ok": True, "configured": False}
         return response(clear)
 
+    def _search_youtube_videos(self, search_url: str, source: str, lock: Lock,
+                               failure: type[MizanError]) -> list[dict[str, Any]]:
+        from yt_dlp import YoutubeDL
+        from yt_dlp.utils import DownloadError
+
+        try:
+            with lock, YoutubeDL({
+                "quiet": True, "no_warnings": True, "extract_flat": True,
+                "skip_download": True, "socket_timeout": 8, "retries": 0,
+                "extractor_retries": 0, "cachedir": False,
+            }) as youtube:
+                info = youtube.extract_info(search_url, download=False)
+        except DownloadError as exc:
+            logger.warning("%s search failed: %s", source, exc)
+            raise failure() from exc
+        if not isinstance(info, dict) or not isinstance(info.get("entries"), list):
+            raise failure()
+        return _youtube_results(info["entries"], source)
+
+    @staticmethod
+    def _search_text(query: str) -> str:
+        if not isinstance(query, str) or len(query.strip()) > 200:
+            raise InvalidSearch()
+        return query.strip()
+
     def search_youtube(self, query: str) -> dict[str, Any]:
         def search():
-            if not isinstance(query, str) or len(query.strip()) > 200:
-                raise InvalidSearch()
-            text = query.strip()
+            text = self._search_text(query)
             if not text:
                 return {"ok": True, "results": []}
-            from yt_dlp import YoutubeDL
-            from yt_dlp.utils import DownloadError
-
-            try:
-                with self._search_lock, YoutubeDL({
-                    "quiet": True, "no_warnings": True, "extract_flat": True,
-                    "skip_download": True, "socket_timeout": 8, "retries": 0,
-                    "extractor_retries": 0, "cachedir": False,
-                }) as youtube:
-                    info = youtube.extract_info(f"ytsearch6:{text}", download=False)
-            except DownloadError as exc:
-                logger.warning("YouTube search failed: %s", exc)
-                raise YoutubeSearchFailed() from exc
-            if not isinstance(info, dict) or not isinstance(info.get("entries"), list):
-                raise YoutubeSearchFailed()
-            results, seen = [], set()
-            for entry in info["entries"]:
-                if not isinstance(entry, dict):
-                    continue
-                video_id = entry.get("id")
-                if not isinstance(video_id, str) or not re.fullmatch(r"[\w-]{11}", video_id, re.ASCII) \
-                        or video_id in seen or entry.get("is_live"):
-                    continue
-                seen.add(video_id)
-                duration = entry.get("duration")
-                results.append({
-                    "id": video_id, "title": str(entry.get("title") or video_id)[:300],
-                    "channel": str(entry.get("channel") or entry.get("uploader") or "")[:200],
-                    "duration": duration if isinstance(duration, (int, float)) and not isinstance(duration, bool)
-                    and math.isfinite(duration) and duration > 0 else None,
-                    "thumbnail": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
-                    "url": f"https://www.youtube.com/watch?v={video_id}",
-                })
-                if len(results) == 6:
-                    break
-            return {"ok": True, "results": results}
+            return {"ok": True, "results": self._search_youtube_videos(
+                f"ytsearch6:{text}", "youtube", self._search_lock, YoutubeSearchFailed)}
         return response(search)
+
+    def search_youtube_music(self, query: str) -> dict[str, Any]:
+        def search():
+            text = self._search_text(query)
+            if not text:
+                return {"ok": True, "results": []}
+            url = f"https://music.youtube.com/search?{urlencode({'q': text})}"
+            return {"ok": True, "results": self._search_youtube_videos(
+                url, "youtube_music", self._youtube_music_search_lock, YoutubeMusicSearchFailed)}
+        return response(search)
+
+    def popular_songs(self) -> dict[str, Any]:
+        def get_chart():
+            with self._popular_chart_lock:
+                cached = self._popular_chart_cache
+                if cached and monotonic() - cached[0] < POPULAR_CHART_CACHE_SECONDS:
+                    return {"ok": True, **cached[1]}
+            with self._popular_chart_fetch_lock:
+                with self._popular_chart_lock:
+                    cached = self._popular_chart_cache
+                    if cached and monotonic() - cached[0] < POPULAR_CHART_CACHE_SECONDS:
+                        return {"ok": True, **cached[1]}
+                try:
+                    chart = fetch_chart()
+                except MizanError:
+                    if cached:
+                        return {"ok": True, **cached[1],
+                                "warning": "The official chart is unavailable; showing the last fetched chart and its date."}
+                    raise
+                fetched_at = datetime.now(timezone.utc).isoformat()
+                result = {
+                    **chart,
+                    "fetchedAt": fetched_at,
+                    "sourceUrl": CHARTS_URL,
+                }
+                with self._popular_chart_lock:
+                    self._popular_chart_cache = (monotonic(), result)
+                return {"ok": True, **result}
+        return response(get_chart)
+
+    def _remember_midi_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        with self._midi_result_lock:
+            self._midi_results.update((result["id"], result) for result in results)
+            if len(self._midi_results) > 200:
+                self._midi_results = dict(list(self._midi_results.items())[-200:])
+        private = {"url", "identifier", "fileName", "size", "hashes", "_licenseUrl"}
+        return [{key: value for key, value in result.items() if key not in private} for result in results]
+
+    def search_midi_commons(self, query: str) -> dict[str, Any]:
+        def search():
+            from .midi_search import search_commons
+            return {"ok": True, "results": self._remember_midi_results(search_commons(query))}
+        return response(search)
+
+    def search_midi_mutopia(self, query: str, startat: int = 0) -> dict[str, Any]:
+        def search():
+            from .midi_search import search_mutopia
+            results, next_start = search_mutopia(query, startat)
+            return {"ok": True, "results": self._remember_midi_results(results), "nextStart": next_start}
+        return response(search)
+
+    def search_midi_archive(self, query: str) -> dict[str, Any]:
+        def search():
+            from .midi_search import search_archive
+            return {"ok": True, "results": self._remember_midi_results(search_archive(query))}
+        return response(search)
+
+    def import_midi_result(self, result_id: str) -> dict[str, Any]:
+        def import_result():
+            from .imports import import_score
+            from .midi_search import download_midi
+            from .errors import InvalidFile
+            import base64
+
+            with self._midi_result_lock:
+                result = self._midi_results.get(result_id) if isinstance(result_id, str) else None
+            if result is None:
+                raise InvalidFile("Search for this MIDI again before importing it.")
+            data = download_midi(result)
+            entry = import_score(
+                f"{result['title']}.mid", base64.b64encode(data).decode("ascii"),
+                self._library, self._runner.pipeline_version,
+                {"title": result["title"], "artist": result.get("artist"),
+                 "sourceUrl": result["sourceUrl"], "license": result["license"],
+                 "attribution": result.get("attribution")},
+            )
+            return {"ok": True, "entry": public_entry(entry, self._runner.pipeline_version)}
+        return response(import_result)
 
     def _artifact_url(self, path: str) -> str:
         return self._artifacts.url(path) if self._artifacts else Path(path).as_uri()

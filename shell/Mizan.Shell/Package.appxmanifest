@@ -41,6 +41,15 @@
           Square310x310Logo="Assets\Square310x310Logo.png" />
         <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#F7F3EB" />
       </uap:VisualElements>
+      <uap:Extension Category="windows.fileTypeAssociation">
+        <uap:FileTypeAssociation Name="midi">
+          <uap:DisplayName>MIDI score</uap:DisplayName>
+          <uap:SupportedFileTypes>
+            <uap:FileType>.mid</uap:FileType>
+            <uap:FileType>.midi</uap:FileType>
+          </uap:SupportedFileTypes>
+        </uap:FileTypeAssociation>
+      </uap:Extension>
     </Application>
   </Applications>
 
