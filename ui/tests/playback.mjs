@@ -30,8 +30,16 @@ try {
     try { port = Number((await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); break } catch { await sleep(100) }
   }
   assert.ok(port, 'Edge debugging endpoint started')
-  const targets = await (await fetch(`http://localhost:${port}/json/list`)).json()
-  socket = new WebSocket(targets.find((target) => target.type === 'page').webSocketDebuggerUrl)
+  // A managed browser can open its own pages (such as a sync dialog) first: use the blank tab this run opened.
+  let blank
+  for (let attempt = 0; attempt < 50 && !blank; attempt++) {
+    const targets = await (await fetch(`http://localhost:${port}/json/list`)).json()
+    for (const target of targets) if (target.type === 'page' && target.url.startsWith('edge://')) await fetch(`http://localhost:${port}/json/close/${target.id}`)
+    blank = targets.find((target) => target.type === 'page' && target.url === 'about:blank')
+    if (!blank) await sleep(100)
+  }
+  assert.ok(blank, 'The browser opened its blank tab')
+  socket = new WebSocket(blank.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
   let sequence = 0
   const pending = new Map()
@@ -63,6 +71,8 @@ try {
   }
   await call('Page.enable')
   await call('Runtime.enable')
+  // The test tab must be the visible one, or animation frames (and so drawing) pause.
+  await call('Page.bringToFront')
   await call('Page.navigate', { url: testUrl })
   for (let i = 0; i < 100; i++) {
     if (await evaluate('!!document.querySelector(".lib-main")')) break
@@ -1753,7 +1763,10 @@ async function courseChecks(width, phase) {
     frames.push({ dark, playing: playButton().getAttribute('aria-label') !== 'Play' })
   }
   await chooseStyle('electronic:Realistic')
-  await wait(() => frames.some((f) => f.dark > 20), 'The realistic electronic kit is drawn')
+  for (let i = 0; i < 60 && !frames.some((f) => f.dark > 20); i++) await sleep(100)
+  const kitCanvas = document.querySelector('.practice-kit canvas')
+  check(frames.some((f) => f.dark > 20), `The realistic electronic kit is drawn (${frames.length} frames, most dark ${Math.max(0, ...frames.map((f) => f.dark))}, ` +
+    `canvas ${kitCanvas?.width}x${kitCanvas?.height} hidden ${kitCanvas?.hidden}, page ${document.visibilityState}, failure ${document.querySelector('.practice-failure')?.textContent ?? 'none'})`)
   frames.length = 0
   playButton().click()
   await wait(() => bar() >= 2, 'Playback advances')

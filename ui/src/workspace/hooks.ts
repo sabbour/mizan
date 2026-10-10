@@ -10,8 +10,9 @@ export function useFrame(engine: Engine, onFrame: (t: Transport) => void): void 
   useEffect(() => {
     let id = 0
     const loop = () => {
-      cb.current(engine.read())
+      // The next frame is booked first, so one failing frame cannot stop every later one.
       id = requestAnimationFrame(loop)
+      cb.current(engine.read())
     }
     id = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(id)

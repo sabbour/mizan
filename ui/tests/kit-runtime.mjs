@@ -31,8 +31,8 @@ try {
   const hit = at(1.0)
   assert.ok(hit.get('snare').pulse > 0.8 && hit.get('snare').since === 0, 'the hit pulses at its beat')
   assert.deepEqual(hit.get('snare').tint, HAND_GLOW.left)
-  assert.deepEqual(at(1.2).get('snare').upcomingTint, HAND_GLOW.right, 'alternating strokes: the next (right) stroke is anticipated in orange')
-  const fade = [1.0, 1.2, 1.4].map((b) => at(b).get('snare').pulse)
+  assert.deepEqual(at(1.4).get('snare').upcomingTint, HAND_GLOW.right, 'alternating strokes: the next (right) stroke is anticipated in orange')
+  const fade = [1.0, 1.05, 1.1].map((b) => at(b).get('snare').pulse)
   assert.ok(fade[0] > fade[1] && fade[1] > fade[2], `the pulse fades: ${fade}`)
   assert.ok(at(1.5).get('snare').pulse < at(1.0).get('snare').pulse, 'a ghost note pulses less than an accent')
   // Both hands at once: shown side by side, not mixed.
@@ -52,9 +52,27 @@ try {
   assert.ok(counting.every((v, i) => i === 0 || v > counting[i - 1]), `the first kick builds through the count-in: ${counting}`)
   assert.ok(!feedbackAt(strikes, { beat: 0, playing: true, countingIn: true, countBeat: 4 }, opts).get('snare'), 'later notes are not anticipated during the count-in')
   // Speed: the pulse lasts the same time in seconds, so it spans more beats at a faster tempo.
-  const slow = feedbackAt(strikes, { beat: 1.3, playing: true, countingIn: false, countBeat: 0 }, { ...opts, secondsPerBeat: 1 }).get('snare').pulse
-  const fast = feedbackAt(strikes, { beat: 1.3, playing: true, countingIn: false, countBeat: 0 }, { ...opts, secondsPerBeat: 0.25 }).get('snare').pulse
+  const slow = feedbackAt(strikes, { beat: 3.3, playing: true, countingIn: false, countBeat: 0 }, { ...opts, secondsPerBeat: 1 }).get('snare').pulse
+  const fast = feedbackAt(strikes, { beat: 3.3, playing: true, countingIn: false, countBeat: 0 }, { ...opts, secondsPerBeat: 0.25 }).get('snare').pulse
   assert.ok(fast > slow, 'at a faster tempo the pulse covers more beats')
+  // Close repeated notes on one piece: every hit flashes and goes dark before the next, at any tempo; anticipation
+  // of the next note starts only after the pulse; hands keep their colours. Separated notes keep the full pulse.
+  const level = (f) => f ? Math.max(f.pulse, f.upcoming * 0.55) : 0
+  for (const [bpm, step, label] of [[100, 0.25, 'sixteenths at 100'], [160, 0.5, 'eighths at 160'], [140, 0.25, 'sixteenths at 140'], [70, 1 / 6, 'sextuplets at 70']]) {
+    const hats = new Map([['hihat', Array.from({ length: 16 }, (_, k) => ({ beat: k * step, velocity: k % 2 ? 0.6 : 0.95, specified: true, hand: k % 2 ? 'left' : 'right' }))]])
+    const o = { ...opts, secondsPerBeat: 60 / bpm }
+    for (let k = 1; k < 14; k++) {
+      const samples = Array.from({ length: 41 }, (_, s) => feedbackAt(hats, { beat: k * step + (s / 40) * step - 1e-6, playing: true, countingIn: false, countBeat: 0 }, o).get('hihat'))
+      const peak = level(feedbackAt(hats, { beat: k * step, playing: true, countingIn: false, countBeat: 0 }, o).get('hihat'))
+      const dip = Math.min(...samples.slice(1, 40).map(level))
+      assert.ok(peak > 0.5 && dip < 0.1 * peak, `${label}: hit ${k} flashes (${peak.toFixed(2)}) and goes dark (${dip.toFixed(3)}) before the next`)
+      assert.deepEqual(feedbackAt(hats, { beat: k * step, playing: true, countingIn: false, countBeat: 0 }, o).get('hihat').tint, HAND_GLOW[k % 2 ? 'left' : 'right'], `${label}: hit ${k} keeps its hand colour`)
+    }
+  }
+  const quarters = new Map([['snare', [0, 1, 2, 3].map((beat) => ({ beat, velocity: 0.9, specified: true }))]])
+  const q = (beat) => feedbackAt(quarters, { beat, playing: true, countingIn: false, countBeat: 0 }, { ...opts, secondsPerBeat: 60 / 60 }).get('snare')
+  assert.ok(q(1.4).pulse > 0 && q(1.44).pulse < 0.01, 'separated hits at 60 bpm keep the full 0.45 s pulse')
+  assert.ok(q(1.5).upcoming > 0 && q(1.5).upcomingTint === PIECE_GLOW.snare, 'and still anticipate the next note through the beat')
   assert.equal(LOOKAHEAD, 1)
   // Reduced motion: a steady mark, no wobble.
   const calm = feedbackAt(strikes, { beat: 1.05, playing: true, countingIn: false, countBeat: 0 }, { ...opts, reduced: true }).get('snare')
@@ -108,7 +126,7 @@ try {
     assert.ok(!full.items.some((item) => item.name.startsWith('Throne')), `${kit}: the throne behind the camera is left out of the view`)
   }
   assert.ok(fallbackScene('acoustic').items.length > 5, 'a built-in kit stands in when a model cannot load')
-  console.log('Kit runtime checks passed: clock feedback (anticipation, hit, fade, loop, count-in, rate, hands, sticking off, reduced motion), part motions, and both kits in all four looks.')
+  console.log('Kit runtime checks passed: clock feedback (anticipation, hit, fade, dense repeats stay distinct, loop, count-in, rate, hands, sticking off, reduced motion), part motions, and both kits in all four looks.')
 } finally {
   await vite.close()
 }
