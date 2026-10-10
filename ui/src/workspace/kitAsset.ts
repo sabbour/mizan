@@ -75,7 +75,8 @@ const PARTS: Record<string, { target: Target; motion?: Motion; glows?: boolean }
   TomMid_BatterHead: { target: 'tom2', motion: 'head', glows: true }, TomMid_Head: { target: 'tom2', motion: 'head', glows: true },
   FloorTom_BatterHead: { target: 'floor', motion: 'head', glows: true }, FloorTom_Head: { target: 'floor', motion: 'head', glows: true },
   HiHat_TopCymbal: { target: 'hihat', motion: 'hat', glows: true }, HiHat_Clutch: { target: 'hihat', motion: 'hat' }, HiHat_Cymbal: { target: 'hihat', motion: 'hat', glows: true },
-  HiHat_Pedal: { target: 'hatPedal', motion: 'pedal' }, HiHat_PedalBoard: { target: 'hatPedal', motion: 'pedal' },
+  // The hi-hat pedal's footboard glows and pulses with the left foot's strokes, like the surfaces the hands play.
+  HiHat_Pedal: { target: 'hatPedal', motion: 'pedal', glows: true }, HiHat_PedalBoard: { target: 'hatPedal', motion: 'pedal', glows: true },
   Crash_Cymbal: { target: 'crash', motion: 'cymbal', glows: true },
   Ride_Cymbal: { target: 'ride', motion: 'cymbal', glows: true }, Ride_Bell: { target: 'ride', motion: 'cymbal', glows: true },
   Ride_Bow: { target: 'ride', motion: 'cymbal', glows: true }, Ride_Edge: { target: 'ride', motion: 'cymbal', glows: true },

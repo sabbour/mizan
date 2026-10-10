@@ -492,7 +492,7 @@ export function fallbackScene(kit: 'acoustic' | 'electronic'): import('./kitAsse
       name: `fallback:${index}`, data, index: Uint32Array.from({ length: count }, (_, i) => i),
       material: { name: `fallback:${index}`, base: [...m.color, 1] as [number, number, number, number], metal: m.metal, rough: m.rough, emissive: [0, 0, 0],
         baseTex: -1, ormTex: -1, normalTex: -1, emissiveTex: -1, normalScale: 1, blend: false },
-      frame, target: batch.target ?? undefined, glows: !!batch.target && batch.target !== 'hatPedal',
+      frame, target: batch.target ?? undefined, glows: !!batch.target,
       motion: batch.hatTop ? 'hat' : undefined, center: [0, 0, 0],
     }
   })

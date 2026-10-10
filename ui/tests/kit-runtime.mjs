@@ -106,7 +106,7 @@ try {
       assert.equal(geometry(p), geometry(full), `${kit} ${look} keeps the full geometry`)
       assert.equal(names(p), names(full), `${kit} ${look} keeps every playable and moving part`)
       const targets = new Set(p.items.filter((item) => item.glows).map((item) => item.target))
-      for (const piece of ['kick', 'snare', 'tom1', 'tom2', 'floor', 'hihat', 'crash', 'ride'])
+      for (const piece of ['kick', 'snare', 'tom1', 'tom2', 'floor', 'hihat', 'hatPedal', 'crash', 'ride'])
         assert.ok(targets.has(piece), `${kit} ${look}: ${piece} has a surface for the feedback`)
       assert.ok(p.items.some((item) => item.motion === 'pedal' && item.target === 'kick') && p.items.some((item) => item.motion === 'beater') &&
         p.items.some((item) => item.motion === 'pedal' && item.target === 'hatPedal'), `${kit} ${look}: pedals and beater move`)

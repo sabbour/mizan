@@ -217,6 +217,13 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       placed.push({ piece, text: label, x: anchor.x, y: anchor.y })
     }
     setLabels(placed)
+    // For visual tests: where a target's moving parts sit on screen, in CSS pixels.
+    ;(globalThis as { __mizanKitTargetAt?: (target: Target) => { x: number; y: number } | null }).__mizanKitTargetAt = (target) => {
+      const items = scene.prepared.items.filter((item) => item.target === target)
+      if (!items.length) return null
+      const mean = [0, 1, 2].map((k) => items.reduce((sum, item) => sum + item.center[k], 0) / items.length)
+      return project(mean[0], mean[1], mean[2])
+    }
     lastSignature.current = ''
   }, [scene, generation, context, plan])
 
