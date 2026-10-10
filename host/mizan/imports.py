@@ -13,30 +13,25 @@ import mido
 import numpy as np
 
 from .engine.harmony import classify_chord, detect_key, smooth_chords
+from .engine.drums import GM_LANES
 from .engine.output import export_midi
 from .errors import InvalidFile
 from .jobs import PIPELINE_VERSION
 from .library import LibraryStore
-from .meter import build_bar_map, signature_beats, validate_bar_map
+from .meter import build_bar_map, signature_beats, time_at_beat, validate_bar_map
 from .paths import app_dir
 
-DRUM_PITCHES = {
-    35: "kick", 36: "kick", 38: "snare", 40: "snare", 41: "floortom", 43: "floortom",
-    45: "hightom", 47: "hightom", 48: "hightom", 50: "hightom", 42: "hihat",
-    44: "hihat", 46: "openhat", 49: "crash", 52: "crash", 55: "crash", 57: "crash",
-    51: "ride", 53: "ride", 59: "ride",
-}
-PIANO_PROGRAMS = set(range(0, 8)) | set(range(16, 24))
+PIANO_PROGRAMS = set(range(0, 8))
 SOUNDFONT_PROGRAMS = set(range(128)) - PIANO_PROGRAMS
 GUITAR_NAMES = ("Acoustic Nylon", "Acoustic Steel", "Electric Jazz",
                 "Electric Clean", "Electric Muted", "Overdriven", "Distortion", "Guitar Harmonics")
 
 
 def _lane(pitch: int) -> str:
-    if pitch in DRUM_PITCHES:
-        return DRUM_PITCHES[pitch]
-    nearest = min(DRUM_PITCHES, key=lambda value: abs(value - pitch))
-    return DRUM_PITCHES[nearest]
+    if pitch in GM_LANES:
+        return GM_LANES[pitch]
+    nearest = min(GM_LANES, key=lambda value: abs(value - pitch))
+    return GM_LANES[nearest]
 
 
 def _track_id(name: str, index: int) -> str:
@@ -50,6 +45,7 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
     except (OSError, EOFError, ValueError) as exc:
         raise InvalidFile("The MIDI file is damaged or unsupported.") from exc
     bpm, beats_per_bar, beat_unit = 120.0, 4.0, 4
+    tempos = {0: 500000}
     meter_changes = []
     names = [None] * len(midi.tracks)
     notes_by_track = [[] for _ in midi.tracks]
@@ -67,8 +63,10 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
         channel = getattr(message, "channel", None)
         if message.type == "track_name":
             names[track_index] = message.name.strip() or None
-        elif message.type == "set_tempo" and bpm == 120.0:
-            bpm = round(mido.tempo2bpm(message.tempo), 3)
+        elif message.type == "set_tempo":
+            if message.tempo <= 0:
+                raise InvalidFile("The MIDI file has an invalid tempo.")
+            tempos[tick] = message.tempo
         elif message.type == "time_signature":
             current = (message.numerator, message.denominator)
             try:
@@ -119,14 +117,16 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
     for track_index, notes in enumerate(notes_by_track):
         if not notes:
             continue
-        drum = all(note["channel"] == 9 for note in notes)
+        drum_notes = [note for note in notes if note["channel"] == 9]
+        if drum_notes:
+            parts.append({"name": names[track_index] or "Drum kit", "drums": True, "notes": drum_notes})
+        notes = [note for note in notes if note["channel"] != 9]
+        if not notes:
+            continue
         program = next((note["program"] for note in notes
                         if note["program"] in PIANO_PROGRAMS), None)
         part_name = names[track_index] or (
-            "Drum kit" if drum else "Piano" if program in PIANO_PROGRAMS else f"Track {track_index + 1}")
-        if drum:
-            parts.append({"name": part_name, "drums": True, "notes": notes})
-            continue
+            "Piano" if program in PIANO_PROGRAMS else f"Track {track_index + 1}")
         other_notes = [note for note in notes if note["program"] not in SOUNDFONT_PROGRAMS]
         if other_notes:
             parts.append({"name": part_name, "drums": False, "notes": other_notes})
@@ -144,6 +144,18 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
                           "notes": instrument_notes, "gmProgram": gm_program})
     if not parts:
         raise InvalidFile("The MIDI file contains no notes.")
+    bpm = round(mido.tempo2bpm(tempos[0]), 3)
+    tempo_map = []
+    last_tick, elapsed, tempo = 0, 0.0, tempos[0]
+    for tick, next_tempo in sorted(tempos.items()):
+        elapsed += mido.tick2second(tick - last_tick, midi.ticks_per_beat, tempo)
+        tempo_map.append({"beat": tick / midi.ticks_per_beat, "time": elapsed})
+        last_tick, tempo = tick, next_tempo
+    # Keep a final segment even when the last tempo change occurs at the end of the file.
+    final_tick = max(end_tick, last_tick + midi.ticks_per_beat)
+    tempo_map.append({"beat": final_tick / midi.ticks_per_beat,
+                      "time": elapsed + mido.tick2second(final_tick - last_tick, midi.ticks_per_beat, tempo)})
+    parts[0]["tempoMap"] = tempo_map
     if meter_changes:
         if meter_changes[0]["startBeat"] > 0:
             meter_changes.insert(0, {"startBeat": 0, "numerator": 4, "denominator": 4})
@@ -316,6 +328,7 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
     if type(extent) not in (int, float) or not math.isfinite(extent) or extent < 0:
         raise InvalidFile("The imported score has an invalid end position.")
     max_beat = float(extent)
+    tempo_map = parts[0].get("tempoMap")
     for index, part in enumerate(parts):
         track_id = _track_id(part["name"], index)
         suffix = 2
@@ -327,7 +340,7 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
                            "detail": "Imported percussion part"})
             for note in part["notes"]:
                 drums.append({"trackId": track_id, "lane": _lane(note["midi"]), "startBeat": round(note["startBeat"], 6),
-                              "velocity": round(note["velocity"], 4)})
+                              "velocity": round(note["velocity"], 4), "sourceMidi": int(note["midi"])})
                 max_beat = max(max_beat, note["startBeat"] + note["beats"])
         else:
             soundfont = part.get("gmProgram") in SOUNDFONT_PROGRAMS
@@ -367,11 +380,11 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
     for beat, vector in enumerate(beat_chroma):
         chord = classify_chord(vector, float(vector.sum()), key)
         chords.append({"startBeat": float(beat), "beats": 1.0,
-                       "onset": beat * 60 / bpm, "offset": (beat + 1) * 60 / bpm,
+                       "onset": time_at_beat(tempo_map, bpm, beat), "offset": time_at_beat(tempo_map, bpm, beat + 1),
                        **chord})
     chords = [
-        {**chord, "onset": chord["startBeat"] * 60 / bpm,
-         "offset": (chord["startBeat"] + chord["beats"]) * 60 / bpm}
+        {**chord, "onset": time_at_beat(tempo_map, bpm, chord["startBeat"]),
+         "offset": time_at_beat(tempo_map, bpm, chord["startBeat"] + chord["beats"])}
         for chord in smooth_chords(chords)
     ]
     sections = [{"name": f"Part {chr(65 + index)}", "startBar": first + 1,
@@ -381,6 +394,7 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
     return {
         "title": title, "source": source, "bpm": bpm, "beatsPerBar": beats_per_bar, "beatUnit": beat_unit,
         "barMap": bar_map,
+        **({"tempoMap": tempo_map} if tempo_map else {}),
         "bars": bars, "key": key, "sections": sections, "chords": chords,
         "piano": sorted(piano, key=lambda note: (note["startBeat"], note["midi"])),
         **({"instrumentNotes": instrument_notes} if instrument_notes else {}),
@@ -410,7 +424,7 @@ def import_score(name: str, data_base64: str, library: LibraryStore,
     hands = {"up": "right", "down": "left", "right hand": "right", "left hand": "left"}
     if (len(parts) == 2 and not any(part["drums"] for part in parts)
             and {hands.get(part["name"].strip().lower()) for part in parts} == {"left", "right"}):
-        parts = [{**{key: parts[0][key] for key in ("barMap", "meterChanges", "endBeat") if key in parts[0]},
+        parts = [{**{key: parts[0][key] for key in ("barMap", "meterChanges", "endBeat", "tempoMap") if key in parts[0]},
                   "name": "Piano", "drums": False, "notes": [
             {**note, "hand": hands[part["name"].strip().lower()]}
             for part in parts for note in part["notes"]

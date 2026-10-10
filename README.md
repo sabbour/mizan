@@ -86,6 +86,8 @@ Very short positive partial measures keep their source coverage and notes. Music
 
 MIDI uses repeated standard time-signature events to restart a partial bar, even when its signature is unchanged, and end-of-track timing to retain trailing rests. Its 480-tick quarter-note resolution cannot represent sub-tick spans losslessly; use MusicXML for finer source coverage.
 
+New MIDI imports keep tempo changes and separate percussion from pitched notes, even when they share one MIDI track. They retain specific percussion pitches and organ or accordion programs instead of playing them as piano. Existing saved imports are not rewritten; import the original file again to apply these corrections.
+
 Imports keep fractional-semitone pitches from MusicXML and static MIDI pitch bends. Playback and exports retain them within MIDI channel limits. Audio transcription uses twelve-tone piano and chord models.
 
 The vocal score follows melody pitches and plays through a vowel synth. Organ-labelled notes use a synthesized organ sound. Imported MIDI and MusicXML retain non-piano General MIDI programs and play them from the bundled FluidR3 bank, which covers all 128 programs and loads only the programs and nearest usable sample roots used by a song. Native piano and drum playback keep their existing bundled samples. The app does not download instrument samples at startup.

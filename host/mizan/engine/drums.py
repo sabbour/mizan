@@ -14,7 +14,8 @@ GM_LANES = {
     42: "hihat", 44: "hihat", 46: "openhat",
     41: "floortom", 43: "floortom", 45: "floortom",
     47: "hightom", 48: "hightom", 50: "hightom",
-    49: "crash", 57: "crash", 51: "ride", 59: "ride",
+    49: "crash", 52: "crash", 55: "crash", 57: "crash",
+    51: "ride", 53: "ride", 59: "ride",
 }
 
 
