@@ -268,9 +268,9 @@ export function genreBacking(style: string, bars: number, beatsPerBar: number, f
     style, chords,
     tracks: [
       { id: 'bass', instrument: 'other', gmProgram: spec.bass.program, name: spec.bass.name,
-        detail: `Backing bass line over ${written}, original and generated for this lesson (not transcribed)` },
+        detail: `Backing bass line over ${written}` },
       { id: 'harmony', instrument: 'other', gmProgram: spec.harmony.program, name: spec.harmony.name,
-        detail: `Backing chords ${written}, original and generated for this lesson (not transcribed)` },
+        detail: `Backing chords ${written}` },
     ],
     notes: { bass, harmony },
   }

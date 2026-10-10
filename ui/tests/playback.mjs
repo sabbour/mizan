@@ -123,6 +123,15 @@ try {
       for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
     }
   }
+  if (process.argv.includes('--layout')) {
+    // The header with a control-heavy track (Harmony line) and the Hands & keys keyboard, narrow to very wide.
+    for (const [width, height, scale] of [[617, 978, 1.5], [1440, 900, 1], [2000, 1100, 1]]) {
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false })
+      await call('Page.navigate', { url: testUrl })
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
+      console.log(await evaluate(`(${layoutChecks.toString()})(${width})`))
+    }
+  }
   if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
   if (meterOnly) console.log(await evaluate(`(${browserMeterChecks.toString()})()`))
   if (readabilityOnly) {
@@ -1736,22 +1745,23 @@ async function backingChecks() {
     const paused = await peak(300)
     check(paused < 0.00001 && engine.nodes.size === 0, `Pause silences the backing (${paused}, ${engine.nodes.size} voices)`)
     // Seek and loop: scheduling restarts from the new place on the same clock, and the loop repeats the backing.
-    engine.loop = { startBar: 4, endBar: 4 }
+    // Bar 8 of the sixteen-bar phrase ends in a fill.
+    engine.loop = { startBar: 8, endBar: 8 }
     engine.rate = 0.5
     calls.length = 0
-    engine.seek(12)
+    engine.seek(28)
     await engine.play()
     await wait(200)
     const slow = engine.seconds(0, 1)
     check(Math.abs(slow - 2 * spb) < 1e-6, `Half speed doubles the beat (${slow} vs ${spb})`)
     const bass = calls.filter((call) => call.id === 'bass')
-    const drums = calls.filter((call) => call.id === 'drums' && call.beat === 12)
-    check(bass.length && drums.length && Math.abs(bass[0].time - drums[0].time) < 1e-6, 'After a seek the bass and drums restart together on bar 4')
+    const drums = calls.filter((call) => call.id === 'drums' && call.beat === 28)
+    check(bass.length && drums.length && Math.abs(bass[0].time - drums[0].time) < 1e-6, 'After a seek the bass and drums restart together on bar 8')
     check(bass.every((call) => call.time >= bass[0].time - 1e-9), 'Nothing before the seek point is scheduled')
     const loopBeats = 4 * slow
     await wait(loopBeats * 1000 + 400)
     const again = calls.filter((call) => call.id === 'bass' && Math.abs(call.time - (bass[0].time + loopBeats)) < 1e-6)
-    check(again.length === 1, `The loop repeats the bass from bar 4 (${calls.filter((c) => c.id === 'bass').map((c) => c.time.toFixed(3))})`)
+    check(again.length === 1, `The loop repeats the bass from bar 8 (${calls.filter((c) => c.id === 'bass').map((c) => c.time.toFixed(3))})`)
     // The fill bar stops the backing at its half bar.
     check(calls.filter((call) => call.id !== 'drums').every((call) => ((call.time - bass[0].time) / slow + 1e-6) % 4 < 2 + 1e-5),
       `The backing rests during the fill (${calls.filter((c) => c.id !== 'drums').map((c) => ((c.time - bass[0].time) / slow).toFixed(3))})`)
@@ -1855,16 +1865,44 @@ async function pianoChecks(width) {
   const keysBefore = new Set(Object.keys(localStorage))
   await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
   const tab = document.querySelector('.lib-tabs [data-tab="course"]')
-  check(tab.textContent === 'Course155', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
+  check(tab.textContent === 'Course263', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
   tab.click()
   await wait(() => document.querySelector('.course-instrument'), 'The course offers an instrument choice')
   const radios = [...document.querySelectorAll('.course-instrument [role="radio"]')]
-  check(radios.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Drums 100:true|Piano 55:false', `Drums and piano with their counts: ${radios.map((r) => r.textContent)}`)
+  check(radios.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Drums 130:true|Piano 133:false', `Drums and piano with their counts: ${radios.map((r) => r.textContent)}`)
   radios[0].focus()
   radios[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
   await wait(() => document.querySelector('#course-piano') && document.activeElement?.dataset.instrument === 'piano', 'ArrowRight chooses Piano')
-  check(document.querySelectorAll('.course-genre-option').length === 11 && document.querySelectorAll('.course-genre-detail .course-lesson').length === 5 &&
-    !document.querySelector('#course-title, .course-shelf'), 'Piano lists eleven genres and one genre\'s five lessons, without the drum lists')
+  check(document.querySelectorAll('.course-genre-option').length === 11 && document.querySelectorAll('.course-genre-detail .course-lesson').length === 10 &&
+    !document.querySelector('#course-title, .course-shelf'), 'Piano lists eleven genres and one genre\'s ten lessons, without the drum lists')
+  const pianoShelves = [...document.querySelectorAll('.course-piano-shelf [role="radio"]')]
+  check(pianoShelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Genres 110:true|Inspired 23:false|Progressions 12:false|Scales 15:false',
+    `Piano shelves with their counts: ${pianoShelves.map((r) => r.textContent)}`)
+  // Inspired: original studies naming their artist and track.
+  pianoShelves[1].click()
+  await wait(() => document.querySelectorAll('.course-collection .course-lesson').length === 23, 'Twenty-three inspired studies')
+  check([...document.querySelectorAll('.course-collection .course-style')].filter((line) => /Hans Zimmer/.test(line.textContent)).length === 9, 'Nine Hans Zimmer studies')
+  // Progressions: a key menu and major or minor; changing the key lists that key's lessons.
+  pianoShelves[2].click()
+  await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 6, 'Six progressions in the key')
+  const tonic = document.querySelector('.course-key select')
+  tonic.value = '3'
+  tonic.dispatchEvent(new Event('change', { bubbles: true }))
+  await wait(() => document.querySelector('.course-steps .course-lesson .course-title')?.textContent.includes('in Eb major'), 'Eb major progressions')
+  document.querySelector('.course-mode [data-mode="minor"]').click()
+  await wait(() => document.querySelector('.course-steps .course-lesson .course-title')?.textContent.includes('in Eb minor'), 'Eb minor progressions')
+  check([...document.querySelectorAll('.course-steps .course-style')].every((line) => /^(Heard in|Same chords as) /.test(line.textContent)), 'Each progression\'s description names example songs')
+  // Scales: a tonic and one of fifteen scales.
+  pianoShelves[3].click()
+  await wait(() => document.querySelectorAll('.course-key select').length === 2, 'Tonic and scale menus')
+  const scaleMenu = document.querySelectorAll('.course-key select')[1]
+  check(scaleMenu.options.length === 15, `Fifteen scales: ${scaleMenu.options.length}`)
+  scaleMenu.value = 'dorian'
+  scaleMenu.dispatchEvent(new Event('change', { bubbles: true }))
+  await wait(() => /^(Eb|D#) Dorian/.test(document.querySelector('.course-steps .course-title')?.textContent ?? ''),
+    `Dorian on the chosen tonic: ${document.querySelector('.course-steps .course-title')?.textContent}`)
+  pianoShelves[0].click()
+  await wait(() => document.querySelector('#course-piano'), 'Back to the genres')
   check([...document.querySelectorAll('.course-lesson, .course-genre-option')].every((button) => button.getBoundingClientRect().right <= innerWidth) &&
     document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, `Piano rows fit at ${width}px`)
   document.querySelector('.course-genre-option[data-genre="R&B and soul"]').click()
@@ -1879,7 +1917,13 @@ async function pianoChecks(width) {
   await open('R&B and soul piano: chords on the four beats')
   check(document.querySelector('.track-button')?.textContent.includes('Piano'), `A piano lesson opens on the piano part: ${document.querySelector('.track-button')?.textContent}`)
   check(document.querySelector('.chordview-option[data-view="keyboard"]')?.getAttribute('aria-checked') === 'true', 'The 3D keyboard is the default guide')
-  check(document.querySelectorAll('.score-bar').length === 2 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed each bar'), 'Score and lesson panel with its pedalling')
+  check(document.querySelectorAll('.score-bar').length === 8 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed with each chord'), 'An eight-bar score and lesson panel with its pedalling')
+  check(document.querySelector('.lesson-panel').getBoundingClientRect().height < 220 && document.querySelector('.lesson-details') && !document.querySelector('.lesson-details').open,
+    `The lesson panel stays compact, details behind a disclosure (${Math.round(document.querySelector('.lesson-panel').getBoundingClientRect().height)}px)`)
+  // The score never shows finger numbers (they stay in the written part and on the keyboards).
+  await wait(() => document.querySelector('.score-osmd svg'), 'The score is drawn')
+  const digits = [...document.querySelectorAll('.score-osmd svg text')].filter((text) => /^[1-5]$/.test(text.textContent.trim())).length
+  check(digits < 12, `No finger numbers on the score (${digits} single digits drawn, bar numbers only)`)
   await wait(() => piano()?.dataset.ready === 'true', `The 3D keyboard loads (${piano()?.textContent.slice(0, 120)})`, 600)
   check(piano().dataset.variant === 'stage_piano_88' && piano().dataset.look === 'Realistic' && piano().querySelectorAll('select').length === 1,
     'The stage piano in its realistic look, with only the look to choose')
@@ -1899,6 +1943,20 @@ async function pianoChecks(width) {
     const box = label.getBoundingClientRect()
     return box.left >= stage.left - 1 && box.right <= stage.right + 1 && box.top >= stage.top - 1 && box.bottom <= stage.bottom + 1
   }), 'Finger labels sit on the keyboard')
+  // Fingering and Note letters are switches: off hides the numbers on the keys (hands keep their colours); letters name the keys down.
+  const toggle = (name) => [...document.querySelectorAll('.toggle')].find((button) => button.querySelector('.toggle-label')?.textContent === name)
+  check(toggle('Fingering')?.getAttribute('aria-pressed') === 'true' && toggle('Note letters')?.getAttribute('aria-pressed') === 'false', 'Fingering on and Note letters off by default')
+  toggle('Fingering').click()
+  await wait(() => document.querySelectorAll('.piano-finger').length === 0, 'Fingering off: no numbers on the 3D keyboard')
+  check(piano().dataset.pressed && document.querySelector('.kit-hand[data-hand="right"][data-lit]'), 'Fingering off keeps the keys and hands lit')
+  toggle('Note letters').click()
+  await wait(() => document.querySelectorAll('.piano-letter').length >= 3 && [...document.querySelectorAll('.piano-finger')].every((label) => !/\d/.test(label.textContent)),
+    'Note letters on: letters over the keys that are down, without numbers')
+  check([...document.querySelectorAll('.piano-letter')].some((letter) => letter.textContent === 'E♭'), `The key's spelling: ${[...document.querySelectorAll('.piano-letter')].map((l) => l.textContent)}`)
+  toggle('Fingering').click()
+  await wait(() => [...document.querySelectorAll('.piano-finger')].some((label) => /\d/.test(label.textContent) && label.querySelector('.piano-letter')), 'Both on: letters with numbers')
+  toggle('Note letters').click()
+  await wait(() => document.querySelectorAll('.piano-letter').length === 0 && document.querySelectorAll('.piano-finger').length >= 3, 'Letters off again, numbers back')
   // Playing: frames are drawn, the pedal goes down and the chords change.
   const frames = []
   window.__mizanPianoFrame = (canvas) => {
@@ -1923,7 +1981,7 @@ async function pianoChecks(width) {
   check(frames.some((f) => f.depressed), 'While playing, sounding keys go down')
   await wait(() => piano().dataset.depressed === '', 'Paused again, every key rises')
   const chords = [...new Set(frames.map((f) => f.chord))]
-  check(frames.some((f) => f.pedal === 'down') && frames.some((f) => f.upcoming) && chords.includes('Eb') && chords.includes('Ab') && new Set(frames.map((f) => f.pressed)).size >= 2,
+  check(frames.some((f) => f.pedal === 'down') && frames.some((f) => f.upcoming) && chords.includes('Eb') && chords.includes('Cm') && new Set(frames.map((f) => f.pressed)).size >= 2,
     `While playing the pedal goes down, keys glow ahead and the chord and keys change (pedal ${[...new Set(frames.map((f) => f.pedal))]}, ` +
     `upcoming ${frames.filter((f) => f.upcoming).length}, chords ${chords}, pressed ${[...new Set(frames.map((f) => f.pressed))].slice(0, 4).join(' | ')})`)
   // Looks are a view choice: the playhead stays, nothing starts and nothing is stored.
@@ -1977,6 +2035,15 @@ async function pianoChecks(width) {
   document.querySelector('.track-button').click()
   await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
   check(['Piano', 'Drum kit', 'Bass (fingered)'].every((name) => document.querySelector(`[aria-label="Mute ${name}"]`)), 'Piano, drums and bass are each in the mixer')
+  // The selected part leads the mix by 2 dB: the others are turned down, never the selected one boosted.
+  {
+    let fiber = document.querySelector('.score-osmd')[Object.keys(document.querySelector('.score-osmd')).find((key) => key.startsWith('__reactFiber$'))]
+    while (fiber && fiber.type?.name !== 'Score') fiber = fiber.return
+    const engine = fiber?.memoizedProps.engine
+    const lead = 10 ** (-2 / 20)
+    check(engine?.selectedPart === 'piano' && Math.abs(engine.level('piano') - 1) < 1e-6 && Math.abs(engine.level('drums') - lead) < 1e-6 && Math.abs(engine.level('bass') - lead) < 1e-6,
+      `The piano leads: piano ${engine?.level('piano')}, drums ${engine?.level('drums')}, bass ${engine?.level('bass')}`)
+  }
   document.querySelector('.track-button').click()
   // Hands & keys: the same clock-driven glow and pulse in the flat keyboard; paused it is steady, and it names what it shows.
   document.querySelector('.chordview-option[data-view="hands"]').click()
@@ -2000,6 +2067,23 @@ async function pianoChecks(width) {
   const still = []
   for (let i = 0; i < 6; i++) { still.push(hands().querySelector('canvas').getContext('2d').getImageData(0, 0, 40, 40).data.join()); await sleep(80) }
   check(new Set(still).size === 1, 'Paused, nothing pulses')
+  // Hands & keys keeps piano proportions: the range grows by octaves to fill the width instead of stretching a few keys.
+  const [low, high, keyWidth] = hands().dataset.range.split(/[-:]/).map(Number)
+  const canvasWidth = hands().querySelector('canvas').getBoundingClientRect().width
+  check(keyWidth >= 14 && keyWidth <= 43 && high - low >= 23 && (high - low >= 87 || canvasWidth - keyWidth * [...Array(high - low + 1).keys()].filter((k) => ![1, 3, 6, 8, 10].includes((low + k) % 12)).length < keyWidth * 13),
+    `Hands & keys keys keep their shape and fill the width (${hands().dataset.range} in ${Math.round(canvasWidth)}px)`)
+  // Fingering off hides the numbers on the flat keyboard; Note letters names the keys down and the ones coming next.
+  const switchFor = (name) => [...document.querySelectorAll('.toggle')].find((button) => button.querySelector('.toggle-label')?.textContent === name)
+  switchFor('Fingering').click()
+  await wait(() => hands().dataset.fingers === '' && /Finger numbers are off/.test(hands().textContent), 'Fingering off: no numbers on Hands & keys')
+  switchFor('Note letters').click()
+  await wait(() => hands().dataset.letters, 'Note letters on: the keys at the playhead are named')
+  const lettered = []
+  playButton().click()
+  for (let i = 0; i < 200 && !lettered.some((l) => l.includes(':next')); i++) { lettered.push(hands().dataset.letters); await sleep(40) }
+  playButton().click()
+  check(lettered.some((l) => l.includes(':next')) && lettered.some((l) => /\d+:[A-G][♭♯]?(,|$)/.test(l)), `Letters on the keys sounding and the keys coming next (${lettered.filter(Boolean).slice(-2).join(' | ')})`)
+  check(hands().dataset.fingers === '', 'Still no numbers while playing with Fingering off')
   // Next and Previous keep the guide the player chose (here Hands & keys), each lesson from the top and stopped.
   const view = () => document.querySelector('.chordview-option[aria-checked="true"]')?.dataset.view
   const fresh = (guide) => bar() === 1 && playButton().getAttribute('aria-label') === 'Play' && view() === guide &&
@@ -2007,6 +2091,10 @@ async function pianoChecks(width) {
   document.querySelector('.lesson-nav button:last-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: repeated eighth-note chords', 'The next piano lesson opens')
   await wait(() => fresh('hands') && hands() && !piano(), `Next keeps Hands & keys, on the piano part, at bar 1, stopped (${view()})`)
+  check(switchFor('Fingering').getAttribute('aria-pressed') === 'false' && switchFor('Note letters').getAttribute('aria-pressed') === 'true', 'Next keeps Fingering off and Note letters on')
+  switchFor('Fingering').click()
+  switchFor('Note letters').click()
+  await wait(() => switchFor('Fingering').getAttribute('aria-pressed') === 'true' && switchFor('Note letters').getAttribute('aria-pressed') === 'false', 'Back to the defaults')
   document.querySelector('.lesson-nav button:first-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: chords on the four beats', 'The previous piano lesson opens')
   await wait(() => fresh('hands') && hands(), `Previous keeps Hands & keys (${view()})`)
@@ -2031,6 +2119,43 @@ async function pianoChecks(width) {
   document.querySelector('.course-instrument [data-instrument="drums"]').click()
   return `Piano checks passed at ${width}px: course switch and counts, piano lesson defaults (piano part, 3D stage piano), written fingers on keys, chord and pedal, ` +
     `keys rest when paused and press while playing, keybed framing, 4 looks without moving playback, solid blueprint keys, mixer, Hands & keys glow and pulse, next lesson, nothing new stored.`
+}
+
+async function layoutChecks(width) {
+  const check = (value, message) => { if (!value) throw new Error(message) }
+  const wait = async (test, message) => {
+    for (let i = 0; i < 200; i++) { if (test()) return; await new Promise((resolve) => setTimeout(resolve, 50)) }
+    throw new Error(message)
+  }
+  await wait(() => document.querySelector('.song-open'), 'The library lists songs')
+  ;[...document.querySelectorAll('.song-open')].find((button) => button.textContent.includes('Paper Rain')).click()
+  await wait(() => document.querySelector('.track-button'), 'The song opens')
+  document.querySelector('.track-button').click()
+  await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
+  ;[...document.querySelectorAll('.track-menu [role="menuitemradio"]')].find((row) => row.textContent.startsWith('Harmony line')).click()
+  await wait(() => document.querySelector('.harmony-summary'), 'Harmony line shows its options as one compact button')
+  document.querySelector('.chordview-option[data-view="hands"]')?.click()
+  await wait(() => document.querySelector('.practice-hands')?.dataset.range, 'Hands & keys draws')
+  const box = (selector) => document.querySelector(selector).getBoundingClientRect()
+  const head = box('.ws-head'), title = box('.ws-song'), track = box('.track-button'), summary = box('.harmony-summary')
+  const song = document.querySelector('.ws-song')
+  check(song.scrollWidth <= song.clientWidth + 1, `The title is not cut off at ${width}px (${song.scrollWidth} > ${song.clientWidth})`)
+  check(title.width >= 80 && [track, summary].every((b) => b.right <= innerWidth + 1 && b.left >= -1), `Title, harmony and track controls stay on screen (${Math.round(title.width)}px title)`)
+  check(head.height <= (width < 960 ? 200 : 80), `The header stays compact (${Math.round(head.height)}px)`)
+  check(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, `No sideways scrolling at ${width}px`)
+  // The options open in a panel over the page and close again; nothing in the header moves.
+  const before = JSON.stringify([box('.ws-song'), box('.track-button')].map((b) => [Math.round(b.x), Math.round(b.y)]))
+  document.querySelector('.harmony-summary').click()
+  await wait(() => document.querySelector('.harmony-options[open] [aria-label="Follow"]'), 'The harmony options open')
+  const panel = box('.harmony-options-panel')
+  check(panel.left >= -1 && panel.right <= innerWidth + 1, `The harmony panel fits the window (${Math.round(panel.left)}–${Math.round(panel.right)})`)
+  check(JSON.stringify([box('.ws-song'), box('.track-button')].map((b) => [Math.round(b.x), Math.round(b.y)])) === before, 'Opening the options does not move the header')
+  document.querySelector('.harmony-summary').click()
+  const [low, high, keyWidth] = document.querySelector('.practice-hands').dataset.range.split(/[-:]/).map(Number)
+  check(keyWidth >= 14 && keyWidth <= 43 && high - low >= 23, `Hands & keys keeps piano proportions (${low}–${high} at ${keyWidth}px a key)`)
+  document.querySelector('.ws-back').click()
+  await wait(() => document.querySelector('.lib-tabs'), 'Back to the library')
+  return `Layout checks passed at ${width}px: header ${Math.round(head.height)}px, title ${Math.round(title.width)}px, Harmony line options in a panel, Hands & keys ${low}–${high} at ${keyWidth}px.`
 }
 
 async function courseChecks(width, phase) {
@@ -2119,11 +2244,11 @@ async function courseChecks(width, phase) {
   check(!Object.keys(localStorage).some((name) => name.includes('tab')), 'The chosen tab is not stored')
   await showTab('course')
   // One list at a time: the levelled course first, then the inspired lessons, then the genres, each a choice above the list.
-  await wait(() => document.querySelectorAll('.course-level .course-lesson').length === 37 && !document.querySelector('#course-inspired, #course-genre'),
-    'The Course tab opens on the 37 course lessons alone')
+  await wait(() => document.querySelectorAll('.course-level .course-lesson').length === 49 && !document.querySelector('#course-inspired, #course-genre'),
+    'The Course tab opens on the 49 course lessons alone')
   check(document.querySelectorAll('.course-level').length === 8, 'Lessons are grouped in eight levels')
   const shelves = [...document.querySelectorAll('.course-shelf [role="radio"]')]
-  check(shelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Course 37:true|Inspired 8:false|Genres 55:false',
+  check(shelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Course 49:true|Inspired 26:false|Genres 55:false',
     `Drum lessons are three lists with their counts: ${shelves.map((radio) => radio.textContent)}`)
   const fits = () => [...document.querySelectorAll('.course-lesson, .course-genre-option')].every((button) => button.getBoundingClientRect().right <= innerWidth) &&
     document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1
@@ -2131,7 +2256,7 @@ async function courseChecks(width, phase) {
   shelves[0].focus()
   shelves[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
   await wait(() => document.querySelector('#course-inspired') && document.activeElement?.dataset.shelf === 'inspired', 'ArrowRight shows the inspired lessons')
-  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && document.querySelectorAll('.course-collection .course-lesson').length === 8 &&
+  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && document.querySelectorAll('.course-collection .course-lesson').length === 26 &&
     [...document.querySelectorAll('.course-collection .course-style')].every((line) => /^Inspired by /.test(line.textContent)) && fits(), 'The inspired list names each drummer')
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
   await wait(() => document.querySelector('#course-genre')?.textContent.startsWith('Grooves by genre'), 'End shows the genres')
@@ -2146,8 +2271,8 @@ async function courseChecks(width, phase) {
     check(document.querySelector('.course-genre-detail .course-genre-facts').textContent.includes('Backing:') && fits(), `${name} names its backing and fits`)
     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
   }
-  check(stages.length === 11 && stages.every((line) => line === 'Basic groove|Variation|Variation|Fill|Four-bar phrase'),
-    `Each genre lists five lessons from the basic groove to a four-bar phrase: ${stages[0]}`)
+  check(stages.length === 11 && stages.every((line) => line === 'Basic groove|Variation|Variation|Fill|Sixteen-bar phrase'),
+    `Each genre lists five lessons from the basic groove to a sixteen-bar phrase: ${stages[0]}`)
   check(document.activeElement?.dataset.genre === genreOptions[0].dataset.genre, 'ArrowDown wraps from the last genre to the first')
   // A genre lesson: drums are the score, the kit and the selected track; the original bass and chords play along and mute on their own.
   await openLesson('Rock kick variations', 'genre', 'Rock')
@@ -2159,18 +2284,49 @@ async function courseChecks(width, phase) {
   document.querySelector('.track-button').click()
   await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
   const muteButton = (name) => document.querySelector(`[aria-label="Mute ${name}"]`)
-  check(muteButton('Drum kit') && muteButton('Bass (picked)') && muteButton('Guitar (overdriven power chords)'), 'Drums, bass and chords are each in the mixer, all audible')
+  check(muteButton('Drum kit') && muteButton('Bass (picked)') && muteButton('Guitar (overdriven chords)'), 'Drums, bass and chords are each in the mixer, all audible')
   muteButton('Bass (picked)').click()
-  await wait(() => document.querySelector('[aria-label="Unmute Bass (picked)"]') && muteButton('Guitar (overdriven power chords)') && muteButton('Drum kit'), 'The bass mutes alone')
+  await wait(() => document.querySelector('[aria-label="Unmute Bass (picked)"]') && muteButton('Guitar (overdriven chords)') && muteButton('Drum kit'), 'The bass mutes alone')
   document.querySelector('[aria-label="Unmute Bass (picked)"]').click()
   await wait(() => muteButton('Bass (picked)'), 'The bass unmutes')
   document.querySelector('.track-button').click()
   await back()
+  // The hi-hat pedal glows and pulses on the pedal itself: pixels at the pedal turn the hi-hat's yellow when it is hit.
+  await openLesson('Disco four on the floor', 'genre', 'Disco and dance')
+  for (let i = 0; i < 600 && !(document.querySelector('.practice-kit canvas') && window.__mizanKitTargetAt?.('hatPedal')); i++) await sleep(50)
+  await sleep(1500)
+  check(document.querySelector('.practice-kit canvas') && window.__mizanKitTargetAt?.('hatPedal'),
+    `The kit with its hi-hat pedal is ready (${document.querySelector('.ws-song')?.textContent}, ready ${document.querySelector('.practice-kit')?.dataset.ready}, view ${document.querySelector('.chordview-option[aria-checked="true"]')?.dataset.view}, track ${document.querySelector('.track-button')?.textContent})`)
+  {
+    const at = window.__mizanKitTargetAt('hatPedal')
+    const pedalSamples = []
+    window.__mizanKitFrame = (canvas, state) => {
+      const gl = canvas.getContext('webgl')
+      const ratio = canvas.width / canvas.clientWidth, n = 14, px = new Uint8Array(n * n * 4)
+      gl.readPixels(Math.round(at.x * ratio) - n / 2, Math.round(canvas.height - at.y * ratio) - n / 2, n, n, gl.RGBA, gl.UNSIGNED_BYTE, px)
+      let yellow = 0
+      for (let i = 0; i < px.length; i += 4) yellow += (px[i] + px[i + 1]) / 2 - px[i + 2]
+      const f = state.feedback.get('hatPedal')
+      pedalSamples.push({ yellow: yellow / (n * n), pulse: f?.pulse ?? 0, upcoming: f?.upcoming ?? 0 })
+    }
+    const countIn = pressed('Count-in') === 'true'
+    if (countIn) { toggle('Count-in').click(); await wait(() => pressed('Count-in') === 'false', 'Count-in off for the pedal check') }
+    playButton().click()
+    for (let i = 0; i < 120 && pedalSamples.filter((s) => s.pulse > 0.4).length < 2; i++) await sleep(50)
+    playButton().click()
+    window.__mizanKitFrame = undefined
+    await wait(() => playButton().getAttribute('aria-label') === 'Play', 'Stopped after the pedal check')
+    if (countIn) { toggle('Count-in').click(); await wait(() => pressed('Count-in') === 'true', 'Count-in back on') }
+    const mean = (list) => list.reduce((sum, s) => sum + s.yellow, 0) / Math.max(1, list.length)
+    const lit = pedalSamples.filter((s) => s.pulse > 0.4), idle = pedalSamples.filter((s) => s.pulse < 0.02 && s.upcoming < 0.02)
+    check(lit.length && mean(lit) > mean(idle) + 20, `The hi-hat pedal glows when struck (yellowness ${Math.round(mean(lit))} lit vs ${Math.round(mean(idle))} idle, ${lit.length}/${idle.length} frames)`)
+  }
+  await back()
   await openLesson('Groove, fill, crash')
-  check(document.querySelector('.ws-song').textContent === 'Lesson 23: Groove, fill, crash', `Lesson title: ${document.querySelector('.ws-song').textContent}`)
+  check(document.querySelector('.ws-song').textContent === 'Lesson 35: Groove, fill, crash', `Lesson title: ${document.querySelector('.ws-song').textContent}`)
   check(/70 bpm · 70%/.test(where()), `The lesson starts at its starting tempo: ${where()}`)
   check(pressed('Loop') === 'true' && pressed('Count-in') === 'true' && pressed('Click') === 'true' && pressed('Sticking') === 'true',
-    'Loop, count-in, click and sticking are on')
+    `Loop, count-in, click and sticking are on (${['Loop', 'Count-in', 'Click', 'Sticking'].map((name) => `${name} ${pressed(name)}`).join(', ')})`)
   check(document.querySelector('.lesson-goal')?.textContent.includes('crash'), 'The lesson instructions are beside the score')
   check(document.querySelectorAll('.lesson-counts tr').length === 3, 'Count and sticking for the groove and fill bars')
   check(document.querySelectorAll('.lesson-counts .hand-left').length > 0 && document.querySelectorAll('.lesson-counts .hand-right').length > 0,
@@ -2218,15 +2374,15 @@ async function courseChecks(width, phase) {
   document.querySelector('.chordview-option[data-view="score"]').click()
   await wait(() => guide() === 'score' && !document.querySelector('.practice-kit'), 'The drum score on its own')
   document.querySelector('.lesson-nav button:last-child').click()
-  await wait(() => fresh('Lesson 24: Fill around the toms', 'score'), `Next keeps the drum score on its own, on the drums, at bar 1, stopped (${guide()}, ${where()})`)
+  await wait(() => fresh('Lesson 36: Fill around the toms', 'score'), `Next keeps the drum score on its own, on the drums, at bar 1, stopped (${guide()}, ${where()})`)
   document.querySelector('.lesson-nav button:first-child').click()
-  await wait(() => fresh('Lesson 23: Groove, fill, crash', 'score'), `Previous keeps the drum score on its own (${guide()}, ${where()})`)
+  await wait(() => fresh('Lesson 35: Groove, fill, crash', 'score'), `Previous keeps the drum score on its own (${guide()}, ${where()})`)
   document.querySelector('.chordview-option[data-view="kit"]').click()
   await wait(() => guide() === 'kit' && document.querySelector('.practice-kit'), 'Back to the kit')
   // Changing lesson starts the new one at bar 1, stopped, at the speed the player chose, still on the kit.
   document.querySelector('.lesson-nav button:last-child').click()
-  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 24: Fill around the toms', 'Next lesson opens')
-  await wait(() => /75 bpm · 75%/.test(where()) && bar() === 1 && fresh('Lesson 24: Fill around the toms', 'kit'), `The next lesson starts at bar 1 at the chosen speed, on the kit: ${where()}`)
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 36: Fill around the toms', 'Next lesson opens')
+  await wait(() => /75 bpm · 75%/.test(where()) && bar() === 1 && fresh('Lesson 36: Fill around the toms', 'kit'), `The next lesson starts at bar 1 at the chosen speed, on the kit: ${where()}`)
   const toms = () => [...document.querySelectorAll('.kit-pill[data-piece]')].map((pill) => pill.textContent).filter((name) => /tom/i.test(name))
   await wait(() => toms().join('|') === 'Tom 1|Tom 2|Floor tom', `The tom fill uses the five-piece kit's three toms: ${toms()}`)
   // While playing: changing lesson stops the old one and starts the new one from the top, not playing.
@@ -2263,7 +2419,7 @@ async function courseChecks(width, phase) {
   await chooseStyle('acoustic:ClayStudyModel')
   check(!playButton().dataset.counting, 'No count-in when it is off')
   document.querySelector('.lesson-nav button:first-child').click()
-  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 23: Groove, fill, crash', 'Previous lesson opens')
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 35: Groove, fill, crash', 'Previous lesson opens')
   await sleep(600)
   check(bar() === 1 && playButton().getAttribute('aria-label') === 'Play', `A lesson changed while playing opens at bar 1, stopped (${where()})`)
   check(pressed('Count-in') === 'false', 'Count-in stays off in the next lesson')

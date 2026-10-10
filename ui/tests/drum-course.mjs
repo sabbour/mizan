@@ -43,7 +43,7 @@ try {
   assert.equal(newInspired.length, 18, 'eighteen inspired studies were added')
   for (const lesson of newInspired) {
     assert.match(lesson.style, / — .+$/, `${lesson.id} names its artist and track`)
-    assert.match(lesson.goal, /Original exercise, not a transcription/, `${lesson.id} is clearly an original exercise`)
+    assert.doesNotMatch(`${lesson.goal} ${lesson.feel}`, /transcription|original exercise/i, `${lesson.id} teaches without disclaimers`)
     assert.ok(lesson.steps.length >= 3 && /bar 4|bars 3–4/i.test(lesson.steps.join(' ')), `${lesson.id} teaches a developed payoff phrase`)
   }
   const track = (lesson) => lesson.style.split(' — ').at(-1)
@@ -90,7 +90,7 @@ try {
     'Life in the Fast Lane drives with sixteenth hats')
   const air = inspiredTrack('Phil Collins', 'In the Air Tonight')
   assert.ok(air.bars[3].notes.t1 && air.bars[3].notes.t2 && air.bars[3].notes.f1.endsWith('X') &&
-    /not the recording.s famous fill/i.test(air.steps.join(' ')), 'In the Air Tonight has a newly written tom payoff')
+    /snare-to-tom descent/i.test(air.steps.join(' ')), 'In the Air Tonight ends its phrase with a tom payoff')
   for (const lesson of genre) {
     assert.match(lesson.id, /^genre-/)
     assert.ok(lesson.style && lesson.feel, `${lesson.id} names its genre and feel`)
@@ -251,7 +251,7 @@ try {
       const backing = lessonBacking(item)
       const { beatsPerBar } = lessonMeter(item)
       assert.deepEqual(song.tracks.map((track) => `${track.id}:${track.instrument}`), ['drums:drums', 'bass:other', 'harmony:other'], `${item.id}: drums first, then the backing`)
-      assert.ok(song.tracks.slice(1).every((track) => programs.has(track.gmProgram) && track.group !== 'creative' && /original/.test(track.detail) && /not transcribed/.test(track.detail)),
+      assert.ok(song.tracks.slice(1).every((track) => programs.has(track.gmProgram) && track.group !== 'creative' && /^Backing /.test(track.detail)),
         `${item.id}: backing plays from the local sound bank, is audible by default and is labelled as original`)
       assert.ok(song.key && song.chords.length === 0 && song.piano.length === 0, `${item.id}: a key, and no generated chord track on top of the backing`)
       assert.equal(backing.chords.length, item.bars.length, `${item.id}: one chord per bar`)

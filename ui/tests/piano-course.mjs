@@ -265,7 +265,9 @@ try {
     }
   }
   assert.ok(families.size >= 12, `at least twelve progression families (${families.size})`)
-  assert.ok(progressionLessons(0, 'major').filter((lesson) => / — as in /.test(lesson.title)).length >= 5, 'progression names give example songs')
+  assert.ok([...progressionLessons(0, 'major'), ...progressionLessons(9, 'minor')].every((lesson) => /^(Heard in|Same chords as) [^()]+\(/.test(lesson.feel) && lesson.examples?.songs.length && lesson.examples.songs.every((song) => /\(.+\)$/.test(song)) &&
+    lesson.examples.songs.every((song) => !lesson.goal.includes(song)) &&
+    !/\(/.test(lesson.title.replace(/\((harmonic minor V|I7 – IV7 – V7)\)/, ''))), 'every progression description names example songs and artists; titles stay compact')
   assert.deepEqual(pianoLessonById('piano-progression-ii-v-i-e-flat-major').chords.slice(0, 4), ['Fm7', 'Bb7', 'Ebmaj7', 'Ebmaj7'])
   assert.deepEqual(pianoLessonById('piano-progression-i-iv-v-i-harmonic-g-sharp-minor').chords.slice(0, 4), ['G#m', 'C#m', 'D#', 'G#m'])
   assert.deepEqual(pianoLessonById('piano-progression-twelve-bar-blues-a-major').chords, ['A7', 'A7', 'A7', 'A7', 'D7', 'D7', 'A7', 'A7', 'E7', 'D7', 'A7', 'E7'])

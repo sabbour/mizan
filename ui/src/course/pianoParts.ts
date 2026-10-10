@@ -55,6 +55,8 @@ export type PianoLesson = {
   numerals?: string[]
   /** For a scale: which scale (major, dorian, blues, ...). */
   family?: string
+  /** For a progression: songs that use it, and how (in a section, or the same chords in another order). */
+  examples?: { songs: string[]; scope: string }
   /** For an inspired study: the artist and recording it takes its style from. */
   influence?: string
 }
@@ -249,9 +251,9 @@ export function pianoSong(lesson: PianoLesson): Song {
     title: lesson.title,
     source: 'course',
     tracks: [
-      { id: 'piano', instrument: 'piano', name: 'Piano', detail: 'Lesson part for both hands, with written fingering (authored, not transcribed)' },
+      { id: 'piano', instrument: 'piano', name: 'Piano', detail: 'Lesson part for both hands, with written fingering' },
       ...backing ? [
-        { id: 'drums', instrument: 'drums' as const, name: 'Drum kit', detail: 'Backing groove in this style, original (authored, not transcribed)' },
+        { id: 'drums', instrument: 'drums' as const, name: 'Drum kit', detail: 'Backing groove in this style' },
         lesson.backing!.bass ? { ...backing.tracks[0], name: lesson.backing!.bass } : backing.tracks[0],
       ] : [],
     ],

@@ -64,8 +64,7 @@ try {
     const where = lesson.id
     assert.match(where, /^piano-inspired-[a-z0-9-]+$/)
     assert.equal(lesson.influence, expectedInfluences[index], `${where}: artist and reference track`)
-    assert.match(lesson.goal, /original study/i, `${where}: identified as an original study`)
-    assert.match(lesson.goal, /not a transcription/i, `${where}: identified as not a transcription`)
+    assert.doesNotMatch(`${lesson.goal} ${lesson.feel} ${lesson.steps.join(' ')}`, /transcription|original study|quoting/i, `${where}: teaches without disclaimers`)
     assert.ok(lesson.kind === 'inspired' && lesson.level === index + 1)
     assert.ok(lesson.tempo.start < lesson.tempo.target)
     assert.ok([8, 16].includes(lesson.bars))

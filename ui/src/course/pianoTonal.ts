@@ -38,8 +38,10 @@ type Pattern = {
   slug: string
   numerals: string[]
   about: string
-  /** Songs with a section built on this progression; the lesson itself is an original exercise. */
-  examples?: string
+  /** Songs with a section built on this progression. */
+  examples?: string[]
+  /** The songs use these chords, but not in this exact order. */
+  loose?: boolean
   /** The V chord takes harmonic minor's raised seventh. */
   harmonic?: boolean
   /** Uppercase numerals with 7 are dominant sevenths even where the scale's seventh is major (the blues). */
@@ -51,31 +53,34 @@ type Pattern = {
 const PATTERNS: Record<KeyMode, Pattern[]> = {
   major: [
     { slug: 'I-IV-V-I', numerals: ['I', 'IV', 'V', 'I'], texture: 'pulse', about: 'home, the subdominant, the dominant and home: the plainest cadence',
-      examples: 'La Bamba (Ritchie Valens), Twist and Shout (The Isley Brothers)' },
+      examples: ['La Bamba (Ritchie Valens)', 'Twist and Shout (The Isley Brothers)'] },
     { slug: 'I-vi-IV-V', numerals: ['I', 'vi', 'IV', 'V'], texture: 'broken', about: 'the relative minor softens the move away before the dominant pulls home',
-      examples: 'Stand by Me (Ben E. King), Every Breath You Take (The Police)' },
+      examples: ['Stand by Me (Ben E. King)', 'Every Breath You Take (The Police)'] },
     { slug: 'ii-V-I', numerals: ['ii7', 'V7', 'Imaj7', 'Imaj7'], texture: 'held', about: 'seventh chords a fifth apart, the cadence of jazz standards',
-      examples: 'Autumn Leaves (jazz standard), Tune Up (Miles Davis)' },
+      examples: ['Autumn Leaves (jazz standard)', 'Tune Up (Miles Davis)'] },
     { slug: 'I-V-vi-IV', numerals: ['I', 'V', 'vi', 'IV'], texture: 'offbeat', about: 'the loop under many pop songs, falling to the relative minor',
-      examples: 'Let It Be (The Beatles), I\'m Yours (Jason Mraz)' },
+      examples: ['Let It Be (The Beatles)', 'I\'m Yours (Jason Mraz)'] },
     { slug: 'I-vi-ii-V', numerals: ['I', 'vi', 'ii', 'V'], texture: 'pulse', about: 'the circle of fifths back home, the turnaround of countless standards',
-      examples: 'Heart and Soul (Hoagy Carmichael), Blue Moon (Rodgers and Hart)' },
+      examples: ['I Got Rhythm (George and Ira Gershwin)', 'Blue Moon (Rodgers and Hart)'] },
     { slug: 'twelve-bar-blues', numerals: ['I7', 'I7', 'I7', 'I7', 'IV7', 'IV7', 'I7', 'I7', 'V7', 'IV7', 'I7', 'V7'], dominant: true, blues: true, texture: 'offbeat',
       about: 'dominant sevenths on I, IV and V; the flat sevenths of I7 and IV7 lie outside the major scale, which is the blues sound',
-      examples: 'Johnny B. Goode (Chuck Berry), Hound Dog (Big Mama Thornton)' },
+      examples: ['Johnny B. Goode (Chuck Berry)', 'Hound Dog (Big Mama Thornton)'] },
   ],
   minor: [
-    { slug: 'i-iv-v-i', numerals: ['i', 'iv', 'v', 'i'], texture: 'held', about: 'the natural minor cadence: every chord minor, the dominant without a leading tone' },
+    { slug: 'i-iv-v-i', numerals: ['i', 'iv', 'v', 'i'], texture: 'held', about: 'the natural minor cadence: every chord minor, the dominant without a leading tone',
+      examples: ['Black Magic Woman (Fleetwood Mac)'], loose: true },
     { slug: 'i-VI-III-VII', numerals: ['i', 'VI', 'III', 'VII'], texture: 'offbeat', about: 'down to the sixth, up to the relative major and its dominant',
-      examples: 'Zombie (The Cranberries), Save Tonight (Eagle-Eye Cherry)' },
-    { slug: 'i-iv-VII-III', numerals: ['i', 'iv', 'VII', 'III'], texture: 'pulse', about: 'through the subtonic to the relative major' },
+      examples: ['Zombie (The Cranberries)', 'Save Tonight (Eagle-Eye Cherry)'] },
+    { slug: 'i-iv-VII-III', numerals: ['i', 'iv', 'VII', 'III'], texture: 'pulse', about: 'through the subtonic to the relative major',
+      examples: ['Island in the Sun (Weezer)', 'It\'s My Life (Talk Talk)'] },
     { slug: 'i-iv-V-i-harmonic', numerals: ['i', 'iv', 'V', 'i'], harmonic: true, texture: 'broken',
-      about: 'harmonic minor: the seventh is raised in the V chord only, so the dominant is major and leads home' },
+      about: 'harmonic minor: the seventh is raised in the V chord only, so the dominant is major and leads home',
+      examples: ['Minor Swing (Django Reinhardt and Stéphane Grappelli)'] },
     { slug: 'i-VII-VI-VII', numerals: ['i', 'VII', 'VI', 'VII'], texture: 'pulse', about: 'a rocking natural minor loop that never reaches the dominant',
-      examples: 'All Along the Watchtower (Bob Dylan; Jimi Hendrix)' },
+      examples: ['All Along the Watchtower (Bob Dylan; Jimi Hendrix)'] },
     { slug: 'andalusian', numerals: ['i', 'VII', 'VI', 'V'], harmonic: true, texture: 'broken',
       about: 'the Andalusian cadence: stepping down to a major V, whose raised seventh comes from harmonic minor',
-      examples: 'Hit the Road Jack (Ray Charles)' },
+      examples: ['Hit the Road Jack (Ray Charles)'] },
   ],
 }
 const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii']
@@ -163,11 +168,13 @@ function progressionLesson(pattern: Pattern, tonic: string, mode: KeyMode, index
   const name = pattern.blues ? 'Twelve-bar blues (I7 – IV7 – V7)' : `${written}${pattern.harmonic ? ' (harmonic minor V)' : ''}`
   return {
     id, instrument: 'piano', kind: 'progression', style: keyLabel(tonic, mode), level: index + 1,
-    title: `${name} in ${keyLabel(tonic, mode)}${pattern.examples ? ` — as in ${pattern.examples}` : ''}`,
-    feel: pattern.blues ? 'Twelve bars: stabs over a walking root, fifth and octave' : `${texture.words}, then two chords a bar`,
+    title: `${name} in ${keyLabel(tonic, mode)}`,
+    // The songs are part of the description: the first two under the title in the list, all of them in the lesson's details.
+    feel: `${pattern.examples ? `${pattern.loose ? 'Same chords as' : 'Heard in'} ${pattern.examples.slice(0, 2).join(', ')}${pattern.examples.length > 2 ? ` and ${pattern.examples.length - 2} more` : ''} · ` : ''}` +
+      `${pattern.blues ? 'twelve bars of stabs over a walking root, fifth and octave' : `${texture.words}, then two chords a bar`}`,
     goal: `${pattern.blues ? 'The twelve-bar blues' : `Play ${written}`} in ${keyLabel(tonic, mode)} (${(pattern.blues ? [...new Set(once)] : once).join(' – ')}): ${pattern.about}.` +
-      (pattern.blues ? ' The last bar walks back into the top.' : ` Bars 1–4 play one chord a bar as ${texture.words}; bars 5–8 move twice as fast, two chords a bar, and the last bar walks back to the top.`) +
-      (pattern.examples ? ` ${pattern.examples} use${pattern.examples.includes(',') ? '' : 's'} this progression in a section; this lesson is an original exercise, not their arrangement.` : ''),
+      (pattern.blues ? ' The last bar walks back into the top.' : ` Bars 1–4 play one chord a bar as ${texture.words}; bars 5–8 move twice as fast, two chords a bar, and the last bar walks back to the top.`),
+    ...(pattern.examples ? { examples: { songs: pattern.examples, scope: pattern.loose ? 'These songs use the same chords in another order.' : 'These songs use this progression in a section.' } } : {}),
     meter: { numerator: 4, denominator: 4 }, tempo: pattern.blues ? { start: 84, target: 126 } : { start: 76, target: 116 },
     hands: `Right hand: three-note chords moving to the nearest notes of the next, fingers 1–5 written · Left hand: root and fifth${pattern.blues || pattern.texture === 'offbeat' ? ', walking up to the octave' : ''}${texture.pedal && !pattern.blues ? ' · Right foot: sustain pedal, changed with each chord' : ''}`,
     steps: [

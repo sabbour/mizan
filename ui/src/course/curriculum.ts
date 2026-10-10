@@ -68,7 +68,7 @@ export type Collection = 'inspired' | 'genre'
 /** Separate sections beside the progressive course. */
 export const COLLECTIONS: Record<Collection, { title: string; intro: string }> = {
   inspired: { title: 'Inspired by great drummers',
-    intro: 'Original exercises on a hallmark of a famous drummer or band. They teach a style; they are not transcriptions of any recording.' },
+    intro: 'Exercises on a hallmark of a famous drummer or band, to learn the style.' },
   genre: { title: 'Grooves by genre',
     intro: 'Five lessons per style: an 8-bar basic groove, two 8-bar variations, an 8-bar fill study and a 16-bar performance phrase. Each plays with original bass and chords; mute or turn them down in the track list.' },
 }
@@ -794,7 +794,7 @@ export function lessonSong(lesson: Lesson): Song {
     title: lesson.collection ? lesson.title : `Lesson ${lessonList(lesson).indexOf(lesson) + 1}: ${lesson.title}`,
     source: 'course',
     tracks: [{ id: 'drums', instrument: 'drums', name: 'Drum kit', detail: lesson.collection
-      ? 'Original practice pattern in this style (authored, not transcribed)' : 'Lesson pattern (authored, not transcribed)' },
+      ? 'Practice pattern in this style' : 'Lesson pattern' },
     ...backing?.tracks ?? []],
     bpm: lesson.tempo.target * pulse,
     beatsPerBar,

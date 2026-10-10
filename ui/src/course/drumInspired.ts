@@ -36,7 +36,7 @@ function makeBar(pattern: Pattern, meter: { numerator: number; denominator: numb
 const studies: Study[] = [
   {
     id: 'inspired-pink-floyd-money', title: 'Seven-quarter groove — Money', artist: 'Pink Floyd', track: 'Money',
-    focus: 'Original exercise, not a transcription · seven-quarter cycle grouped 3 + 2 + 2',
+    focus: 'seven-quarter cycle grouped 3 + 2 + 2',
     level: 7, meter: { numerator: 7, denominator: 4 },
     bars: [
       { steps: 2, notes: { hh: 'XxXxXxXxXxXxXx', sn: '----X-----X---', bd: 'x-----x---x---' } },
@@ -47,7 +47,7 @@ const studies: Study[] = [
   },
   {
     id: 'inspired-pink-floyd-time', title: 'Space, then a tom response — Time', artist: 'Pink Floyd', track: 'Time',
-    focus: 'Original exercise, not a transcription · open space, measured tom answers and a controlled build',
+    focus: 'open space, measured tom answers and a controlled build',
     level: 6,
     bars: [
       { steps: 4, notes: { hh: 'x---x---x---x---', sn: '----X-------X---', bd: 'x-------x-------' } },
@@ -60,7 +60,7 @@ const studies: Study[] = [
   {
     id: 'inspired-pink-floyd-another-brick', title: 'Open sixteenth hats — Another Brick in the Wall, Part 2',
     artist: 'Pink Floyd', track: 'Another Brick in the Wall, Part 2',
-    focus: 'Original exercise, not a transcription · disco-influenced sixteenth hats, open offbeats and a half-time backbeat',
+    focus: 'disco-influenced sixteenth hats, open offbeats and a half-time backbeat',
     level: 5,
     bars: [
       { steps: 4, alternating: true, notes: { hh: 'x-x-x-o-x-x-x-o-', sn: '--------X-------', bd: 'x-------x---x---', hp: 'x-------x-------' } },
@@ -72,7 +72,7 @@ const studies: Study[] = [
   {
     id: 'inspired-dire-straits-sultans', title: 'Light shuffle and rimshot accents — Sultans of Swing',
     artist: 'Dire Straits', track: 'Sultans of Swing',
-    focus: 'Original exercise, not a transcription · light shuffle pulse, ghost-note snare and rimshot-like accents',
+    focus: 'light shuffle pulse, ghost-note snare and rimshot-like accents',
     level: 7,
     bars: [
       { steps: 3, notes: { rd: 'x-xx-xx-xx-x', sn: '---g---X----', bd: 'x-----x-----' } },
@@ -84,7 +84,7 @@ const studies: Study[] = [
   {
     id: 'inspired-dire-straits-money-for-nothing', title: 'Tom-led half-time build — Money for Nothing',
     artist: 'Dire Straits', track: 'Money for Nothing',
-    focus: 'Original exercise, not a transcription · low-tom intro texture opening into a broad half-time backbeat',
+    focus: 'low-tom intro texture opening into a broad half-time backbeat',
     level: 6,
     bars: [
       { steps: 2, notes: { f1: 'X---x---', bd: 'x---x---' } },
@@ -96,7 +96,7 @@ const studies: Study[] = [
   {
     id: 'inspired-dire-straits-walk-of-life', title: 'Bouncy country shuffle — Walk of Life',
     artist: 'Dire Straits', track: 'Walk of Life',
-    focus: 'Original exercise, not a transcription · bouncy country shuffle with accented backbeats and kick pickups',
+    focus: 'bouncy country shuffle with accented backbeats and kick pickups',
     level: 5,
     bars: [
       { steps: 3, notes: { hh: 'x-xx-xx-xx-x', sn: '---X-----X--', bd: 'x-----x-----' } },
@@ -108,7 +108,7 @@ const studies: Study[] = [
   {
     id: 'inspired-metallica-enter-sandman', title: 'Steady eighths and a changing kick — Enter Sandman',
     artist: 'Metallica', track: 'Enter Sandman',
-    focus: 'Original exercise, not a transcription · firm eighth-note pulse with measured kick variations',
+    focus: 'firm eighth-note pulse with measured kick variations',
     level: 6,
     bars: [
       { steps: 2, notes: { cr: 'X-------', hh: '-xxxxxxx', sn: '--X---X-', bd: 'x---x---' } },
@@ -120,7 +120,7 @@ const studies: Study[] = [
   {
     id: 'inspired-metallica-master-of-puppets', title: 'Galloping kick groups — Master of Puppets',
     artist: 'Metallica', track: 'Master of Puppets',
-    focus: 'Original exercise, not a transcription · controlled long-short kick groups and clear backbeats',
+    focus: 'controlled long-short kick groups and clear backbeats',
     level: 8,
     bars: [
       { steps: 4, notes: { cr: 'X---x---X---x---', sn: '----X-------X---', bd: 'X-xx--xx-X-xx--x' } },
@@ -132,7 +132,7 @@ const studies: Study[] = [
   {
     id: 'inspired-metallica-sad-but-true', title: 'Slow heavy backbeat — Sad But True',
     artist: 'Metallica', track: 'Sad But True',
-    focus: 'Original exercise, not a transcription · slow half-time weight and deliberate rests',
+    focus: 'slow half-time weight and deliberate rests',
     level: 6,
     bars: [
       { steps: 2, notes: { cr: 'x-------', hh: '----x---', sn: '----X---', bd: 'x-------' } },
@@ -144,7 +144,7 @@ const studies: Study[] = [
   {
     id: 'inspired-tool-schism', title: 'Grouped odd-meter phrase — Schism',
     artist: 'Tool', track: 'Schism',
-    focus: 'Original exercise, not a transcription · odd-meter groupings in the spirit of progressive rock',
+    focus: 'odd-meter groupings in the spirit of progressive rock',
     level: 8, meter: { numerator: 7, denominator: 8 },
     bars: [
       { steps: 4, notes: { t1: 'X-----x---X---', sn: '----X-----X---', bd: 'x-----x---x---' } },
@@ -156,7 +156,7 @@ const studies: Study[] = [
   {
     id: 'inspired-tool-lateralus', title: 'Accents that cross the pulse — Lateralus',
     artist: 'Tool', track: 'Lateralus',
-    focus: 'Original exercise, not a transcription · shifting accent groups over an even subdivision',
+    focus: 'shifting accent groups over an even subdivision',
     level: 8,
     bars: [
       { steps: 4, alternating: true, notes: { sn: 'XxxXxxXxxXxxXxxx' } },
@@ -168,7 +168,7 @@ const studies: Study[] = [
   {
     id: 'inspired-tool-the-pot', title: 'Syncopated linear accents — The Pot',
     artist: 'Tool', track: 'The Pot',
-    focus: 'Original exercise, not a transcription · syncopated kick and ghost-note answers',
+    focus: 'syncopated kick and ghost-note answers',
     level: 8,
     bars: [
       { steps: 4, notes: { hh: 'x-x-x-x-x-x-x-x-', sn: '---gX--g---gX--g', bd: 'x-x-----x---x---' } },
@@ -180,7 +180,7 @@ const studies: Study[] = [
   {
     id: 'inspired-eagles-hotel-california', title: 'Reggae-tinged half-feel — Hotel California',
     artist: 'Eagles', track: 'Hotel California',
-    focus: 'Original exercise, not a transcription · laid-back half-feel, offbeat cymbal color and quiet snare ghosts',
+    focus: 'laid-back half-feel, offbeat cymbal color and quiet snare ghosts',
     level: 6,
     bars: [
       { steps: 2, notes: { rd: 'x---x---', sn: '--g-X---', bd: 'x-----x-' } },
@@ -192,7 +192,7 @@ const studies: Study[] = [
   {
     id: 'inspired-eagles-take-it-easy', title: 'Country-rock train beat — Take It Easy',
     artist: 'Eagles', track: 'Take It Easy',
-    focus: 'Original exercise, not a transcription · straight-eighth train beat with backbeat accents and ghost taps',
+    focus: 'straight-eighth train beat with backbeat accents and ghost taps',
     level: 6,
     bars: [
       { steps: 2, notes: { hh: 'xxxxxxxx', sn: 'XgXgXgXg', bd: 'x---x---' } },
@@ -204,7 +204,7 @@ const studies: Study[] = [
   {
     id: 'inspired-eagles-life-in-fast-lane', title: 'Driving sixteenths and kick shifts — Life in the Fast Lane',
     artist: 'Eagles', track: 'Life in the Fast Lane',
-    focus: 'Original exercise, not a transcription · driving sixteenth hats, kick shifts and crash punctuation',
+    focus: 'driving sixteenth hats, kick shifts and crash punctuation',
     level: 7,
     bars: [
       { steps: 4, notes: { hh: 'XxxxXxxxXxxxXxxx', sn: '----X-------X---', bd: 'x-----x---x-----' } },
@@ -216,7 +216,7 @@ const studies: Study[] = [
   {
     id: 'inspired-phil-collins-in-the-air-tonight', title: 'A spacious build and original tom answer — In the Air Tonight',
     artist: 'Phil Collins', track: 'In the Air Tonight',
-    focus: 'Original exercise, not a transcription · gradual dynamic build and a newly written tom response',
+    focus: 'gradual dynamic build and a tom response',
     level: 7,
     bars: [
       { steps: 4, notes: { hh: 'x-------x-------', bd: 'x---------------' } },
@@ -228,7 +228,7 @@ const studies: Study[] = [
   {
     id: 'inspired-phil-collins-easy-lover', title: 'Upbeat two-hand pulse — Easy Lover',
     artist: 'Philip Bailey & Phil Collins', track: 'Easy Lover',
-    focus: 'Original exercise, not a transcription · bright alternating hi-hat and syncopated kick',
+    focus: 'bright alternating hi-hat and syncopated kick',
     level: 6,
     bars: [
       { steps: 4, alternating: true, notes: { hh: 'XxxxXxxxXxxxXxxx', sn: '----X-------X---', bd: 'x------xx-------' } },
@@ -240,7 +240,7 @@ const studies: Study[] = [
   {
     id: 'inspired-genesis-turn-it-on-again', title: 'Uneven phrase accents — Turn It On Again',
     artist: 'Genesis', track: 'Turn It On Again',
-    focus: 'Original exercise, not a transcription · asymmetric groupings in the spirit of progressive pop',
+    focus: 'asymmetric groupings in the spirit of progressive pop',
     level: 8, meter: { numerator: 7, denominator: 8 },
     bars: [
       { steps: 4, notes: { hh: 'X-xx-X-xX-xx-X', sn: '----X-----X---', bd: 'x---x---x---x-' } },
@@ -362,7 +362,7 @@ const TEACHING: Record<string, Teaching> = {
     tempo: { start: 56, target: 80 }, limbs: 'Right hand: hi-hat · Left hand: snare and toms · Right foot: kick',
     steps: ['Bars 1–2 use only a few hat and kick notes; hold the dynamic down and leave the gaps silent.',
       'Bar 3 adds a strong snare backbeat and a busier hat to create the build.',
-      'Bar 4 plays a newly composed snare-to-tom descent, not the recording’s famous fill; accent the floor tom, then release.'],
+      'Bar 4 plays a snare-to-tom descent; accent the floor tom, then release.'],
   },
   'inspired-phil-collins-easy-lover': {
     goal: 'drive a pop-rock phrase with alternating sixteenth hats, strong beat accents and a kick that answers the backbeat.',
@@ -376,7 +376,7 @@ const TEACHING: Record<string, Teaching> = {
     tempo: { start: 56, target: 80 }, limbs: 'Right hand: hi-hat or ride · Left hand: snare · Right foot: kick',
     steps: ['Bars 1 and 3 group the pulse 3 + 2 + 2; bar 2 changes to 2 + 2 + 3.',
       'Keep the eighth-note kick steady while the accented cymbal and snare move with each group.',
-      'Bar 4 adds a new crash pickup and returns to the first grouping; this is a practice grouping, not a transcription.'],
+      'Bar 4 adds a new crash pickup and returns to the first grouping.'],
   },
 }
 
@@ -386,7 +386,7 @@ export const INSPIRED_LESSONS: Lesson[] = studies.map((study) => {
   return {
     id: study.id, collection: 'inspired', style: `Inspired by ${study.artist} — ${study.track}`,
     feel: study.focus, level: study.level, title: study.title,
-    goal: `Original exercise, not a transcription: ${teaching.goal}`,
+    goal: teaching.goal.charAt(0).toUpperCase() + teaching.goal.slice(1),
     meter, tempo: teaching.tempo, limbs: teaching.limbs, steps: teaching.steps,
     bars: study.bars.map((pattern) => makeBar(pattern, meter)),
   }

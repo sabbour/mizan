@@ -59,7 +59,7 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
           <div><dt>Tempo</dt><dd className="num">start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</dd></div>
           {lesson.limbs && <div><dt>Limbs</dt><dd>{lesson.limbs}</dd></div>}
           {backing && <div><dt>Backing</dt><dd>{backing.tracks.map((track) => track.name).join(' and ')}, playing <span className="num">{backing.chords.join(' – ')}</span>.
-            Original parts made for this lesson; mute or turn them down in the track list.</dd></div>}
+            Mute or turn them down in the track list.</dd></div>}
         </dl>
         <table className="lesson-counts">
           <tbody>
@@ -77,7 +77,7 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
           <p className="lesson-note">Speed starts at the lesson&apos;s starting tempo until you choose your own speed, which Mizan then remembers;
             raise it with ] as it gets comfortable. The pattern loops and the 3D kit shows each stroke. Hands are the lesson&apos;s sticking,
             from the player&apos;s side: <b className="hand-left">L</b> left hand in blue, <b className="hand-right">R</b> right hand in orange; feet have no letter.
-            {lesson.collection === 'inspired' && ' This is an original exercise in the drummer\'s style, not a transcription of a recording.'}</p>
+            </p>
         </details>
       </div>
       <nav className="lesson-nav" aria-label="Other lessons">
@@ -267,8 +267,7 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
           <section className="course" aria-labelledby="course-piano-inspired">
             <h2 id="course-piano-inspired" className="lib-h2">Inspired piano <span className="dim num">{PIANO_INSPIRED.length}</span></h2>
             <p className="course-intro">
-              Original studies in the style of well-known players and recordings: the kind of voicings, left hand and rhythm each is known for.
-              None is a transcription; no melody, lyric or arrangement of the recording is used.
+              Studies in the style of well-known players and recordings: the voicings, left hand and rhythm each is known for.
             </p>
             <ol className="course-levels course-collection">{PIANO_INSPIRED.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
           </section>
@@ -350,7 +349,8 @@ export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; on
           <summary>Lesson details: hands, {lesson.chords.length ? 'chords bar by bar' : 'bars'}{bass ? ', backing' : ''} and how to practise</summary>
         <dl className="lesson-facts">
           <div><dt>{lesson.key ? 'Key' : 'Style'}</dt><dd>{lesson.style}</dd></div>
-          {lesson.influence && <div><dt>Inspired by</dt><dd>{lesson.influence} (an original study, not a transcription)</dd></div>}
+          {lesson.examples && <div><dt>Heard in</dt><dd>{lesson.examples.songs.join(', ')}. {lesson.examples.scope}</dd></div>}
+          {lesson.influence && <div><dt>Inspired by</dt><dd>{lesson.influence}</dd></div>}
           <div><dt>Feel</dt><dd>{lesson.feel}</dd></div>
           <div><dt>Step</dt><dd className="num">{pianoStep(lesson)}</dd></div>
           <div><dt>Meter</dt><dd className="num">{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars</dd></div>
@@ -358,7 +358,7 @@ export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; on
           <div><dt>Hands</dt><dd>{lesson.hands}</dd></div>
           <div><dt>Pedal</dt><dd>{lesson.pedals ? 'Sustain, changed with each chord (shown on the 3D keyboard)' : 'None written'}</dd></div>
           {bass && <div><dt>Backing</dt><dd>Drum kit and {bass.name.toLowerCase()}, playing <span className="num">{lesson.chords.join(' – ')}</span>.
-            Original parts made for this lesson; mute or turn them down in the track list.</dd></div>}
+            Mute or turn them down in the track list.</dd></div>}
         </dl>
         <table className="lesson-counts">
           <tbody>
@@ -375,7 +375,7 @@ export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; on
           <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
           <p className="lesson-note">Finger numbers are written over the notes (1 thumb to 5 little finger) and shown on the 3D keyboard as each key plays:
             <b className="hand-left"> left hand in blue</b>, <b className="hand-right">right hand in orange</b>. Speed starts at the lesson&apos;s starting tempo;
-            raise it with ] as it gets comfortable. This is an original exercise, not a transcription of a recording.</p>
+            raise it with ] as it gets comfortable.</p>
         </details>
       </div>
       <nav className="lesson-nav" aria-label="Other lessons">

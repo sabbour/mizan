@@ -561,8 +561,8 @@ export class Engine {
   private updateMix(): void {
     if (!this.ctx) return
     for (const [id, bus] of this.buses) {
-      // A short glide, so changing the selection while playing never clicks or restarts anything.
-      bus.gain.setTargetAtTime(this.level(id), this.ctx.currentTime, 0.04)
+      // Muting is quick; the selection's lead glides, so changing parts while playing never clicks or restarts anything.
+      bus.gain.setTargetAtTime(this.level(id), this.ctx.currentTime, this.muted.has(id) ? 0.012 : 0.04)
     }
   }
 
