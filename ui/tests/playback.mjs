@@ -1876,7 +1876,7 @@ async function pianoChecks(width) {
   check(document.querySelectorAll('.course-genre-option').length === 11 && document.querySelectorAll('.course-genre-detail .course-lesson').length === 10 &&
     !document.querySelector('#course-title, .course-shelf'), 'Piano lists eleven genres and one genre\'s ten lessons, without the drum lists')
   const pianoShelves = [...document.querySelectorAll('.course-piano-shelf [role="radio"]')]
-  check(pianoShelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Genres 110:true|Inspired 23:false|Progressions 12:false|Scales 15:false',
+  check(pianoShelves.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Genres 110:true|Inspired 23:false|Progressions 18:false|Scales 15:false',
     `Piano shelves with their counts: ${pianoShelves.map((r) => r.textContent)}`)
   // Inspired: original studies naming their artist and track.
   pianoShelves[1].click()
@@ -1884,7 +1884,7 @@ async function pianoChecks(width) {
   check([...document.querySelectorAll('.course-collection .course-style')].filter((line) => /Hans Zimmer/.test(line.textContent)).length === 9, 'Nine Hans Zimmer studies')
   // Progressions: a key menu and major or minor; changing the key lists that key's lessons.
   pianoShelves[2].click()
-  await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 6, 'Six progressions in the key')
+  await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 9, 'Nine progressions in the key')
   const tonic = document.querySelector('.course-key select')
   tonic.value = '3'
   tonic.dispatchEvent(new Event('change', { bubbles: true }))

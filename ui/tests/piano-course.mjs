@@ -225,7 +225,7 @@ try {
   for (const { tonic, pitch, mode } of KEYS) {
     const progressions = progressionLessons(pitch, mode)
     tonalCount += progressions.length
-    assert.equal(progressions.length, 6, `${tonic} ${mode}: six progressions`)
+    assert.equal(progressions.length, 9, `${tonic} ${mode}: nine progressions`)
     for (const lesson of progressions) {
       const where = lesson.id
       families.add(lesson.id.replace(/-[a-g](-sharp|-flat)?-(major|minor)$/, '') + ':' + mode)
@@ -245,32 +245,43 @@ try {
       assert.equal(lesson.numerals.length, lesson.bars)
       assert.deepEqual(lesson.sections.map((s) => s.name), lesson.numerals, `${where}: the numerals over each bar`)
       const blues = lesson.id.includes('twelve-bar-blues')
-      assert.equal(lesson.bars, blues ? 12 : 8)
-      if (!blues) assert.ok(lesson.chords.slice(4).every((bar) => bar.split(' ').length === 2), `${where}: two chords a bar in the second half`)
+      assert.equal(lesson.bars, blues ? 24 : 16, `${where}: sixteen bars (the blues two twelve-bar choruses)`)
+      const eight = lesson.id.includes('-canon-')
+      if (!blues && !eight) assert.ok(lesson.chords.slice(8, 12).every((bar) => bar.split(' ').length === 2), `${where}: bars 9–12 move two chords a bar`)
+      // Phrases vary the playing, not only the chords: the right-hand rhythm of each four-bar phrase is not all the same.
+      const rhythmOf = (bar) => JSON.stringify(lesson.notes.filter((n) => n.hand === 'right' && Math.floor(n.startBeat / 4) === bar).map((n) => [n.startBeat % 4, n.beats]))
+      assert.ok(new Set(Array.from({ length: lesson.bars / 4 }, (_, phrase) => rhythmOf(phrase * 4))).size >= 2, `${where}: the phrases are played in different ways`)
       // Chord quality follows the numeral's case, built from the key's scale; the harmonic V and blues sevenths are named.
-      const scale = (mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10]).map((s) => (pitch + s) % 12)
+      const scale = (lesson.id.includes('dorian') ? [0, 2, 3, 5, 7, 9, 10] : mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10]).map((s) => (pitch + s) % 12)
+      const minorScale = [0, 2, 3, 5, 7, 8, 10].map((s) => (pitch + s) % 12)
       lesson.numerals.forEach((numerals, bar) => numerals.split(' – ').forEach((numeral, part) => {
         const symbol = lesson.chords[bar].split(' ')[part]
         const { root, intervals } = parseChord(symbol)
-        assert.equal(intervals.includes(3), numeral[0] === numeral[0].toLowerCase(), `${where}: ${numeral} is ${symbol}`)
+        const bare = numeral.replace(/^b/, '')
+        assert.equal(intervals.includes(3), bare[0] === bare[0].toLowerCase(), `${where}: ${numeral} is ${symbol}`)
         for (const x of intervals) {
           const tone = pc(root + x)
-          const raised = /harmonic/.test(lesson.title) && numeral === 'V' && tone === (pitch + 11) % 12
+          const raised = /harmonic/.test(lesson.title) && /^V/.test(numeral) && tone === (pitch + 11) % 12
           const flatSeventh = blues && x === 10
-          assert.ok(scale.includes(tone) || raised || flatSeventh, `${where}: ${symbol} is in the key or named as outside it`)
+          const borrowed = numeral.startsWith('b') && minorScale.includes(tone)
+          assert.ok(scale.includes(tone) || raised || flatSeventh || borrowed, `${where}: ${symbol} is in the key or named as outside it`)
         }
       }))
       if (blues) assert.match(lesson.goal, /outside the major scale/)
       if (/harmonic/.test(lesson.title)) assert.match(lesson.goal, /raised seventh|seventh is raised/)
     }
   }
-  assert.ok(families.size >= 12, `at least twelve progression families (${families.size})`)
-  assert.ok([...progressionLessons(0, 'major'), ...progressionLessons(9, 'minor')].every((lesson) => /^(Heard in|Same chords as) [^()]+\(/.test(lesson.feel) && lesson.examples?.songs.length && lesson.examples.songs.every((song) => /\(.+\)$/.test(song)) &&
+  assert.ok(families.size >= 18, `at least eighteen progression families (${families.size})`)
+  assert.ok([...progressionLessons(0, 'major'), ...progressionLessons(9, 'minor')].every((lesson) => /^(Heard in|Same chords as) [^()]+\(/.test(lesson.feel) && lesson.examples?.songs.length && lesson.examples.songs.every((song) => /\(.+\)/.test(song)) &&
     lesson.examples.songs.every((song) => !lesson.goal.includes(song)) &&
-    !/\(/.test(lesson.title.replace(/\((harmonic minor V|I7 – IV7 – V7)\)/, ''))), 'every progression description names example songs and artists; titles stay compact')
+    !/\(/.test(lesson.title.replace(/\((harmonic minor V|I7 – IV7 – V7|Dorian)\)/, ''))), 'every progression description names example songs and artists; titles stay compact')
   assert.deepEqual(pianoLessonById('piano-progression-ii-v-i-e-flat-major').chords.slice(0, 4), ['Fm7', 'Bb7', 'Ebmaj7', 'Ebmaj7'])
   assert.deepEqual(pianoLessonById('piano-progression-i-iv-v-i-harmonic-g-sharp-minor').chords.slice(0, 4), ['G#m', 'C#m', 'D#', 'G#m'])
-  assert.deepEqual(pianoLessonById('piano-progression-twelve-bar-blues-a-major').chords, ['A7', 'A7', 'A7', 'A7', 'D7', 'D7', 'A7', 'A7', 'E7', 'D7', 'A7', 'E7'])
+  assert.deepEqual(pianoLessonById('piano-progression-twelve-bar-blues-a-major').chords.slice(0, 12), ['A7', 'A7', 'A7', 'A7', 'D7', 'D7', 'A7', 'A7', 'E7', 'D7', 'A7', 'E7'])
+  assert.deepEqual(pianoLessonById('piano-progression-i-bvii-iv-i-c-major').chords.slice(0, 4), ['C', 'Bb', 'F', 'C'], 'bVII borrowed from C minor')
+  assert.deepEqual(pianoLessonById('piano-progression-minor-ii-v-i-c-minor').chords.slice(0, 4), ['Dm7b5', 'G7', 'Cm', 'Cm'], 'minor ii–V–i: half-diminished ii, harmonic V7')
+  assert.deepEqual(pianoLessonById('piano-progression-dorian-vamp-a-minor').chords.slice(0, 2), ['Am7', 'D7'], 'Dorian vamp: major IV7')
+  assert.deepEqual(pianoLessonById('piano-progression-canon-d-major').chords.slice(0, 8), ['D', 'A', 'Bm', 'F#m', 'G', 'D', 'G', 'A'], 'the Canon sequence')
   assert.deepEqual(pianoLessonById('piano-progression-andalusian-a-minor').chords.slice(0, 4), ['Am', 'G', 'F', 'E'])
 
   // ---- Scales: fifteen kinds in every key ----

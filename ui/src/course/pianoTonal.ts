@@ -49,6 +49,8 @@ type Pattern = {
   texture: Texture
   /** Twelve-bar form, one numeral per bar, instead of four chords played twice. */
   blues?: boolean
+  /** Chords taken from another scale on the same tonic (a Dorian vamp's major IV). */
+  scale?: 'dorian'
 }
 const PATTERNS: Record<KeyMode, Pattern[]> = {
   major: [
@@ -62,6 +64,13 @@ const PATTERNS: Record<KeyMode, Pattern[]> = {
       examples: ['Let It Be (The Beatles)', 'I\'m Yours (Jason Mraz)'] },
     { slug: 'I-vi-ii-V', numerals: ['I', 'vi', 'ii', 'V'], texture: 'pulse', about: 'the circle of fifths back home, the turnaround of countless standards',
       examples: ['I Got Rhythm (George and Ira Gershwin)', 'Blue Moon (Rodgers and Hart)'] },
+    { slug: 'I-bVII-IV-I', numerals: ['I', 'bVII', 'IV', 'I'], texture: 'pulse',
+      about: 'the flat seventh chord is borrowed from the minor key (the Mixolydian sound of rock): its root lies a whole step below the tonic',
+      examples: ['Sweet Child o\' Mine (Guns N\' Roses)', 'Hey Jude (The Beatles), in the long coda'] },
+    { slug: 'I-IV-V-IV', numerals: ['I', 'IV', 'V', 'IV'], texture: 'offbeat', about: 'the three primary chords rocking back through IV instead of resolving',
+      examples: ['Wild Thing (The Troggs)'] },
+    { slug: 'canon', numerals: ['I', 'V', 'vi', 'iii', 'IV', 'I', 'IV', 'V'], texture: 'broken', about: 'a bass falling by step under eight chords, the sequence of Pachelbel\'s Canon',
+      examples: ['Canon in D (Johann Pachelbel)'] },
     { slug: 'twelve-bar-blues', numerals: ['I7', 'I7', 'I7', 'I7', 'IV7', 'IV7', 'I7', 'I7', 'V7', 'IV7', 'I7', 'V7'], dominant: true, blues: true, texture: 'offbeat',
       about: 'dominant sevenths on I, IV and V; the flat sevenths of I7 and IV7 lie outside the major scale, which is the blues sound',
       examples: ['Johnny B. Goode (Chuck Berry)', 'Hound Dog (Big Mama Thornton)'] },
@@ -81,26 +90,40 @@ const PATTERNS: Record<KeyMode, Pattern[]> = {
     { slug: 'andalusian', numerals: ['i', 'VII', 'VI', 'V'], harmonic: true, texture: 'broken',
       about: 'the Andalusian cadence: stepping down to a major V, whose raised seventh comes from harmonic minor',
       examples: ['Hit the Road Jack (Ray Charles)'] },
+    { slug: 'minor-ii-V-i', numerals: ['iiø7', 'V7', 'i', 'i'], harmonic: true, texture: 'held',
+      about: 'the minor-key jazz cadence: a half-diminished ii, then a V7 whose major third is harmonic minor\'s raised seventh',
+      examples: ['Autumn Leaves (jazz standard), in its minor-key phrases'] },
+    { slug: 'dorian-vamp', numerals: ['i7', 'IV7'], scale: 'dorian', texture: 'offbeat',
+      about: 'a Dorian vamp: the IV chord is major because Dorian raises natural minor\'s sixth',
+      examples: ['Oye Como Va (Tito Puente; Santana)'] },
+    { slug: 'i-VI-VII-i', numerals: ['i', 'VI', 'VII', 'i'], texture: 'pulse', about: 'climbing VI, VII, i: the natural minor reaches home by step instead of through V',
+      examples: ['The Lord of the Rings theme (Howard Shore)'] },
   ],
 }
 const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii']
 const QUALITY: Record<string, string> = { '4,7': '', '3,7': 'm', '3,6': 'dim', '4,7,11': 'maj7', '4,7,10': '7', '3,7,10': 'm7', '3,6,10': 'm7b5' }
 
 /** The scale of a key, as pitch classes from the tonic; harmonic minor raises the seventh. */
-const scaleOf = (tonic: number, mode: KeyMode | 'harmonic') => MODES[mode].map((step) => (tonic + step) % 12)
+const scaleOf = (tonic: number, mode: KeyMode | 'harmonic' | 'dorian') => MODES[mode].map((step) => (tonic + step) % 12)
 
-/** A roman numeral as a chord symbol in the key, checked against the chord its scale degrees make. */
-export function numeralChord(tonic: string, mode: KeyMode, numeral: string, options: { harmonic?: boolean; dominant?: boolean } = {}): string {
-  const match = /^(i{1,3}|iv|vi{0,2}|v)(maj7|7)?$/i.exec(numeral)
+/**
+ * A roman numeral as a chord symbol in the key, checked against the chord its scale degrees make. A `b` before a
+ * major-key numeral borrows the chord from the minor key on the same tonic (bVII, bVI, bIII); `ø7` is half-diminished.
+ */
+export function numeralChord(tonic: string, mode: KeyMode, numeral: string,
+  options: { harmonic?: boolean; dominant?: boolean; scale?: 'dorian' } = {}): string {
+  const match = /^(b?)(i{1,3}|iv|vi{0,2}|v)(maj7|ø7|7)?$/i.exec(numeral)
   if (!match) throw new Error(`Unknown numeral ${numeral}`)
-  const degree = ROMAN.indexOf(match[1].toLowerCase())
-  const scale = scaleOf(pitchOf(tonic), mode === 'minor' && options.harmonic && degree === 4 ? 'harmonic' : mode)
-  const tones = [0, 2, 4, ...(match[2] ? [6] : [])].map((step) => scale[(degree + step) % 7])
+  const [, flat, roman, suffix] = match
+  const degree = ROMAN.indexOf(roman.toLowerCase())
+  const from = flat ? 'minor' : options.scale ?? (mode === 'minor' && options.harmonic && degree === 4 ? 'harmonic' : mode)
+  const scale = scaleOf(pitchOf(tonic), from)
+  const tones = [0, 2, 4, ...(suffix ? [6] : [])].map((step) => scale[(degree + step) % 7])
   // A blues dominant seventh: the scale's triad with a flat seventh, outside the scale where the scale has a major seventh.
-  if (options.dominant && match[2] === '7' && match[1] === match[1].toUpperCase()) tones[3] = (tones[0] + 10) % 12
+  if (options.dominant && suffix === '7' && roman === roman.toUpperCase()) tones[3] = (tones[0] + 10) % 12
   const quality = QUALITY[tones.slice(1).map((tone) => (tone - tones[0] + 12) % 12).join()]
-  const upper = match[1] === match[1].toUpperCase()
-  if (quality === undefined || upper !== ['', 'maj7', '7'].includes(quality) || (match[2] === 'maj7') !== (quality === 'maj7'))
+  const upper = roman === roman.toUpperCase()
+  if (quality === undefined || upper !== ['', 'maj7', '7'].includes(quality) || (suffix === 'maj7') !== (quality === 'maj7') || (suffix === 'ø7') !== (quality === 'm7b5'))
     throw new Error(`${numeral} is not ${quality ?? 'a chord'} in ${tonic} ${mode}`)
   return spell(tonic, degree, tones[0]) + quality
 }
@@ -140,19 +163,51 @@ const TEXTURE: Record<Texture, { right: string; left: string; pedal: boolean; wo
   broken: { right: 'PPPP', left: 'bbbb', pedal: true, words: 'broken chords' },
 }
 
+/** The contrasting texture for a progression's second phrase. */
+const CONTRAST: Record<Texture, Texture> = { held: 'pulse', pulse: 'broken', offbeat: 'held', broken: 'offbeat' }
+
+/**
+ * A progression lesson in phrases, each a new way of playing the same chords: the family's texture, then a contrasting
+ * one over a walking bass, then (for four- and two-chord families) the chords twice as fast, two a bar, and the first
+ * texture again, ending on a walk back to the top. Eight-chord families play their sequence twice; the blues two choruses.
+ */
+function progressionPlan(pattern: Pattern, once: string[]) {
+  const size = once.length
+  const a = TEXTURE[pattern.texture], b = TEXTURE[CONTRAST[pattern.texture]]
+  const repeat = (line: string, bars: number) => line.repeat(Math.ceil(bars / line.length)).slice(0, bars)
+  const pairs = (list: string[]) => Array.from({ length: Math.ceil(list.length / 2) }, (_, i) => `${list[2 * i]} ${list[(2 * i + 1) % list.length]}`)
+  const numerals = pattern.numerals
+  if (pattern.blues) return {
+    chords: [...once, ...once], numerals: [...numerals, ...numerals],
+    right: `${repeat('C', 12)}${repeat('A', 12)}`, left: `${repeat('m', 12)}${repeat('o', 11)}t`,
+    phrases: 'two choruses: off-beat stabs over a walking bass, then four chords to the bar over root and fifth',
+  }
+  if (size === 8) return {
+    chords: [...once, ...once], numerals: [...numerals, ...numerals],
+    right: `${repeat(a.right[0], 8)}${repeat(b.right[0], 8)}`, left: `${repeat(a.left[0], 8)}mmmmmmmt`,
+    phrases: `the sequence as ${a.words}, then again as ${b.words} over a walking bass`,
+  }
+  // Four or two chords: four phrases of four bars.
+  const cycle = (bars: number) => Array.from({ length: bars }, (_, i) => once[i % size])
+  const cycleNumerals = (bars: number) => Array.from({ length: bars }, (_, i) => numerals[i % size])
+  const fast = pairs(cycle(8)), fastNumerals = pairs(cycleNumerals(8))
+  return {
+    chords: [...cycle(4), ...cycle(4), ...fast, ...cycle(4)], numerals: [...cycleNumerals(4), ...cycleNumerals(4), ...fastNumerals, ...cycleNumerals(4)],
+    right: `${a.right}${b.right}BBBB${a.right}`, left: `${a.left}mmmmoooo${a.left.slice(0, 3)}t`,
+    phrases: `four phrases: ${a.words}; ${b.words} over a walking bass; two chords a bar; then ${a.words} again, walking back to the top`,
+  }
+}
+
 function progressionLesson(pattern: Pattern, tonic: string, mode: KeyMode, index: number): PianoLesson {
   const id = progressionId(pattern, tonic, mode)
   const once = pattern.numerals.map((numeral) => numeralChord(tonic, mode, numeral, pattern))
   const texture = TEXTURE[pattern.texture]
-  const twice = [`${once[0]} ${once[1]}`, `${once[2]} ${once[3]}`]
-  const chords = pattern.blues ? once : [...once, ...twice, ...twice]
-  const numerals = pattern.blues ? pattern.numerals
-    : [...pattern.numerals, ...[0, 1].flatMap(() => [`${pattern.numerals[0]} ${pattern.numerals[1]}`, `${pattern.numerals[2]} ${pattern.numerals[3]}`])]
+  const plan = progressionPlan(pattern, once)
+  const { chords, numerals } = plan
+  const pedal = texture.pedal && !pattern.blues
   const { notes, pedals } = arrange({
-    id, beatsPerBar: 4, chords, rich: false, pedal: texture.pedal, tonic: pitchOf(tonic), mode, contour: [72, 74, 76, 74],
-    right: pattern.blues ? 'CCCC CCCC CCCC' : `${texture.right} BBBB`,
-    left: pattern.blues ? 'mmmm mmmm mmmt' : `${texture.left} ooot`,
-    palette: { right: PROGRESSION_RIGHT, left: PROGRESSION_LEFT },
+    id, beatsPerBar: 4, chords, rich: false, pedal, tonic: pitchOf(tonic), mode, contour: [72, 74, 76, 74, 76, 77, 79, 74, 74, 76, 77, 79, 76, 74, 72, 71],
+    right: plan.right, left: plan.left, palette: { right: PROGRESSION_RIGHT, left: PROGRESSION_LEFT },
   })
   // Every note spelled from the chord it belongs to; a passing note into the next chord from the letter above that root.
   const spans = chords.flatMap((bar, number) => bar.split(' ').map((symbol, part, all) => ({ symbol, start: number * 4 + part * 4 / all.length })))
@@ -164,24 +219,27 @@ function progressionLesson(pattern: Pattern, tonic: string, mode: KeyMode, index
       note.spell = onLetter(LETTERS.indexOf(next[0]) + 1, pc(note.midi))
     }
   }
-  const written = pattern.numerals.slice(0, pattern.blues ? 12 : 4).join(' – ')
-  const name = pattern.blues ? 'Twelve-bar blues (I7 – IV7 – V7)' : `${written}${pattern.harmonic ? ' (harmonic minor V)' : ''}`
+  const written = pattern.numerals.join(' – ')
+  const name = pattern.blues ? 'Twelve-bar blues (I7 – IV7 – V7)' : `${written}${pattern.harmonic ? ' (harmonic minor V)' : ''}${pattern.scale ? ' (Dorian)' : ''}`
+  const examples = pattern.examples ?? []
   return {
     id, instrument: 'piano', kind: 'progression', style: keyLabel(tonic, mode), level: index + 1,
     title: `${name} in ${keyLabel(tonic, mode)}`,
     // The songs are part of the description: the first two under the title in the list, all of them in the lesson's details.
-    feel: `${pattern.examples ? `${pattern.loose ? 'Same chords as' : 'Heard in'} ${pattern.examples.slice(0, 2).join(', ')}${pattern.examples.length > 2 ? ` and ${pattern.examples.length - 2} more` : ''} · ` : ''}` +
-      `${pattern.blues ? 'twelve bars of stabs over a walking root, fifth and octave' : `${texture.words}, then two chords a bar`}`,
-    goal: `${pattern.blues ? 'The twelve-bar blues' : `Play ${written}`} in ${keyLabel(tonic, mode)} (${(pattern.blues ? [...new Set(once)] : once).join(' – ')}): ${pattern.about}.` +
-      (pattern.blues ? ' The last bar walks back into the top.' : ` Bars 1–4 play one chord a bar as ${texture.words}; bars 5–8 move twice as fast, two chords a bar, and the last bar walks back to the top.`),
-    ...(pattern.examples ? { examples: { songs: pattern.examples, scope: pattern.loose ? 'These songs use the same chords in another order.' : 'These songs use this progression in a section.' } } : {}),
+    feel: `${examples.length ? `${pattern.loose ? 'Same chords as' : 'Heard in'} ${examples.slice(0, 2).join(', ')}${examples.length > 2 ? ` and ${examples.length - 2} more` : ''} · ` : ''}` +
+      `${chords.length} bars: ${pattern.blues ? 'two choruses' : `${texture.words}, then variations`}`,
+    goal: `${pattern.blues ? 'The twelve-bar blues' : `Play ${written}`} in ${keyLabel(tonic, mode)} (${[...new Set(once)].join(' – ')}): ${pattern.about}. ` +
+      `${chords.length} bars in ${plan.phrases}.`,
+    ...(examples.length ? { examples: { songs: examples, scope: pattern.loose ? 'These songs use the same chords in another order.' : 'These songs use this progression in a section.' } } : {}),
     meter: { numerator: 4, denominator: 4 }, tempo: pattern.blues ? { start: 84, target: 126 } : { start: 76, target: 116 },
-    hands: `Right hand: three-note chords moving to the nearest notes of the next, fingers 1–5 written · Left hand: root and fifth${pattern.blues || pattern.texture === 'offbeat' ? ', walking up to the octave' : ''}${texture.pedal && !pattern.blues ? ' · Right foot: sustain pedal, changed with each chord' : ''}`,
+    hands: `Right hand: three-note chords moving to the nearest notes of the next, fingers 1–5 written · Left hand: root and fifth, walking up to the octave${pedal ? ' · Right foot: sustain pedal, changed with each chord' : ''}`,
     steps: [
       'Say the numeral and the chord name as you play each bar: the numeral is the chord\'s place in the key.',
       'Keep the notes the chords share under the same fingers and move the others by the smallest step.',
-      ...(texture.pedal && !pattern.blues ? ['Press the sustain pedal just after each new chord and lift it just before the next.'] : []),
-      pattern.blues ? 'Count the twelve bars in three lines of four: I, then IV and back, then V, IV and home.' : 'In bars 5–8 the chords change every two beats: get the left hand moving first, then add the right.',
+      ...(pedal ? ['Press the sustain pedal just after each new chord and lift it just before the next.'] : []),
+      pattern.blues ? 'Count the twelve bars in three lines of four: I, then IV and back, then V, IV and home; the second chorus changes the rhythm.'
+        : once.length === 8 ? 'Feel the bass step down under the first half of the sequence; the second time through, the left hand walks.'
+        : 'Each four-bar phrase plays the chords a new way; in bars 9–12 they change every two beats: get the left hand moving first, then add the right.',
       'Then try the same progression in another key with the key picker: the numerals stay the same.',
     ],
     bars: chords.length, chords, notes, ...(pedals ? { pedals } : {}),
