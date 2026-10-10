@@ -5,6 +5,7 @@ import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
 import { activeAnalysis, analysisProgress, ago, clock, decodingErrorHeadline, jobExecutionLabel, jobQueueLabel, jobQueuePosition, jobTitle, jobStageLabel, jobStagePercent, resumeParts, sourceLine, took } from './format'
 import { CourseSection } from '../course/Course'
+import { LESSONS } from '../course/curriculum'
 import './library.css'
 
 type Problem = { message: string; fix: string | null }
@@ -18,6 +19,9 @@ type Props = {
   onOpen: (entry: Entry) => void
   /** Opens a built-in drum course lesson. */
   onLesson: (id: string) => void
+  /** Songs or Drum course; held by the app so it survives opening a song or lesson. */
+  tab: LibraryTab
+  onTab: (tab: LibraryTab) => void
   onDetails: (job: QueueJob) => void
   selectedJob?: string
   onCredits: () => void
@@ -52,11 +56,19 @@ function inFolder(entry: Entry, id: string) {
   return entry.folders.includes(id)
 }
 
-export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDetails, selectedJob, onCredits }: Props) {
+export type LibraryTab = 'songs' | 'course'
+const TABS: { id: LibraryTab; label: string }[] = [{ id: 'songs', label: 'Songs' }, { id: 'course', label: 'Drum course' }]
+
+export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDetails, selectedJob, onCredits, tab, onTab: setTab }: Props) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedFolder, setSelectedFolder] = useState('all')
-  const [query, setQuery] = useState('')
+  const [query, setQueryValue] = useState('')
+  // Searching and adding songs belong to Songs: typing a search shows it.
+  const setQuery = (next: string) => {
+    setQueryValue(next)
+    if (next.trim() && tab !== 'songs') setTab('songs')
+  }
   const [error, setError] = useState<Problem | null>(null)
   const [folderFeedback, setFolderFeedback] = useState<{ message: string; error: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -431,7 +443,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
       field.current?.focus()
       try {
         await host.addLink(submitted)
-        if (enteredLink) setQuery((current) => current.trim() === submitted ? '' : current)
+        if (enteredLink) setQueryValue((current) => current.trim() === submitted ? '' : current)
         onQueueChange()
       } catch (e) {
         setError(problem(e))
@@ -800,7 +812,10 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
             onSubmit={(e) => {
               e.preventDefault()
               if (isLink) void addLink(query)
-              else songs.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              else {
+                setTab('songs')
+                songs.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
             }}
           >
             <label className="intake-field intake-unified">
@@ -855,16 +870,36 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
           </div>
         </section>
 
+        <div className="lib-tabs" role="tablist" aria-label="Library">
+          {TABS.map((item, index) => (
+            <button key={item.id} type="button" role="tab" id={`lib-tab-${item.id}`} aria-controls={`lib-panel-${item.id}`}
+              aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} className="lib-tab" data-tab={item.id}
+              onClick={() => setTab(item.id)}
+              onKeyDown={(event) => {
+                const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+                const to = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : step ? (index + step + TABS.length) % TABS.length : -1
+                if (to < 0) return
+                event.preventDefault()
+                setTab(TABS[to].id)
+                ;(event.currentTarget.parentElement?.querySelector(`[data-tab="${TABS[to].id}"]`) as HTMLElement | null)?.focus()
+              }}>
+              {item.label}
+              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length}</span>
+              {item.id === 'songs' && queueJobs.length > 0 && tab !== 'songs' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" id="lib-panel-songs" aria-labelledby="lib-tab-songs" hidden={tab !== 'songs'}>
+        {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails} onOpen={(id) => entries && onOpenId(id, entries, onOpen)} />}
         {empty && (
           <p className="library-first-note">
             <FileMusic size={19} aria-hidden />
             Your songs and practice progress will appear here. Paste a YouTube link above or import a MIDI or MusicXML file to begin.
           </p>
-        )}
+          )}
 
-        {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails} onOpen={(id) => entries && onOpenId(id, entries, onOpen)} />}
-
-        {!empty && (
+          {!empty && (
           <div className="lib-catalog">
             <FolderNav
               folders={allFolders}
@@ -918,7 +953,11 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
           </div>
         )}
 
-        <CourseSection onLesson={onLesson} />
+        </div>
+
+        <div role="tabpanel" id="lib-panel-course" aria-labelledby="lib-tab-course" hidden={tab !== 'course'}>
+          {tab === 'course' && <CourseSection onLesson={onLesson} />}
+        </div>
       </main>
 
       {songDrag && draggedEntry && (

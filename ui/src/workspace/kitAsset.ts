@@ -54,7 +54,7 @@ type Gltf = {
     occlusionTexture?: { index: number }; pbrMetallicRoughness?: { baseColorFactor?: number[]; metallicFactor?: number; roughnessFactor?: number
       baseColorTexture?: { index: number }; metallicRoughnessTexture?: { index: number } } }[]
   textures: { source: number }[]
-  images: { bufferView: number; mimeType: string }[]
+  images: { bufferView: number; mimeType: string; name?: string }[]
   extensions?: { KHR_materials_variants?: { variants: { name: string }[] } }
 }
 
@@ -103,7 +103,7 @@ export function loadKit(kit: KitType): Promise<Asset> {
       const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as Gltf
       const binLength = view.getUint32(20 + jsonLength, true)
       const bin = bytes.subarray(28 + jsonLength, 28 + jsonLength + binLength)
-      const images = Promise.all(json.images.map(async (image) => {
+      const images = Promise.all(json.images.map(async (image, index) => {
         const v = json.bufferViews[image.bufferView]
         try {
           const blob = new Blob([bin.slice(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength)], { type: image.mimeType })
@@ -114,7 +114,9 @@ export function loadKit(kit: KitType): Promise<Asset> {
           const size = { resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale) }
           full.close()
           return await createImageBitmap(blob, { ...size, resizeQuality: 'high' })
-        } catch {
+        } catch (error) {
+          // The kit still draws, with that map's plain material colour instead of the texture.
+          console.error(`${KIT_FILE[kit]}: texture ${index}${image.name ? ` (${image.name})` : ''} could not be decoded; drawing its material without it.`, error)
           return null
         }
       }))

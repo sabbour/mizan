@@ -93,10 +93,10 @@ try {
       console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'session')`))
       // A full reload stands in for an app restart: the saved choices must come back.
       await call('Page.navigate', { url: testUrl })
-      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".course")'); i++) await sleep(100)
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
       console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'restart')`))
       await call('Page.navigate', { url: testUrl })
-      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".course")'); i++) await sleep(100)
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
     }
   }
   if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
@@ -1657,7 +1657,13 @@ async function courseChecks(width, phase) {
   const toggle = (label) => [...document.querySelectorAll('.ws-foot .toggle')].find((button) => button.textContent.includes(label))
   const pressed = (label) => toggle(label)?.getAttribute('aria-pressed')
   const playButton = () => document.querySelector('.ws-foot .play')
+  const showTab = async (id) => {
+    document.querySelector(`.lib-tabs [data-tab="${id}"]`).click()
+    await wait(() => !document.getElementById(`lib-panel-${id}`)?.hidden, `The ${id} tab shows`)
+  }
   const openLesson = async (title) => {
+    if (document.getElementById('lib-panel-course')?.hidden) await showTab('course')
+    await wait(() => document.querySelectorAll('.course-lesson').length > 40, 'The course lists its lessons')
     const button = [...document.querySelectorAll('.course-lesson')].find((item) => item.querySelector('.course-title')?.firstChild?.textContent === title)
     check(button, `Lesson ${title} is listed`)
     button.click()
@@ -1665,11 +1671,11 @@ async function courseChecks(width, phase) {
   }
   const back = async () => {
     document.querySelector('.ws-back').click()
-    await wait(() => document.querySelector('.course') && !document.querySelector('.ws'), 'Back returns to the library')
+    await wait(() => document.querySelector('.lib-tabs') && !document.querySelector('.ws'), 'Back returns to the library')
   }
   if (phase === 'restart') {
     // After a full reload: the choices made before are still in force.
-    await wait(() => document.querySelectorAll('.course-lesson').length > 40, 'The library lists the lessons again')
+    await wait(() => document.querySelector('.lib-tabs'), 'The library opens again')
     await openLesson('Fill around the toms')
     check(pressed('Count-in') === 'false' && pressed('Click') === 'false' && pressed('Sticking') === 'false',
       `Count-in, click and sticking stay off after a restart (${pressed('Count-in')}, ${pressed('Click')}, ${pressed('Sticking')})`)
@@ -1688,6 +1694,27 @@ async function courseChecks(width, phase) {
   localStorage.removeItem('mizan:practice')
   localStorage.setItem('mizan:mixer:s1', JSON.stringify({ muted: ['piano'], volumes: { drums: 0.6 } }))
   const before = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
+  // Songs and the drum course are two tabs: Songs first; arrows, Home and End move between them.
+  await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
+  const tabs = () => [...document.querySelectorAll('.lib-tabs [role="tab"]')]
+  check(document.querySelector('.lib-tabs').getAttribute('role') === 'tablist' && tabs().map((tab) => `${tab.dataset.tab}:${tab.getAttribute('aria-selected')}:${tab.tabIndex}`).join('|') === 'songs:true:0|course:false:-1' &&
+    !document.getElementById('lib-panel-songs').hidden && document.getElementById('lib-panel-course').hidden && !document.querySelector('.course-lesson'),
+    `Songs is the first tab, with the course in its own tab: ${tabs().map((tab) => tab.textContent).join(' | ')}`)
+  const key = (name) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }))
+  tabs()[0].focus(); key('ArrowRight')
+  await wait(() => document.activeElement?.dataset.tab === 'course' && !document.getElementById('lib-panel-course').hidden && document.getElementById('lib-panel-songs').hidden, 'ArrowRight selects and focuses Drum course')
+  key('Home'); await wait(() => document.activeElement?.dataset.tab === 'songs', 'Home returns to Songs')
+  key('End'); await wait(() => document.activeElement?.dataset.tab === 'course', 'End selects Drum course')
+  key('ArrowRight'); await wait(() => document.activeElement?.dataset.tab === 'songs', 'Arrows wrap around')
+  await showTab('course')
+  const search = document.querySelector('.intake-unified input')
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'paper')
+  search.dispatchEvent(new Event('input', { bubbles: true }))
+  await wait(() => tabs()[0].getAttribute('aria-selected') === 'true' && document.querySelector('.song-open'), 'Typing a search shows Songs with the matches')
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, '')
+  search.dispatchEvent(new Event('input', { bubbles: true }))
+  check(!Object.keys(localStorage).some((name) => name.includes('tab')), 'The chosen tab is not stored')
+  await showTab('course')
   await wait(() => document.querySelectorAll('.course-level .course-lesson').length === 37, 'The library lists the 37 course lessons')
   check(document.querySelectorAll('.course-level').length === 8, 'Lessons are grouped in eight levels')
   check(document.querySelector('#course-inspired')?.textContent.startsWith('Inspired by great drummers') &&
@@ -1763,13 +1790,15 @@ async function courseChecks(width, phase) {
     frames.push({ dark, playing: playButton().getAttribute('aria-label') !== 'Play' })
   }
   await chooseStyle('electronic:Realistic')
-  for (let i = 0; i < 60 && !frames.some((f) => f.dark > 20); i++) await sleep(100)
+  // The first switch to a kit may still be decoding its textures; a paused kit redraws once the new look is ready.
+  for (let i = 0; i < 300 && !frames.some((f) => f.dark > 20); i++) await sleep(100)
   const kitCanvas = document.querySelector('.practice-kit canvas')
   check(frames.some((f) => f.dark > 20), `The realistic electronic kit is drawn (${frames.length} frames, most dark ${Math.max(0, ...frames.map((f) => f.dark))}, ` +
     `canvas ${kitCanvas?.width}x${kitCanvas?.height} hidden ${kitCanvas?.hidden}, page ${document.visibilityState}, failure ${document.querySelector('.practice-failure')?.textContent ?? 'none'})`)
   frames.length = 0
   playButton().click()
-  await wait(() => bar() >= 2, 'Playback advances')
+  for (let i = 0; i < 300 && !(bar() >= 2); i++) await sleep(50)
+  check(bar() >= 2, `Playback advances (${where()})`)
   await sleep(3000)
   const played = frames.filter((f) => f.playing)
   window.__mizanKitFrame = undefined
@@ -1801,6 +1830,8 @@ async function courseChecks(width, phase) {
   await wait(() => document.querySelectorAll('.score-ghost').length === 8 && document.querySelectorAll('.score-ghost-paren').length === 16,
     `Each ghost note is parenthesised (${document.querySelectorAll('.score-ghost').length})`)
   await back()
+  check(tabs()[1].getAttribute('aria-selected') === 'true', 'Back from a lesson returns to the Drum course tab')
+  await showTab('songs')
   // Song: a suggested sticking, and choosing another track starts it from the top.
   const song = [...document.querySelectorAll('.song-open')].find((element) => element.textContent.includes('Paper Rain'))
   check(song, 'Library has a song to open')

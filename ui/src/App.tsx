@@ -1,7 +1,7 @@
 import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
-import { Library } from './library/Library'
+import { Library, type LibraryTab } from './library/Library'
 import { JobPanel } from './library/JobPanel'
 import { Credits } from './Credits'
 import { host, type Entry, type Opened } from './library/bridge'
@@ -47,6 +47,8 @@ class WorkspaceBoundary extends Component<{ children: ReactNode; onBack: () => v
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
+  // Songs or Drum course, kept while a song or lesson is open so Back returns to the same tab.
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>('songs')
   const [openError, setOpenError] = useState<string | null>(null)
   const [openRevision, setOpenRevision] = useState(0)
   const [reprocessing, setReprocessing] = useState(false)
@@ -170,6 +172,8 @@ export default function App() {
           onOpen={(e) => void open(e.id)}
           onCredits={() => setView({ kind: 'credits' })}
           onLesson={(id) => setView({ kind: 'lesson', id })}
+          tab={libraryTab}
+          onTab={setLibraryTab}
           onDetails={(j) => setView((v) => (v.kind === 'job' && v.id === j.id ? { kind: 'library' } : { kind: 'job', id: j.id }))}
         />
       )}
