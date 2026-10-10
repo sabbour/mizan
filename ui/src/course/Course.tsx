@@ -4,6 +4,7 @@ import type { CourseBrowse } from './browse'
 import { COLLECTIONS, genres, LESSONS, LEVELS, lessonBacking, lessonList, lessonStage, type Lesson, type LessonBar } from './curriculum'
 import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonList, pianoLessonSong, pianoStep, type PianoLesson } from './piano'
 import { PIANO_INSPIRED } from './pianoInspired'
+import { byArtist, inspiredOrder } from './inspired'
 import { KEY_NAMES, PROGRESSION_COUNT, progressionLessons, SCALE_COUNT, SCALE_FAMILIES, scaleLessons, scaleTonic, type KeyMode } from './pianoTonal'
 import { tempoLabel } from './state'
 
@@ -35,7 +36,7 @@ function Sticking({ line }: { line: string }) {
 
 /** Instructions beside a lesson's score, with the lessons before and after it in the same list. */
 export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (id: string) => void }) {
-  const list = lessonList(lesson)
+  const list = lesson.collection === 'inspired' ? inspiredOrder(lessonList(lesson)) : lessonList(lesson)
   const index = list.indexOf(lesson)
   const previous = list[index - 1]
   const next = list[index + 1]
@@ -97,13 +98,13 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
 const meta = (lesson: Pick<Lesson, 'meter' | 'tempo'>) =>
   `${lesson.meter.numerator}/${lesson.meter.denominator} · ${lesson.tempo.start}–${tempoLabel(lesson, lesson.tempo.target)}`
 
-function LessonButton({ lesson, onLesson }: { lesson: Lesson; onLesson: (id: string) => void }) {
+function LessonButton({ lesson, onLesson, number }: { lesson: Lesson; onLesson: (id: string) => void; number?: number }) {
   const stage = lessonStage(lesson)
   const detail = stage ? `${stage.name} · ${lesson.feel}` : lesson.collection === 'inspired' ? `${lesson.style} · ${lesson.feel}` : undefined
   return (
     <li>
       <button className={`course-lesson${detail ? ' course-lesson-two' : ''}`} onClick={() => onLesson(lesson.id)}>
-        <span className="course-number num">{stage ? stage.index + 1 : lessonList(lesson).indexOf(lesson) + 1}</span>
+        <span className="course-number num">{number ?? (stage ? stage.index + 1 : lessonList(lesson).indexOf(lesson) + 1)}</span>
         <span className="course-title">{lesson.title}{detail && <span className="course-style">{detail}</span>}</span>
         <span className="course-meta num">{meta(lesson)}{lesson.collection && <span className="course-level-tag">Level {lesson.level}</span>}</span>
       </button>
@@ -111,12 +112,12 @@ function LessonButton({ lesson, onLesson }: { lesson: Lesson; onLesson: (id: str
   )
 }
 
-function PianoLessonButton({ lesson, onLesson }: { lesson: PianoLesson; onLesson: (id: string) => void }) {
+function PianoLessonButton({ lesson, onLesson, number }: { lesson: PianoLesson; onLesson: (id: string) => void; number?: number }) {
   const detail = lesson.kind === 'genre' ? `${PIANO_STAGES[lesson.level - 1]} · ${lesson.feel}` : lesson.kind === 'inspired' ? `${lesson.influence} · ${lesson.feel}` : lesson.feel
   return (
     <li>
       <button className="course-lesson course-lesson-two" onClick={() => onLesson(lesson.id)}>
-        <span className="course-number num">{lesson.level}</span>
+        <span className="course-number num">{number ?? lesson.level}</span>
         <span className="course-title">{lesson.title}<span className="course-style">{detail}</span></span>
         <span className="course-meta num">{meta(lesson)} · {lesson.bars} bars{lesson.pedals && <span className="course-level-tag">Pedal</span>}</span>
       </button>
@@ -225,6 +226,11 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
   const pianoGenre = pianoGenreList.find(({ style }) => style === browse.pianoGenre) ?? pianoGenreList[0]
   const backing = lessonBacking(drumGenre.lessons[0])!
   const pianoBass = pianoLessonSong(pianoGenre.lessons[0]).tracks.find((track) => track.id === 'bass')!
+  // Inspired lessons by artist, the chosen artist shown (the first when none is chosen yet).
+  const drumArtists = byArtist(inspired)
+  const drumArtist = drumArtists.find(({ artist }) => artist === browse.drumArtist) ?? drumArtists[0]
+  const pianoArtists = byArtist(PIANO_INSPIRED)
+  const pianoArtist = pianoArtists.find(({ artist }) => artist === browse.pianoArtist) ?? pianoArtists[0]
   const tonal = browse.pianoShelf === 'progression' ? progressionLessons(browse.pianoKey.pitch, browse.pianoKey.mode)
     : browse.pianoShelf === 'scale' ? scaleLessons(browse.pianoKey.pitch, browse.pianoScale) : []
   return (
@@ -269,7 +275,12 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
             <p className="course-intro">
               Studies in the style of well-known players and recordings: the voicings, left hand and rhythm each is known for.
             </p>
-            <ol className="course-levels course-collection">{PIANO_INSPIRED.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+            <GenreShelf id="course-piano-inspired" value={pianoArtist.artist} onChange={(pianoArtist) => set({ pianoArtist })}
+              styles={pianoArtists.map(({ artist, lessons }) => ({ style: artist, note: `${lessons.length} ${lessons.length === 1 ? 'study' : 'studies'}` }))}>
+              <h3>{pianoArtist.artist}</h3>
+              <ol className="course-steps course-collection">{pianoArtist.lessons.map((lesson, index) =>
+                <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} number={index + 1} />)}</ol>
+            </GenreShelf>
           </section>
         ) : (
           <section className="course" aria-labelledby="course-piano-tonal">
@@ -288,9 +299,12 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
         <section className="course" aria-labelledby="course-inspired">
           <h2 id="course-inspired" className="lib-h2">{COLLECTIONS.inspired.title} <span className="dim num">{inspired.length}</span></h2>
           <p className="course-intro">{COLLECTIONS.inspired.intro}</p>
-          <ol className="course-levels course-collection">
-            {inspired.map((lesson) => <LessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}
-          </ol>
+          <GenreShelf id="course-inspired" value={drumArtist.artist} onChange={(drumArtist) => set({ drumArtist })}
+            styles={drumArtists.map(({ artist, lessons }) => ({ style: artist, note: `${lessons.length} ${lessons.length === 1 ? 'track' : 'tracks'}` }))}>
+            <h3>{drumArtist.artist}</h3>
+            <ol className="course-steps course-collection">{drumArtist.lessons.map((lesson, index) =>
+              <LessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} number={index + 1} />)}</ol>
+          </GenreShelf>
         </section>
       ) : browse.shelf === 'genre' ? (
         <section className="course" aria-labelledby="course-genre">

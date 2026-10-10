@@ -1,6 +1,7 @@
 import { backingKey, GENRE_STYLE, parseChord, progression } from './accompaniment'
 import { lessonById, lessonMeter } from './curriculum'
 import { PIANO_INSPIRED } from './pianoInspired'
+import { inspiredOrder } from './inspired'
 import { arrange, pianoSong, type Arp, type FillRhythm, type Finger, type LeftCell, type LeftPalette, type Mode, type PianoLesson, type RightPalette, type Strokes } from './pianoParts'
 import { tonalLesson, tonalList } from './pianoTonal'
 
@@ -313,7 +314,7 @@ export const pianoLessonById = (id: string): PianoLesson | undefined =>
 /** The lessons in the same list as this one, for Previous and Next. */
 export function pianoLessonList(lesson: PianoLesson): PianoLesson[] {
   if (lesson.kind === 'genre') return PIANO_LESSONS
-  if (lesson.kind === 'inspired') return PIANO_INSPIRED
+  if (lesson.kind === 'inspired') return inspiredOrder(PIANO_INSPIRED)
   return tonalList(lesson)
 }
 

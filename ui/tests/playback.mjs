@@ -1880,8 +1880,16 @@ async function pianoChecks(width) {
     `Piano shelves with their counts: ${pianoShelves.map((r) => r.textContent)}`)
   // Inspired: original studies naming their artist and track.
   pianoShelves[1].click()
-  await wait(() => document.querySelectorAll('.course-collection .course-lesson').length === 23, 'Twenty-three inspired studies')
-  check([...document.querySelectorAll('.course-collection .course-style')].filter((line) => /Hans Zimmer/.test(line.textContent)).length === 9, 'Nine Hans Zimmer studies')
+  // Grouped by artist: the artists listed with their study counts, one artist's studies at a time in learning order.
+  await wait(() => document.querySelector('#course-piano-inspired-genres'), 'The inspired studies are grouped by artist')
+  const pianoArtists = [...document.querySelectorAll('#course-piano-inspired-genres .course-genre-option')]
+  const pianoStudies = pianoArtists.reduce((sum, option) => sum + Number(/\d+/.exec(option.querySelector('.course-genre-note').textContent)[0]), 0)
+  check(pianoStudies === 23 && pianoArtists.length >= 10, `Twenty-three inspired studies by ${pianoArtists.length} artists (${pianoStudies})`)
+  pianoArtists.find((option) => option.dataset.genre === 'Hans Zimmer').click()
+  await wait(() => document.querySelector('.course-genre-detail h3')?.textContent === 'Hans Zimmer' &&
+    document.querySelectorAll('.course-genre-detail .course-lesson').length === 9, 'Nine Hans Zimmer studies')
+  const zimmerNumbers = [...document.querySelectorAll('.course-genre-detail .course-number')].map((n) => n.textContent).join(',')
+  check(zimmerNumbers === '1,2,3,4,5,6,7,8,9', `Numbered in learning order within the artist: ${zimmerNumbers}`)
   // Progressions: a key menu and major or minor; changing the key lists that key's lessons.
   pianoShelves[2].click()
   await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 9, 'Nine progressions in the key')
@@ -2256,8 +2264,15 @@ async function courseChecks(width, phase) {
   shelves[0].focus()
   shelves[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
   await wait(() => document.querySelector('#course-inspired') && document.activeElement?.dataset.shelf === 'inspired', 'ArrowRight shows the inspired lessons')
-  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && document.querySelectorAll('.course-collection .course-lesson').length === 26 &&
-    [...document.querySelectorAll('.course-collection .course-style')].every((line) => /^Inspired by /.test(line.textContent)) && fits(), 'The inspired list names each drummer')
+  const drumArtists = [...document.querySelectorAll('#course-inspired-genres .course-genre-option')]
+  const drumStudies = drumArtists.reduce((sum, option) => sum + Number(/\d+/.exec(option.querySelector('.course-genre-note').textContent)[0]), 0)
+  check(document.querySelector('#course-inspired').textContent.startsWith('Inspired by great drummers') && drumStudies === 26 &&
+    [...document.querySelectorAll('.course-collection .course-style')].every((line) => /^Inspired by /.test(line.textContent)) && fits(),
+    `The inspired lessons are grouped by artist, each naming its drummer (${drumStudies} by ${drumArtists.length} artists)`)
+  drumArtists.find((option) => option.dataset.genre === 'Pink Floyd')?.click()
+  await wait(() => document.querySelector('.course-genre-detail h3')?.textContent === 'Pink Floyd' && document.querySelectorAll('.course-genre-detail .course-lesson').length >= 3,
+    'Pink Floyd lists its tracks')
+  document.querySelector('.course-shelf [data-shelf="inspired"]').focus()
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
   await wait(() => document.querySelector('#course-genre')?.textContent.startsWith('Grooves by genre'), 'End shows the genres')
   const genreOptions = [...document.querySelectorAll('.course-genre-option')]
