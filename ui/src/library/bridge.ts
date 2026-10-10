@@ -129,17 +129,25 @@ export type PopularChartRow = {
   videoId: string
   title: string
   artist: string
-  rank: number
+  rank?: number
   thumbnail: string
+}
+export type PopularShelf = {
+  id: string
+  title: string
+  publisher: string
+  sourceUrl: string
+  kind: 'editorial' | 'chart'
+  status: 'available' | 'unavailable'
+  description: string
+  chartDate: string
+  rows: PopularChartRow[]
+  message?: string
 }
 export type PopularChart = {
   title: string
-  period: string
-  market: string
-  chartDate: string
   fetchedAt: string
-  sourceUrl: string
-  rows: PopularChartRow[]
+  sections: PopularShelf[]
   warning?: string
   sample?: boolean
 }
@@ -350,7 +358,7 @@ export const host = {
     call<{ results: YouTubeResult[] }>('search_youtube', query).then((r) => r.results),
   searchYouTubeMusic: (query: string) =>
     call<{ results: YouTubeResult[] }>('search_youtube_music', query).then((r) => r.results),
-  popularSongs: () => call<PopularChart>('popular_songs'),
+  popularSongs: (refresh = false) => call<PopularChart>('popular_songs', refresh),
   searchMidiCommons: (query: string) =>
     call<{ results: MidiSearchResult[] }>('search_midi_commons', query).then((r) => r.results),
   searchMidiMutopia: (query: string, startAt = 0) =>

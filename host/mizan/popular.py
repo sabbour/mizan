@@ -1,157 +1,134 @@
 from __future__ import annotations
 
-import json
 import re
-from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from concurrent.futures import ThreadPoolExecutor
 
 from .errors import PopularChartUnavailable
 
-CHARTS_URL = "https://artists.youtube.com/charts/tracks"
-CHARTS_API = "https://charts.youtube.com/youtubei/v1/browse?alt=json"
-MAX_CHART_RESPONSE = 2 * 1024 * 1024
+HIT_LIST_ID = "RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs"
+HIT_LIST_URL = f"https://music.youtube.com/playlist?list={HIT_LIST_ID}"
+GLOBAL_TOP_100_ID = "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"
+GLOBAL_TOP_100_URL = f"https://music.youtube.com/playlist?list={GLOBAL_TOP_100_ID}"
+POPULAR_PLAYLIST_LIMIT = 12
+
+_PLAYLISTS = (
+    {
+        "id": "hit-list",
+        "title": "Today's Biggest Hits — The Hit List",
+        "playlist_id": HIT_LIST_ID,
+        "playlist_title": "The Hit List",
+        "publisher": "YouTube Music",
+        "url": HIT_LIST_URL,
+        "kind": "editorial",
+    },
+    {
+        "id": "global-top-100",
+        "title": "Top 100 Songs Global",
+        "playlist_id": GLOBAL_TOP_100_ID,
+        "playlist_title": "Top 100 Songs Global",
+        "publisher": "YouTube Music Global Charts",
+        "url": GLOBAL_TOP_100_URL,
+        "kind": "chart",
+    },
+)
 
 
-class _ChartRedirects(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, message, headers, new_url):
-        url = urljoin(request.full_url, new_url)
-        try:
-            parsed = urlsplit(url)
-            port = parsed.port
-        except ValueError as exc:
-            raise PopularChartUnavailable() from exc
-        if (parsed.scheme != "https" or parsed.hostname != "charts.youtube.com"
-                or port not in (None, 443)):
-            raise PopularChartUnavailable()
-        return super().redirect_request(request, fp, code, message, headers, url)
-
-
-def parse_chart_response(payload: dict) -> dict:
-    try:
-        section = payload["contents"]["sectionListRenderer"]["contents"][0]["musicAnalyticsSectionRenderer"]["content"]
-        perspective = section["perspectiveMetadata"]
-        params = perspective["requestParams"]["chartParams"]
-        track_lists = section["trackTypes"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise PopularChartUnavailable() from exc
-
-    chart_type = params.get("chartType")
-    track_lists = section["trackTypes"]
-    if not isinstance(track_lists, list):
-        raise PopularChartUnavailable()
-    title = "Top Songs" if chart_type in (None, "CHART_TYPE_UNKNOWN", "CHART_TYPE_TRACKS") else None
-    if not title:
-        raise PopularChartUnavailable()
-    chart_lists = [item for item in track_lists
-                   if isinstance(item, dict) and item.get("listType") == "TOP_VIEWS_CHART"]
-    chart = next((item for item in chart_lists
-                  if item.get("chartPeriodType") == "CHART_PERIOD_TYPE_WEEKLY"),
-                 chart_lists[0] if chart_lists else None)
-    if not chart or not isinstance(chart.get("trackViews"), list):
+def parse_playlist_response(payload: dict, *, playlist_id: str, title: str,
+                            publisher: str, ranked: bool = False) -> dict:
+    if (not isinstance(payload, dict)
+            or payload.get("id") != playlist_id
+            or payload.get("title") != title
+            or payload.get("channel") != publisher
+            or not isinstance(payload.get("entries"), list)):
         raise PopularChartUnavailable()
 
-    period = chart.get("chartPeriodType")
-    market = params.get("countryCode") or params.get("region")
-    if not isinstance(period, str) or not isinstance(market, str):
-        raise PopularChartUnavailable()
     rows, seen = [], set()
-    def rank_of(item):
-        try:
-            return int((item.get("chartEntryMetadata") or {}).get("currentPosition"))
-        except (AttributeError, TypeError, ValueError):
-            return 2**31
-
-    chart_window = sorted(
-        (item for item in chart["trackViews"] if isinstance(item, dict)),
-        key=rank_of,
-    )[:8]
-    for entry in chart_window:
-        video_id = entry.get("encryptedVideoId")
-        entry_metadata = entry.get("chartEntryMetadata")
-        title_text = entry.get("name")
+    for position, entry in enumerate(payload["entries"][:POPULAR_PLAYLIST_LIMIT], 1):
+        if not isinstance(entry, dict):
+            continue
+        video_id = entry.get("id")
         if (not isinstance(video_id, str) or not re.fullmatch(r"[\w-]{11}", video_id, re.ASCII)
-                or video_id in seen or not isinstance(title_text, str) or not title_text.strip()
-                or not isinstance(entry_metadata, dict)):
+                or video_id in seen):
             continue
-        try:
-            rank = int(entry_metadata.get("currentPosition"))
-        except (TypeError, ValueError):
-            continue
-        if rank < 1:
+        video_title = entry.get("title")
+        if not isinstance(video_title, str) or not video_title.strip():
             continue
         seen.add(video_id)
-        artists = entry.get("artists")
-        artist = ", ".join(
-            name for item in artists if isinstance(item, dict)
-            if isinstance((name := item.get("name")), str) and name.strip()
-        ) if isinstance(artists, list) else ""
-        thumbnail_data = entry.get("thumbnail")
-        thumbnails = thumbnail_data.get("thumbnails") if isinstance(thumbnail_data, dict) else None
-        thumbnail = next((item["url"] for item in reversed(thumbnails or [])
-                          if isinstance(item, dict) and isinstance(item.get("url"), str)
-                          and item["url"].startswith("https://")), None)
-        rows.append({
-            "id": video_id,
-            "title": title_text.strip()[:300],
-            "artist": artist[:300],
-            "rank": rank,
-            "thumbnail": thumbnail or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+        artist = entry.get("channel") or entry.get("artist") or entry.get("uploader") or ""
+        thumbnails = entry.get("thumbnails")
+        thumbnail = next(
+            (item.get("url") for item in reversed(thumbnails or [])
+             if isinstance(item, dict) and isinstance(item.get("url"), str)
+             and item["url"].startswith("https://i.ytimg.com/")),
+            None,
+        )
+        if not thumbnail:
+            candidate = entry.get("thumbnail")
+            thumbnail = candidate if isinstance(candidate, str) \
+                and candidate.startswith("https://i.ytimg.com/") else None
+        row = {
             "videoId": video_id,
-        })
-    rows.sort(key=lambda item: item["rank"])
+            "title": video_title.strip()[:300],
+            "artist": str(artist)[:300],
+            "thumbnail": thumbnail or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        }
+        if ranked:
+            row["rank"] = position
+        rows.append(row)
     if not rows:
         raise PopularChartUnavailable()
-    warning = (
-        "Some songs in this chart do not have a public video link; remaining ranks are unchanged."
-        if len(rows) < len(chart_window) else None
-    )
-    return {
-        "title": title,
-        "period": period,
-        "market": market,
-        "chartDate": str(chart.get("endDate") or perspective.get("latestEndDate") or ""),
+
+    result = {
         "rows": rows,
-        "sourceUrl": CHARTS_URL,
-        **({"warning": warning} if warning else {}),
+        "description": str(payload.get("description") or "")[:500],
+        "chartDate": str(payload.get("modified_date") or "") if ranked else "",
     }
+    return result
 
 
-def fetch_chart() -> dict:
-    body = json.dumps({
-        "context": {"client": {
-            "clientName": "WEB_MUSIC_ANALYTICS",
-            "clientVersion": "2.0",
-            "hl": "en",
-            "gl": "US",
-        }},
-        "browseId": "FEmusic_analytics_charts_home",
-        "query": json.dumps({"region": "global"}),
-    }).encode("utf-8")
-    request = Request(CHARTS_API, data=body, headers={
-        "Content-Type": "application/json",
-        "Origin": "https://charts.youtube.com",
-        "Referer": "https://charts.youtube.com/charts/TopSongs/global",
-        "User-Agent": "Mozilla/5.0",
-    })
+def _fetch_playlist(section: dict) -> dict:
+    from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
+
     try:
-        with build_opener(_ChartRedirects()).open(request, timeout=8) as response:
-            if not response.geturl().startswith("https://charts.youtube.com/"):
-                raise PopularChartUnavailable()
-            length = response.headers.get("Content-Length")
-            if length and int(length) > MAX_CHART_RESPONSE:
-                raise PopularChartUnavailable()
-            raw = response.read(MAX_CHART_RESPONSE + 1)
-    except PopularChartUnavailable:
-        raise
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
-        raise PopularChartUnavailable() from exc
-    if len(raw) > MAX_CHART_RESPONSE:
-        raise PopularChartUnavailable()
-    try:
-        payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PopularChartUnavailable() from exc
-    if not isinstance(payload, dict):
-        raise PopularChartUnavailable()
-    return parse_chart_response(payload)
+        with YoutubeDL({
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": False,
+            "playlistend": POPULAR_PLAYLIST_LIMIT,
+            "socket_timeout": 8,
+            "retries": 0,
+            "extractor_retries": 0,
+            "cachedir": False,
+            "cookiefile": None,
+            "usenetrc": False,
+        }) as youtube:
+            payload = youtube.extract_info(section["url"], download=False)
+        parsed = parse_playlist_response(
+            payload,
+            playlist_id=section["playlist_id"],
+            title=section["playlist_title"],
+            publisher=section["publisher"],
+            ranked=section["kind"] == "chart",
+        )
+        return {
+            **section,
+            "status": "available",
+            **parsed,
+        }
+    except (DownloadError, OSError, TimeoutError, PopularChartUnavailable):
+        return {
+            **section,
+            "status": "unavailable",
+            "message": "YouTube Music could not load this playlist.",
+            "rows": [],
+            "description": "",
+            "chartDate": "",
+        }
+
+
+def fetch_popular_songs() -> dict:
+    with ThreadPoolExecutor(max_workers=len(_PLAYLISTS)) as executor:
+        sections = list(executor.map(_fetch_playlist, _PLAYLISTS))
+    return {"title": "YouTube Music", "sections": sections}

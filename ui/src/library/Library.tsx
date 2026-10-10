@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, AudioLines, ChevronDown, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
+import { ArrowUp, AudioLines, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
 import { host, HostError, IMPORTABLE, onMidiFileOpened, toBase64, type CloudReadinessProgress, type CloudStatus, type Entry, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
 import { foldSearchText } from './searchText'
 import { CloudSetup } from './CloudSetup'
@@ -1157,20 +1157,11 @@ function mergeVideoResults(youtube: YouTubeResult[], music: YouTubeResult[]): Un
 }
 
 function chartDateLabel(value: string): string {
-  const normalized = /^\d{8}$/.test(value)
-    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`
-    : value
-  const date = new Date(normalized)
+  const dateOnly = value.match(/^(\d{4})-?(\d{2})-?(\d{2})$/)
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
-}
-
-function chartPeriodLabel(value: string): string {
-  const period = value.replace(/^CHART_PERIOD_TYPE_/, '').toLowerCase()
-  return period ? `${period[0].toUpperCase()}${period.slice(1)}` : 'Period not listed'
-}
-
-function chartMarketLabel(value: string): string {
-  return value.toLowerCase() === 'global' ? 'Global' : value.toUpperCase()
 }
 
 function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
@@ -1183,96 +1174,144 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
   const [error, setError] = useState<Problem | null>(null)
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
+  const shelves = useRef(new Map<string, HTMLOListElement>())
 
   useEffect(() => {
     let stale = false
     setLoading(true)
     setError(null)
-    void host.popularSongs().then(
+    void host.popularSongs(retry > 0).then(
       (result) => { if (!stale) setChart(result) },
       (reason) => { if (!stale) setError(problem(reason)) },
     ).finally(() => { if (!stale) setLoading(false) })
     return () => { stale = true }
   }, [retry])
 
+  const scrollShelf = (id: string, direction: -1 | 1) => {
+    const track = shelves.current.get(id)
+    if (track) track.scrollBy({ left: direction * track.clientWidth * 0.8, behavior: 'smooth' })
+  }
+
   return (
     <section className="popular-music" aria-labelledby="popular-music-title" aria-busy={loading}>
       <div className="popular-music-heading">
         <div>
-          <h2 id="popular-music-title" className="lib-h2">
-            {chart?.title ?? 'Popular songs'}
-          </h2>
-          {chart ? (
-            <p className="popular-music-summary">
-              {chart.sample
-                ? <>Popular on YouTube / YouTube Music · sample preview from “{chart.title}”; playlist order is not a chart ranking.</>
-                : <>{chartPeriodLabel(chart.period)} · {chartMarketLabel(chart.market)} chart
-                    {chart.chartDate ? ` · through ${chartDateLabel(chart.chartDate)}` : ''}
-                    {' · '}YouTube Music uses the same ranks.</>}
-            </p>
-          ) : (
-            <p className="popular-music-summary">Official YouTube Charts · YouTube and YouTube Music share the same song ranks.</p>
-          )}
+          <h2 id="popular-music-title" className="lib-h2">Popular on YouTube Music</h2>
+          <p className="popular-music-summary">
+            {chart?.sample
+              ? `Snapshot from ${chartDateLabel(chart.fetchedAt)} · development data`
+              : 'Curated playlists from YouTube Music · open a video or choose Transcribe.'}
+          </p>
         </div>
-        {chart && <p className="popular-freshness">
-          {chart.sample
-            ? `Playlist last modified ${chartDateLabel(chart.chartDate)} · sample data`
-            : `${chart.chartDate ? `Chart data through ${chartDateLabel(chart.chartDate)}` : 'Chart update date not provided'} · fetched ${new Date(chart.fetchedAt).toLocaleString()}`}
-        </p>}
+        <div className="popular-heading-actions">
+          {chart && <p className="popular-freshness">
+            Updated {new Date(chart.fetchedAt).toLocaleString()} · refreshed every 6 hours
+          </p>}
+        </div>
       </div>
 
-      {loading && !chart && <p className="songs-note" role="status">Loading official music charts…</p>}
+      {loading && !chart && <p className="songs-note" role="status">Loading YouTube Music playlists…</p>}
       {error && (
         <div className="popular-chart-error" role="alert">
           <span>{error.message}</span>
-          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry chart</button>
+          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry playlists</button>
         </div>
       )}
       {chart?.warning && (
         <p className="popular-chart-warning" role="status">
           {chart.warning}{' '}
-          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry chart</button>
+          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry playlists</button>
         </p>
       )}
 
-      {chart && (
-        <>
-          <ol className="popular-music-list">
-            {chart.rows.map((row) => {
-              const url = `https://www.youtube.com/watch?v=${row.videoId}`
-              const queued = jobs.some((job) => job.kind === 'transcribe' && job.url === url
-                && (job.status === 'queued' || job.status === 'running'))
-              const pending = pendingLinks.includes(url)
-              return (
-                <li key={row.videoId} className="popular-music-card">
-                  {row.rank > 0 && <span className="popular-rank num" aria-label={`Rank ${row.rank}`}>{row.rank}</span>}
-                  <Thumb entry={{ thumbnail: row.thumbnail, source: 'youtube' }} />
-                  <div className="popular-music-copy">
-                    <a className="popular-song-title" href={url} target="_blank" rel="noreferrer">{row.title}</a>
-                    <p className="song-meta">{row.artist || 'Artist not listed'}</p>
-                    <div className="video-sources">
-                      <a className="video-source" href={url} target="_blank" rel="noreferrer">YouTube</a>
-                      <a className="video-source" href={`https://music.youtube.com/watch?v=${row.videoId}`}
-                        target="_blank" rel="noreferrer">YouTube Music</a>
-                    </div>
-                  </div>
-                  <button className="btn" disabled={busy || queued || pending}
-                    aria-label={`${pending ? 'Queuing' : queued ? 'Queued' : 'Transcribe'} ${row.title}`}
-                    onClick={() => void onTranscribe(url)}>
-                    {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
-                  </button>
-                </li>
-              )
-            })}
-          </ol>
-          <p className="popular-chart-source">
-            <a href={chart.sourceUrl} target="_blank" rel="noreferrer">
-              {chart.sample ? 'Popular Music Videos playlist' : 'Official YouTube Charts'} <ExternalLink size={12} aria-hidden />
-            </a>
-            {!chart.sample && <> · Chart refreshes are cached for up to 6 hours.</>}
-          </p>
-        </>
-      )}
+      {chart?.sections.map((section) => (
+        <section className="popular-shelf" key={section.id} aria-labelledby={`popular-shelf-${section.id}`}>
+          <div className="popular-shelf-heading">
+            <div className="popular-shelf-title-group">
+              <h3 id={`popular-shelf-${section.id}`}>{section.title}</h3>
+              <span className="popular-source-badge">{section.publisher}</span>
+              {section.kind === 'chart' && <span className="popular-chart-badge">Chart</span>}
+            </div>
+            <div className="popular-heading-actions">
+              <div className="popular-shelf-controls" aria-label={`${section.title} shelf controls`}>
+                <button type="button" className="icon-btn" aria-label={`Previous songs in ${section.title}`}
+                  title={`Previous songs in ${section.title}`}
+                  onClick={() => scrollShelf(section.id, -1)} disabled={!section.rows.length}>
+                  <ChevronLeft size={18} aria-hidden />
+                </button>
+                <button type="button" className="icon-btn" aria-label={`Next songs in ${section.title}`}
+                  title={`Next songs in ${section.title}`}
+                  onClick={() => scrollShelf(section.id, 1)} disabled={!section.rows.length}>
+                  <ChevronRight size={18} aria-hidden />
+                </button>
+              </div>
+            </div>
+          </div>
+          {(section.description || section.chartDate) && (
+            <p className="popular-shelf-summary">
+              {section.description}
+              {section.chartDate && ` · Updated ${chartDateLabel(section.chartDate)}`}
+            </p>
+          )}
+          {section.status === 'unavailable' ? (
+            <div className="popular-chart-error" role="alert">
+              <span>{section.title} unavailable — {section.message ?? 'YouTube Music could not load this playlist.'}</span>
+              <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry</button>
+            </div>
+          ) : (
+            <>
+              <ol ref={(node) => {
+                if (node) shelves.current.set(section.id, node)
+                else shelves.current.delete(section.id)
+              }} className="popular-music-list" aria-label={section.title}>
+                {section.rows.map((row) => {
+                  const url = `https://www.youtube.com/watch?v=${row.videoId}`
+                  const queued = jobs.some((job) => job.kind === 'transcribe' && job.url === url
+                    && (job.status === 'queued' || job.status === 'running'))
+                  const pending = pendingLinks.includes(url)
+                  const transcribeLabel = pending ? 'Queuing' : queued ? 'Queued' : 'Transcribe'
+                  return (
+                    <li key={row.videoId} className="popular-music-card" tabIndex={0}>
+                      <div className="popular-cover">
+                        <a className="popular-cover-link" href={url} target="_blank" rel="noreferrer"
+                          aria-label={`Open ${row.title} on YouTube`}>
+                          <Thumb entry={{ thumbnail: row.thumbnail, source: 'youtube' }} />
+                          {row.rank !== undefined && (
+                            <span className="popular-rank num" aria-label={`Chart rank ${row.rank}`}>{row.rank}</span>
+                          )}
+                        </a>
+                        <button type="button" className="btn btn-primary popular-song-transcribe"
+                          disabled={busy || queued || pending}
+                          aria-label={`${transcribeLabel} ${row.title}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void onTranscribe(url)
+                          }}>
+                          {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
+                        </button>
+                      </div>
+                      <div className="popular-music-copy">
+                        <a className="popular-song-title" href={url} target="_blank" rel="noreferrer">{row.title}</a>
+                        <p className="song-meta">{row.artist || 'Artist not listed'}</p>
+                        <div className="popular-card-actions">
+                          <a className="video-source" href={url} target="_blank" rel="noreferrer">YouTube</a>
+                          <a className="video-source" href={`https://music.youtube.com/watch?v=${row.videoId}`}
+                            target="_blank" rel="noreferrer">YouTube Music</a>
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ol>
+              <p className="popular-chart-source">
+                <a href={section.sourceUrl} target="_blank" rel="noreferrer">
+                  Open source playlist <ExternalLink size={12} aria-hidden />
+                </a>
+              </p>
+            </>
+          )}
+        </section>
+      ))}
     </section>
   )
 }

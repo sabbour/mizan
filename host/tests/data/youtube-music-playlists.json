@@ -1,0 +1,44 @@
+{
+  "hitList": {
+    "id": "RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs",
+    "title": "The Hit List",
+    "channel": "YouTube Music",
+    "description": "The home of today's biggest and hottest hits.",
+    "modified_date": "20261010",
+    "entries": [
+      {
+        "id": "78wrful9cVU",
+        "title": "Olivia Rodrigo - drop dead (Official Music Video)",
+        "channel": "Olivia Rodrigo",
+        "thumbnail": "https://i.ytimg.com/vi/78wrful9cVU/maxresdefault.jpg"
+      },
+      {
+        "id": "nUsrYVxrDwI",
+        "title": "Ella Langley - Choosin' Texas (Official Video)",
+        "channel": "Ella Langley",
+        "thumbnail": "https://i.ytimg.com/vi/nUsrYVxrDwI/maxresdefault.jpg"
+      }
+    ]
+  },
+  "globalTop100": {
+    "id": "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i",
+    "title": "Top 100 Songs Global",
+    "channel": "YouTube Music Global Charts",
+    "description": "This week's ranking of the most popular songs on YouTube.",
+    "modified_date": "20261010",
+    "entries": [
+      {
+        "id": "fcnDmrtj6Sk",
+        "title": "Shakira, Burna Boy - Dai Dai (Official Video)",
+        "channel": "Shakira",
+        "thumbnail": "https://i.ytimg.com/vi/fcnDmrtj6Sk/maxresdefault.jpg"
+      },
+      {
+        "id": "fRIhCiUVaKs",
+        "title": "KAROL G, Judeline, rusowsky - BbY WOW (Visualizer)",
+        "channel": "KAROL G",
+        "thumbnail": "https://i.ytimg.com/vi/fRIhCiUVaKs/maxresdefault.jpg"
+      }
+    ]
+  }
+}

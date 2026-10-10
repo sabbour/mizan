@@ -1,106 +1,121 @@
 import json
-import io
+from copy import deepcopy
 from pathlib import Path
-from urllib.request import Request
 
 import pytest
 
 from mizan import popular
-from mizan.api import Api
+from mizan.api import Api, POPULAR_SONGS_CACHE_SECONDS
+from mizan.errors import PopularChartUnavailable
 from mizan.jobs import JobRunner, JobStore
 
-from mizan.popular import parse_chart_response
+
+FIXTURE = Path(__file__).parent / "data" / "youtube-music-playlists.json"
 
 
-FIXTURE = Path(__file__).parent / "data" / "youtube-global-weekly-tracks.json"
+def fixture_payloads():
+    return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
-def test_chart_parser_keeps_real_rank_fields_and_weekly_market_metadata():
-    chart = parse_chart_response(json.loads(FIXTURE.read_text(encoding="utf-8")))
+def test_playlist_parser_keeps_real_hit_list_metadata_without_inventing_ranks():
+    payload = fixture_payloads()["hitList"]
+    result = popular.parse_playlist_response(
+        payload,
+        playlist_id=popular.HIT_LIST_ID,
+        title="The Hit List",
+        publisher="YouTube Music",
+    )
 
-    assert chart["title"] == "Top Songs"
-    assert chart["period"] == "CHART_PERIOD_TYPE_WEEKLY"
-    assert chart["market"] == "global"
-    assert chart["chartDate"] == "2026-10-03"
-    assert [row["rank"] for row in chart["rows"]] == [1, 2]
-    assert "do not have a public video link" in chart["warning"]
-    assert chart["rows"][0]["videoId"] == "aB_12-cD345"
-    assert chart["rows"][0]["artist"] == "Fixture Artist"
-    assert chart["rows"][0]["thumbnail"] == "https://example.com/high.jpg"
-    assert chart["rows"][1]["artist"] == "Second Artist, Guest Artist"
+    assert result["description"] == "The home of today's biggest and hottest hits."
+    assert result["chartDate"] == ""
+    assert result["rows"][0] == {
+        "videoId": "78wrful9cVU",
+        "title": "Olivia Rodrigo - drop dead (Official Music Video)",
+        "artist": "Olivia Rodrigo",
+        "thumbnail": "https://i.ytimg.com/vi/78wrful9cVU/maxresdefault.jpg",
+    }
+    assert all("rank" not in row for row in result["rows"])
 
 
-def test_chart_parser_rejects_malformed_or_empty_chart_responses():
-    from mizan.errors import PopularChartUnavailable
+def test_global_playlist_parser_preserves_order_as_real_chart_rank():
+    payload = fixture_payloads()["globalTop100"]
+    result = popular.parse_playlist_response(
+        payload,
+        playlist_id=popular.GLOBAL_TOP_100_ID,
+        title="Top 100 Songs Global",
+        publisher="YouTube Music Global Charts",
+        ranked=True,
+    )
 
+    assert result["description"] == "This week's ranking of the most popular songs on YouTube."
+    assert result["chartDate"] == "20261010"
+    assert [row["rank"] for row in result["rows"]] == [1, 2]
+    assert result["rows"][0]["videoId"] == "fcnDmrtj6Sk"
+
+
+def test_playlist_parser_rejects_wrong_source_and_keeps_original_chart_positions():
+    payload = deepcopy(fixture_payloads()["globalTop100"])
+    payload["entries"].insert(1, deepcopy(payload["entries"][0]))
+    payload["entries"].append({
+        "id": "xvT1jH8B9AM",
+        "title": "KALYANI Official Music Video",
+        "channel": "MONEY VERSE RECORDS",
+    })
+    result = popular.parse_playlist_response(
+        payload,
+        playlist_id=popular.GLOBAL_TOP_100_ID,
+        title="Top 100 Songs Global",
+        publisher="YouTube Music Global Charts",
+        ranked=True,
+    )
+
+    assert [row["rank"] for row in result["rows"]] == [1, 3, 4]
+    payload["channel"] = "Unverified uploader"
     with pytest.raises(PopularChartUnavailable):
-        parse_chart_response({})
-
-    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    payload["contents"]["sectionListRenderer"]["contents"][0]["musicAnalyticsSectionRenderer"]["content"]["trackTypes"] = []
-    with pytest.raises(PopularChartUnavailable):
-        parse_chart_response(payload)
-
-
-def test_live_fetch_uses_keyless_global_chart_browse_request(monkeypatch):
-    payload = FIXTURE.read_bytes()
-    requests = []
-
-    class Response(io.BytesIO):
-        headers = {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            self.close()
-
-        def geturl(self):
-            return popular.CHARTS_API
-
-    class Opener:
-        def open(self, request, timeout):
-            requests.append((request, timeout))
-            return Response(payload)
-
-    monkeypatch.setattr(popular, "build_opener", lambda *_args: Opener())
-    result = popular.fetch_chart()
-
-    request, timeout = requests[0]
-    body = json.loads(request.data)
-    assert request.full_url == popular.CHARTS_API
-    assert timeout == 8
-    assert "key=" not in request.full_url
-    assert body["browseId"] == "FEmusic_analytics_charts_home"
-    assert json.loads(body["query"]) == {"region": "global"}
-    assert result["market"] == "global"
+        popular.parse_playlist_response(
+            payload,
+            playlist_id=popular.GLOBAL_TOP_100_ID,
+            title="Top 100 Songs Global",
+            publisher="YouTube Music Global Charts",
+            ranked=True,
+        )
 
 
-def test_chart_fetch_redirects_stay_on_the_official_https_host():
-    request = Request(popular.CHARTS_API)
-    handler = popular._ChartRedirects()
+def test_playlist_fetches_are_independent_and_preserve_partial_errors(monkeypatch):
+    def fetch(section):
+        if section["id"] == "hit-list":
+            return {**section, "status": "unavailable", "message": "playlist failed", "rows": []}
+        parsed = popular.parse_playlist_response(
+            fixture_payloads()["globalTop100"],
+            playlist_id=section["playlist_id"],
+            title=section["playlist_title"],
+            publisher=section["publisher"],
+            ranked=True,
+        )
+        return {**section, "status": "available", **parsed}
 
-    allowed = handler.redirect_request(request, io.BytesIO(), 302, "Found", {},
-                                       "https://charts.youtube.com/charts/TopSongs/global")
-    assert allowed.full_url == "https://charts.youtube.com/charts/TopSongs/global"
-    for target in ("http://charts.youtube.com/charts", "https://charts.youtube.com:444/charts",
-                   "https://charts.youtube.com.evil.example/charts"):
-        with pytest.raises(popular.PopularChartUnavailable):
-            handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, target)
+    monkeypatch.setattr(popular, "_fetch_playlist", fetch)
+    result = popular.fetch_popular_songs()
+
+    assert [section["status"] for section in result["sections"]] == ["unavailable", "available"]
+    assert result["sections"][0]["id"] == "hit-list"
+    assert result["sections"][1]["rows"][0]["rank"] == 1
 
 
-def test_popular_chart_host_cache_is_six_hours_and_stale_chart_is_visible(monkeypatch):
+def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
     now = [100.0]
-    fetched = []
-    chart = {
-        "title": "Top Songs", "period": "CHART_PERIOD_TYPE_WEEKLY",
-        "market": "global", "chartDate": "2026-10-03", "sourceUrl": popular.CHARTS_URL,
-        "rows": [],
+    feed = {
+        "title": "YouTube Music",
+        "sections": [
+            {"id": "hit-list", "status": "available", "rows": [{"videoId": "78wrful9cVU"}]},
+            {"id": "global-top-100", "status": "available", "rows": [{"videoId": "fcnDmrtj6Sk"}]},
+        ],
     }
+    fetched = []
     monkeypatch.setattr("mizan.api.monotonic", lambda: now[0])
-    monkeypatch.setattr("mizan.api.fetch_chart", lambda: fetched.append(1) or chart)
+    monkeypatch.setattr("mizan.api.fetch_popular_songs", lambda: fetched.append(1) or feed)
     try:
         first = bridge.popular_songs()
         now[0] += 60
@@ -108,25 +123,37 @@ def test_popular_chart_host_cache_is_six_hours_and_stale_chart_is_visible(monkey
         assert first["ok"] and second["ok"]
         assert first["fetchedAt"] == second["fetchedAt"]
         assert len(fetched) == 1
+        refreshed = bridge.popular_songs(True)
+        assert refreshed["ok"] and len(fetched) == 2
 
-        now[0] += 6 * 60 * 60 + 1
-        monkeypatch.setattr("mizan.api.fetch_chart",
-                            lambda: (_ for _ in ()).throw(popular.PopularChartUnavailable()))
+        now[0] += POPULAR_SONGS_CACHE_SECONDS + 1
+        monkeypatch.setattr("mizan.api.fetch_popular_songs", lambda: {
+            "title": "YouTube Music",
+            "sections": [
+                {"id": "hit-list", "status": "unavailable", "rows": []},
+                {"id": "global-top-100", "status": "unavailable", "rows": []},
+            ],
+        })
         stale = bridge.popular_songs()
-        assert stale["ok"] and stale["rows"] == []
-        assert "last fetched chart" in stale["warning"]
-        assert stale["fetchedAt"] == first["fetchedAt"]
+        assert stale["ok"]
+        assert stale["sections"] == feed["sections"]
+        assert "last playlist snapshot" in stale["warning"]
+        assert stale["fetchedAt"] == refreshed["fetchedAt"]
     finally:
         runner.close()
-
-
-def test_popular_chart_first_failure_returns_unavailable_error(monkeypatch):
+def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
-    monkeypatch.setattr("mizan.api.fetch_chart",
-                        lambda: (_ for _ in ()).throw(popular.PopularChartUnavailable()))
+    monkeypatch.setattr("mizan.api.fetch_popular_songs", lambda: {
+        "title": "YouTube Music",
+        "sections": [
+            {"id": "hit-list", "status": "unavailable", "rows": []},
+            {"id": "global-top-100", "status": "unavailable", "rows": []},
+        ],
+    })
     try:
         result = bridge.popular_songs()
-        assert result["error"]["code"] == "popular_chart_unavailable"
+        assert result["ok"]
+        assert [section["status"] for section in result["sections"]] == ["unavailable", "unavailable"]
     finally:
         runner.close()

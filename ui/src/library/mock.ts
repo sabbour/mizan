@@ -1,5 +1,5 @@
 import { buildSong } from '../workspace/song'
-import type { Entry, Folder, MidiSearchResult, ModelDownloads, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
+import type { Entry, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
 import { foldSearchText } from './searchText'
 
 // A stand-in host for the browser dev server: same calls and shapes as the Python bridge.
@@ -291,27 +291,67 @@ export const mockHost = {
       thumbnail: `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`,
     })) })
   },
-  popular_songs() {
-    const videos = [
-      { videoId: 'fOT0BUpITw8', title: 'BELLAKEO (Video Oficial) - Peso Pluma, Anitta', artist: 'Peso Pluma', thumbnail: 'https://i.ytimg.com/vi/fOT0BUpITw8/mqdefault.jpg' },
-      { videoId: 'NFvDHYMzj9U', title: 'Arcángel - FN8 (Video Lyric)', artist: 'Arcangel', thumbnail: 'https://i.ytimg.com/vi/NFvDHYMzj9U/mqdefault.jpg' },
-      { videoId: '8c7KOGxeY3w', title: 'POR EL CONTRARIO', artist: 'Becky G', thumbnail: 'https://i.ytimg.com/vi/8c7KOGxeY3w/mqdefault.jpg' },
-      { videoId: 'jWdxXdp8sZI', title: 'The Type', artist: 'Real Boston Richey', thumbnail: 'https://i.ytimg.com/vi/jWdxXdp8sZI/mqdefault.jpg' },
-      { videoId: 's6cdjJvGM2o', title: 'La Diabla', artist: 'Xavi Oficial', thumbnail: 'https://i.ytimg.com/vi/s6cdjJvGM2o/mqdefault.jpg' },
-      { videoId: 'w1-jss2mZlY', title: 'You Broke My Heart', artist: 'Drake', thumbnail: 'https://i.ytimg.com/vi/w1-jss2mZlY/mqdefault.jpg' },
-      { videoId: '885j2xO9VB8', title: 'Crazy', artist: 'Finesse2Tymes', thumbnail: 'https://i.ytimg.com/vi/885j2xO9VB8/mqdefault.jpg' },
-      { videoId: 'muzQ0r14L2Y', title: 'Shotta Flow 7 “FINAL”', artist: 'NLE Choppa', thumbnail: 'https://i.ytimg.com/vi/muzQ0r14L2Y/mqdefault.jpg' },
-    ]
-    return ok({
-      title: 'Popular Music Videos',
-      period: 'PLAYLIST',
-      market: 'global',
-      chartDate: '2026-07-17',
-      fetchedAt: '2026-07-17T00:00:00Z',
-      sourceUrl: 'https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+  popular_songs(_refresh = false) {
+    const hitList = [
+      ['78wrful9cVU', 'Olivia Rodrigo - drop dead (Official Music Video)', 'Olivia Rodrigo'],
+      ['nUsrYVxrDwI', "Ella Langley - Choosin' Texas (Official Video)", 'Ella Langley'],
+      ['fRIhCiUVaKs', 'KAROL G, Judeline, rusowsky - BbY WOW (Visualizer)', 'KAROL G'],
+      ['6KjVYeQ9SRw', 'Dracula', 'Tame Impala'],
+      ['3sur4BmjQt8', 'Olivia Dean - So Easy (To Fall In Love)', 'Olivia Dean'],
+      ['Rt9tW3cMLhI', 'Olivia Rodrigo - stupid song (Official Music Video)', 'Olivia Rodrigo'],
+      ['SD4yRDY9mek', 'Drake - Janice STFU', 'Drake'],
+      ['hDU4GB1PTxc', 'Taylor Swift - I Knew It, I Knew You (from Toy Story 5)', 'Taylor Swift'],
+      ['Dg47eNL_Usw', 'Ella Langley - Be Her (Official Video)', 'Ella Langley'],
+      ['uvY8fdgezLQ', 'Zara Larsson - Midnight Sun (Official Music Video)', 'Zara Larsson'],
+      ['v2ttAph6PhM', 'Stella Lefty - Boston (Lyric Video)', 'Stella Lefty'],
+      ['lIxQe1R5hs0', 'PinkPantheress - Stateside + Zara Larsson (Official Video)', 'Pinkpantheress'],
+    ].map(([videoId, title, artist]) => ({
+      videoId, title, artist,
+      thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    }))
+    const globalChart = [
+      ['fcnDmrtj6Sk', 'Shakira, Burna Boy - Dai Dai (Official Video)', 'Shakira'],
+      ['fRIhCiUVaKs', 'KAROL G, Judeline, rusowsky - BbY WOW (Visualizer)', 'KAROL G'],
+      ['xvT1jH8B9AM', 'KALYANI (with Shreya Ghoshal) OFFICIAL MUSIC VIDEO | ARJN | KDS | FIFTY4 | RONN | SHREYA GHOSHAL |', 'MONEY VERSE RECORDS'],
+      ['s2HYl12gmOY', 'Parvati - Full Song | Hanuman Ansh | Sadhu Tiwari | Shobhinaw Satyaa | In Cinemas Now', 'Times Music Spiritual'],
+      ['vRjaGgDsWSo', 'Casa Tupka Anthemo | @YoYoHoneySingh feat. Priyanshi | Full Video', 'Yo Yo Honey Singh'],
+      ['is8UDe2PhKQ', "KATSEYE (캣츠아이) 'Hootie Frutti' Official MV", 'HYBE LABELS'],
+      ['JqFzhcWo3EU', 'Yeshanagula | The Paradise | Nani | Keerthy Suresh | Anirudh Ravichander | Srikanth Odela', 'Saregama Telugu'],
+      ['vSA7yMrTETg', 'Xamdam Sobirov - Peshta / Хамдам Собиров - Пешта / Video Klip', 'Xamdam Sobirov'],
+    ].map(([videoId, title, artist], index) => ({
+      videoId, title, artist, rank: index + 1,
+      thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    }))
+    const snapshot: PopularChart = {
+      title: 'YouTube Music',
+      fetchedAt: '2026-10-10T08:49:51.327717+00:00',
       sample: true,
-      rows: videos.map((video) => ({ ...video, rank: 0 })),
-    })
+      sections: [
+        {
+          id: 'hit-list',
+          title: "Today's Biggest Hits — The Hit List",
+          publisher: 'YouTube Music',
+          sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs',
+          kind: 'editorial',
+          status: 'available',
+          description: "The home of today's biggest and hottest hits.",
+          chartDate: '20261010',
+          rows: hitList,
+        },
+        {
+          id: 'global-top-100',
+          title: 'Top 100 Songs Global',
+          publisher: 'YouTube Music Global Charts',
+          sourceUrl: 'https://music.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i',
+          kind: 'chart',
+          status: 'available',
+          description: "This week's ranking of the most popular songs on YouTube.",
+          chartDate: '20261010',
+          rows: globalChart,
+        },
+      ],
+    }
+    return ok(snapshot)
   },
   search_midi_commons(query: string) {
     const results: MidiSearchResult[] = [{

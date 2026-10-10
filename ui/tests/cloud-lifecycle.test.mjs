@@ -762,58 +762,99 @@ test('unified MIDI ranking folds accents and deduplicates only shared file ident
   assert.equal(groups.find((group) => group.sources.some((source) => source.id === 'mutopia:arrangement')).sources.length, 1)
 })
 
-test('popular chart cards use the fetched ranks and require an explicit Transcribe click', async () => {
-  const chart = {
-    title: 'Top Songs', period: 'CHART_PERIOD_TYPE_WEEKLY', market: 'global',
-    chartDate: '2026-10-03', fetchedAt: '2026-10-10T00:00:00Z',
-    sourceUrl: 'https://artists.youtube.com/charts/tracks',
-    rows: [{
-      videoId: 'aB_12-cD345', title: 'Chart song', artist: 'Chart artist',
-      rank: 1, thumbnail: 'https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg',
-    }],
+test('YouTube Music shelves keep chart ranks and require an explicit Transcribe click', async () => {
+  const feed = {
+    title: 'YouTube Music', fetchedAt: '2026-10-10T00:00:00Z',
+    sections: [
+      {
+        id: 'hit-list', title: "Today's Biggest Hits — The Hit List", publisher: 'YouTube Music',
+        sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs',
+        kind: 'editorial', status: 'available', description: "The home of today's biggest and hottest hits.",
+        chartDate: '20261010',
+        rows: [{
+          videoId: '78wrful9cVU', title: 'Hit List song', artist: 'Hit List artist',
+          thumbnail: 'https://i.ytimg.com/vi/78wrful9cVU/mqdefault.jpg',
+        }],
+      },
+      {
+        id: 'global-top-100', title: 'Top 100 Songs Global', publisher: 'YouTube Music Global Charts',
+        sourceUrl: 'https://music.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i',
+        kind: 'chart', status: 'available',
+        description: "This week's ranking of the most popular songs on YouTube.",
+        chartDate: '20261010',
+        rows: [{
+          videoId: 'aB_12-cD345', title: 'Chart song', artist: 'Chart artist',
+          rank: 1, thumbnail: 'https://i.ytimg.com/vi/aB_12-cD345/mqdefault.jpg',
+        }],
+      },
+    ],
   }
   const queued = []
-  const h = harness({ popularSongs: async () => chart })
+  const h = harness({ popularSongs: async () => feed })
   const view = h.render(h.load('Library.tsx').PopularMusic, {
     jobs: [], busy: false, pendingLinks: [], onTranscribe: async (url) => queued.push(url),
   })
   await view.settle()
 
-  assert.match(text(view.tree), /Weekly · Global chart · through/)
-  assert.match(text(view.tree), /YouTube Music uses the same ranks/)
-  assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 1)
+  assert.match(text(view.tree), /Today's Biggest Hits — The Hit List/)
+  assert.match(text(view.tree), /Top 100 Songs Global/)
+  assert.match(text(view.tree), /This week's ranking of the most popular songs on YouTube/)
+  assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 2)
   assert.ok(nodes(view.tree, (node) => node.type === 'a'
-    && node.props.href === 'https://music.youtube.com/watch?v=aB_12-cD345').length)
+    && node.props.href === 'https://music.youtube.com/watch?v=78wrful9cVU').length)
   assert.equal(queued.length, 0)
-  button(view.tree, 'Transcribe Chart song').props.onClick()
+  const transcribe = button(view.tree, 'Transcribe Chart song')
+  assert.equal(transcribe.props.type, 'button')
+  assert.equal(transcribe.props.tabIndex, undefined)
+  let stopped = false
+  transcribe.props.onClick({ stopPropagation() { stopped = true } })
   await view.settle()
+  assert.equal(stopped, true)
   assert.equal(queued[0], 'https://www.youtube.com/watch?v=aB_12-cD345')
   view.unmount()
 })
 
-test('popular chart errors remain visible and retryable without rendering fake songs', async () => {
+test('playlist failures remain visible and retryable without rendering fake songs', async () => {
   let attempts = 0
-  const chart = {
-    title: 'Top Songs', period: 'CHART_PERIOD_TYPE_WEEKLY', market: 'global',
-    chartDate: '2026-10-03', fetchedAt: '2026-10-10T00:00:00Z',
-    sourceUrl: 'https://artists.youtube.com/charts/tracks', rows: [],
+  const feed = {
+    title: 'YouTube Music', fetchedAt: '2026-10-10T00:00:00Z',
+    sections: [
+      {
+        id: 'hit-list', title: "Today's Biggest Hits — The Hit List", publisher: 'YouTube Music',
+        sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs',
+        kind: 'editorial', status: 'unavailable', description: '', chartDate: '',
+        message: 'YouTube Music could not load this playlist.', rows: [],
+      },
+      {
+        id: 'global-top-100', title: 'Top 100 Songs Global', publisher: 'YouTube Music Global Charts',
+        sourceUrl: 'https://music.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i',
+        kind: 'chart', status: 'available', description: "This week's ranking.", chartDate: '20261010',
+        rows: [{
+          videoId: 'fcnDmrtj6Sk', title: 'Fetched chart song', artist: 'Chart artist', rank: 1,
+          thumbnail: 'https://i.ytimg.com/vi/fcnDmrtj6Sk/mqdefault.jpg',
+        }],
+      },
+    ],
   }
   const h = harness({
     popularSongs: async () => {
-      if (attempts++ === 0) throw new h.HostError('Chart is rate limited')
-      return chart
+      if (attempts++ === 0) throw new h.HostError('YouTube Music is unavailable')
+      return feed
     },
   })
   const view = h.render(h.load('Library.tsx').PopularMusic, {
     jobs: [], busy: false, pendingLinks: [], onTranscribe: async () => {},
   })
   await view.settle()
-  assert.match(text(view.tree), /Chart is rate limited/)
+  assert.match(text(view.tree), /YouTube Music is unavailable/)
   assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 0)
-  button(view.tree, 'Retry chart').props.onClick()
+  button(view.tree, 'Retry playlists').props.onClick()
   await view.settle()
   await view.settle()
-  assert.match(text(view.tree), /Top Songs/)
+  assert.match(text(view.tree), /Top 100 Songs Global/)
+  assert.match(text(view.tree), /Today's Biggest Hits — The Hit List unavailable/)
+  assert.match(text(view.tree), /Fetched chart song/)
+  assert.equal(nodes(view.tree, (node) => node.props.className === 'popular-music-card').length, 1)
   assert.equal(attempts, 2)
   view.unmount()
 })

@@ -72,15 +72,16 @@ and returns canonical YouTube watch URLs for the existing transcription path.
 The UI merges the two video lists by ID and keeps each provider's loading or
 error status visible.
 
-The Library landing page lazily requests the official global **Top Songs**
-chart through the keyless YouTube Charts browse endpoint used by
-`artists.youtube.com/charts/tracks`. The `WEB_MUSIC_ANALYTICS` chart response
-supplies ranks, market, period, end date, titles, artists, and video IDs;
-YouTube Music uses the same ranks. The host caches the response in memory for
-six hours and shows the last successful chart with its date if refresh fails.
-The legacy chart page is a JavaScript shell and yt-dlp does not extract its
-entries; the first-party chart browse request uses no key or new dependency.
-Video links use the existing explicit Transcribe path.
+The Library landing page lazily fetches two public YouTube Music playlists in
+parallel through yt-dlp, without credentials or media downloads. The lead
+editorial shelf is **Today's Biggest Hits — The Hit List**; its playlist order
+is not presented as a chart. The secondary **Top 100 Songs Global** playlist
+is published by YouTube Music Global Charts, and its description and playlist
+order provide the chart label and ranks. Each shelf reports its own failure,
+so one unavailable playlist does not hide the other. Successful
+responses are cached in memory for six hours; a complete refresh failure shows
+the last successful snapshot and its date. Cards link to the source video on
+YouTube and YouTube Music, and only the explicit Transcribe button starts work.
 
 ### Single-user Azure GPU offload
 

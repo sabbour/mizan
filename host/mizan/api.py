@@ -18,12 +18,12 @@ from .errors import (InvalidSearch, MizanError, PipelineNotReady, YoutubeMusicSe
 from .jobs import ALL_STAGES, Job, JobRunner, JobStore
 from .library import public_entry
 from .paths import app_dir
-from .popular import CHARTS_URL, fetch_chart
+from .popular import fetch_popular_songs
 from .telemetry import UsageSampler
 from .youtube import parse_video_id
 
 logger = logging.getLogger(__name__)
-POPULAR_CHART_CACHE_SECONDS = 6 * 60 * 60
+POPULAR_SONGS_CACHE_SECONDS = 6 * 60 * 60
 STEM_LABELS = {
     "mix": "Full mix", "vocals": "Vocals", "piano": "Piano", "guitar": "Guitar",
     "bass": "Bass", "drums": "Drums", "other": "Other",
@@ -42,7 +42,7 @@ FIXES = {
     "folder_not_found": "Refresh the library and try again.",
     "youtube_search_failed": "Check your connection and retry.",
     "youtube_music_search_failed": "Check your connection and retry.",
-    "popular_chart_unavailable": "Try again later.",
+    "popular_playlist_unavailable": "Try again later.",
 }
 
 
@@ -175,9 +175,9 @@ class Api:
         self._add_link_lock = Lock()
         self._search_lock = Lock()
         self._youtube_music_search_lock = Lock()
-        self._popular_chart_lock = Lock()
-        self._popular_chart_fetch_lock = Lock()
-        self._popular_chart_cache: tuple[float, dict[str, Any]] | None = None
+        self._popular_songs_lock = Lock()
+        self._popular_songs_fetch_lock = Lock()
+        self._popular_songs_cache: tuple[float, dict[str, Any]] | None = None
         self._midi_result_lock = Lock()
         self._midi_results: dict[str, dict[str, Any]] = {}
         self._usage = UsageSampler()
@@ -383,34 +383,36 @@ class Api:
                 url, "youtube_music", self._youtube_music_search_lock, YoutubeMusicSearchFailed)}
         return response(search)
 
-    def popular_songs(self) -> dict[str, Any]:
-        def get_chart():
-            with self._popular_chart_lock:
-                cached = self._popular_chart_cache
-                if cached and monotonic() - cached[0] < POPULAR_CHART_CACHE_SECONDS:
+    def popular_songs(self, refresh: bool = False) -> dict[str, Any]:
+        def get_songs():
+            with self._popular_songs_lock:
+                cached = self._popular_songs_cache
+                if (not refresh and cached
+                        and monotonic() - cached[0] < POPULAR_SONGS_CACHE_SECONDS):
                     return {"ok": True, **cached[1]}
-            with self._popular_chart_fetch_lock:
-                with self._popular_chart_lock:
-                    cached = self._popular_chart_cache
-                    if cached and monotonic() - cached[0] < POPULAR_CHART_CACHE_SECONDS:
+            with self._popular_songs_fetch_lock:
+                with self._popular_songs_lock:
+                    cached = self._popular_songs_cache
+                    if (not refresh and cached
+                            and monotonic() - cached[0] < POPULAR_SONGS_CACHE_SECONDS):
                         return {"ok": True, **cached[1]}
                 try:
-                    chart = fetch_chart()
+                    songs = fetch_popular_songs()
                 except MizanError:
                     if cached:
                         return {"ok": True, **cached[1],
-                                "warning": "The official chart is unavailable; showing the last fetched chart and its date."}
+                                "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
                     raise
+                if (cached and songs.get("sections")
+                        and all(section.get("status") == "unavailable" for section in songs["sections"])):
+                    return {"ok": True, **cached[1],
+                            "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
                 fetched_at = datetime.now(timezone.utc).isoformat()
-                result = {
-                    **chart,
-                    "fetchedAt": fetched_at,
-                    "sourceUrl": CHARTS_URL,
-                }
-                with self._popular_chart_lock:
-                    self._popular_chart_cache = (monotonic(), result)
+                result = {**songs, "fetchedAt": fetched_at}
+                with self._popular_songs_lock:
+                    self._popular_songs_cache = (monotonic(), result)
                 return {"ok": True, **result}
-        return response(get_chart)
+        return response(get_songs)
 
     def _remember_midi_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self._midi_result_lock:

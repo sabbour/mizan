@@ -27,8 +27,8 @@ class YoutubeMusicSearchFailed(MizanError):
 
 
 class PopularChartUnavailable(MizanError):
-    code = "popular_chart_unavailable"
-    message = "The official YouTube music chart is unavailable right now."
+    code = "popular_playlist_unavailable"
+    message = "The official YouTube Music Global Charts playlist is unavailable right now."
 
 
 class MidiSearchFailed(MizanError):
