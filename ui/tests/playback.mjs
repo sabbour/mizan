@@ -7,6 +7,7 @@
 // Add --timing for scheduled note onsets and active noteheads at normal and half speed.
 // Add --scroll-follow to check score follow visibility only.
 // Add --meter to check changing-meter engraving and workspace navigation.
+// Add --instrument for instrument scores, saved practice views and continuous part switching.
 // MIZAN_TEST_OPENED optionally points to a live Api.open_song JSON response for the Cairokee benchmark.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
@@ -15,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { analysisChecks, vocalChecks } from './vocal-analysis.mjs'
 import { instrumentChecks } from './instrument-workspace.mjs'
+import { practiceChecks } from './practice-workspace.mjs'
 import { browserMeterChecks } from './meter.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -25,9 +27,16 @@ spawn(process.env.MIZAN_TEST_BROWSER ?? 'C:\\Program Files (x86)\\Microsoft\\Edg
   '--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
   '--autoplay-policy=no-user-gesture-required', '--no-first-run', 'about:blank',
 ], { stdio: 'ignore' })
-let socket
-let onBinding
-try {
+const stopOwnedBrowsers = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `
+    $all = Get-CimInstance Win32_Process
+    $owned = $all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('${profile.replaceAll("'", "''")}') }
+    function Stop-TestBrowser([int]$parentId) {
+      foreach ($child in ($all | Where-Object ParentProcessId -eq $parentId)) { Stop-TestBrowser $child.ProcessId }
+      Stop-Process -Id $parentId -ErrorAction SilentlyContinue
+    }
+    foreach ($ownedProcess in $owned) { Stop-TestBrowser $ownedProcess.ProcessId }
+  `], { stdio: 'ignore', timeout: 15000 })
+const connectBrowser = async () => {
   let port
   for (let attempt = 0; attempt < 100; attempt++) {
     try { port = Number((await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); break } catch { await sleep(100) }
@@ -35,21 +44,45 @@ try {
   assert.ok(port, 'Edge debugging endpoint started')
   // A managed browser can open its own pages (such as a sync dialog) first: use the blank tab this run opened.
   let blank
+  let startupError
   for (let attempt = 0; attempt < 50 && !blank; attempt++) {
-    const targets = await (await fetch(`http://localhost:${port}/json/list`)).json()
-    for (const target of targets) if (target.type === 'page' && target.url.startsWith('edge://')) await fetch(`http://localhost:${port}/json/close/${target.id}`)
+    let targets
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) })
+      if (!response.ok) throw new Error(`Edge debugging endpoint returned ${response.status}`)
+      targets = await response.json()
+    } catch (error) {
+      if (!startupError) console.warn('Waiting for the isolated Edge debugging endpoint:', error.message)
+      startupError = error
+      await sleep(100)
+      continue
+    }
+    for (const target of targets) if (target.type === 'page' && target.url.startsWith('edge://')) await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`)
     blank = targets.find((target) => target.type === 'page' && target.url === 'about:blank')
     if (!blank) await sleep(100)
   }
-  assert.ok(blank, 'The browser opened its blank tab')
-  socket = new WebSocket(blank.webSocketDebuggerUrl)
-  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
+  assert.ok(blank, `The browser opened its blank tab${startupError ? `: ${startupError.message}` : ''}`)
+  const address = new URL(blank.webSocketDebuggerUrl)
+  address.hostname = '127.0.0.1'
+  const connected = new WebSocket(address.href)
+  await new Promise((resolve, reject) => { connected.onopen = resolve; connected.onerror = reject })
+  return connected
+}
+let socket
+let onBinding
+try {
+  socket = await connectBrowser()
   let sequence = 0
   const pending = new Map()
+  const runtimeErrors = []
   socket.onmessage = ({ data }) => {
     const message = JSON.parse(data)
     if (message.id) pending.get(message.id)?.finish(message)
-    if (message.method === 'Runtime.exceptionThrown') console.error(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text)
+    if (message.method === 'Runtime.exceptionThrown') {
+      const error = message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text
+      runtimeErrors.push(error)
+      console.error(error)
+    }
     if (message.method === 'Runtime.bindingCalled') onBinding?.(message.params)
   }
   socket.onclose = () => {
@@ -114,6 +147,8 @@ try {
   }
   if (courseOnly) {
     console.log(await evaluate(`(${backingChecks.toString()})()`))
+    await call('Page.navigate', { url: testUrl })
+    for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
       console.log(await evaluate(`(${courseChecks.toString()})(${width}, 'session')`))
@@ -134,7 +169,14 @@ try {
       console.log(await evaluate(`(${layoutChecks.toString()})(${width})`))
     }
   }
-  if (instrumentOnly) console.log(await evaluate(`(${instrumentChecks.toString()})()`))
+  if (instrumentOnly) {
+    console.log(await evaluate(`(${instrumentChecks.toString()})()`))
+    console.log(await evaluate(`(${practiceChecks.toString()})('session')`))
+    await call('Page.reload')
+    for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
+    console.log(await evaluate(`(${practiceChecks.toString()})('restart')`))
+    assert.deepEqual(runtimeErrors, [], 'Instrument and practice checks have no uncaught browser errors')
+  }
   if (meterOnly) console.log(await evaluate(`(${browserMeterChecks.toString()})()`))
   if (readabilityOnly) {
     assert.ok(process.env.MIZAN_TEST_CAIROKEE_ANALYSIS, 'Set MIZAN_TEST_CAIROKEE_ANALYSIS to the read-only saved analysis JSON')
@@ -241,18 +283,10 @@ try {
     socket.send(JSON.stringify({ id: -1, method: 'Browser.close' }))
     await sleep(1000)
   }
-  execFileSync('powershell.exe', ['-NoProfile', '-Command', `
-      $all = Get-CimInstance Win32_Process
-      $owned = $all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('${profile.replaceAll("'", "''")}') }
-      function Stop-TestBrowser([int]$parentId) {
-        foreach ($child in ($all | Where-Object ParentProcessId -eq $parentId)) { Stop-TestBrowser $child.ProcessId }
-        Stop-Process -Id $parentId -ErrorAction SilentlyContinue
-      }
-      foreach ($ownedProcess in $owned) { Stop-TestBrowser $ownedProcess.ProcessId }
-    `], { stdio: 'ignore', timeout: 15000 })
+  stopOwnedBrowsers()
   socket?.close()
   await sleep(1000)
-  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
   console.log('Playback checks finished; test resources removed.')
 }
 
@@ -1708,8 +1742,10 @@ async function backingChecks() {
     check(programs.every((program) => engine.gmSamples.get(program)?.length), `Backing samples decode for GM programs ${programs}`)
     check(requests.length > 0 && requests.every(({ status }) => status === 200), `Backing samples load locally: ${JSON.stringify(requests.map((r) => r.status))}`)
     // One clock: the bass and the drums at beat 0 are scheduled for the same instant; the chords follow at their written offset.
-    await wait(200)
     const first = (id) => calls.find((call) => call.id === id)
+    const readyBy = performance.now() + 5000
+    while (!['drums', 'bass', 'harmony'].every((id) => first(id)) && performance.now() < readyBy) await wait(25)
+    check(['drums', 'bass', 'harmony'].every((id) => first(id)), `All backing parts are scheduled: ${JSON.stringify(calls)}`)
     const spb = engine.seconds(0, 1)
     const kick = calls.find((call) => call.id === 'drums' && call.beat === 0)
     check(Math.abs(first('bass').time - kick.time) < 1e-6, `Bass and drums share beat 0 (${first('bass').time} vs ${kick.time})`)
@@ -1881,6 +1917,7 @@ async function pianoChecks(width) {
   const playButton = () => document.querySelector('.ws-foot .play')
   const piano = () => document.querySelector('.practice-piano')
   const keysBefore = new Set(Object.keys(localStorage))
+  const practiceBefore = localStorage.getItem('mizan:practice')
   await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
   const tab = document.querySelector('.lib-tabs [data-tab="course"]')
   check(tab.textContent === 'Course287', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
@@ -2134,22 +2171,24 @@ async function pianoChecks(width) {
   document.querySelector('.lesson-nav button:last-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: repeated eighth-note chords', 'The next piano lesson opens again')
   await wait(() => fresh('score') && !hands() && !piano(), `Next keeps the score on its own (${view()})`)
-  // Leaving the lessons forgets the choice: the next lesson opened from the list starts on the 3D keyboard.
+  // Leaving the lessons keeps the chosen view for the next lesson opened from the list.
   document.querySelector('.ws-back').click()
   await wait(() => document.querySelector('#course-piano'), 'Back to the piano lessons')
   await open('R&B and soul piano: chords on the four beats')
-  await wait(() => fresh('keyboard') && piano()?.dataset.ready === 'true', `A lesson opened from the list starts on the 3D keyboard (${view()})`)
+  await wait(() => fresh('score') && !hands() && !piano(), `A lesson opened from the list keeps the score on its own (${view()})`)
   document.querySelector('.ws-back').click()
   await wait(() => document.querySelector('#course-piano') && document.querySelector('.course-genre-option[aria-checked="true"]')?.dataset.genre === 'R&B and soul',
     'Back returns to the piano lessons of the same genre')
   const added = Object.keys(localStorage).filter((key) => !keysBefore.has(key))
-  check(added.every((key) => key.startsWith('mizan:course:position:piano-') || key.startsWith('mizan:mixer:course:piano-')), `Only lesson places and mixers are stored: ${added}`)
-  check(!localStorage.getItem('mizan:practice') || Object.keys(JSON.parse(localStorage.getItem('mizan:practice'))).every((key) => ['countIn', 'rate', 'click', 'sticking', 'kitStyle'].includes(key)),
-    'The instrument and look are not stored')
+  check(added.every((key) => key.startsWith('mizan:course:position:piano-') || key.startsWith('mizan:mixer:course:piano-') || key === 'mizan:practice'), `Only lesson places, mixers and practice preferences are stored: ${added}`)
+  const savedPractice = JSON.parse(localStorage.getItem('mizan:practice'))
+  check(savedPractice.pianoView === 'score' && Object.keys(savedPractice).every((key) => ['countIn', 'rate', 'click', 'sticking', 'kitStyle', 'pianoView', 'drumsView'].includes(key)),
+    'The piano view is remembered without new instrument or look preferences')
   for (const key of added) localStorage.removeItem(key)
+  if (practiceBefore !== null) localStorage.setItem('mizan:practice', practiceBefore)
   document.querySelector('.course-instrument [data-instrument="drums"]').click()
   return `Piano checks passed at ${width}px: course switch and counts, piano lesson defaults (piano part, 3D stage piano), written fingers on keys, chord and pedal, ` +
-    `keys rest when paused and press while playing, keybed framing, 4 looks without moving playback, solid blueprint keys, mixer, Hands & keys glow and pulse, next lesson, nothing new stored.`
+    `keys rest when paused and press while playing, keybed framing, 4 looks without moving playback, solid blueprint keys, mixer, Hands & keys glow and pulse, saved view across lessons.`
 }
 
 async function layoutChecks(width) {
@@ -2255,12 +2294,15 @@ async function courseChecks(width, phase) {
     check(pressed('Count-in') === 'false' && pressed('Click') === 'false' && pressed('Sticking') === 'false',
       `Count-in, click and sticking stay off after a restart (${pressed('Count-in')}, ${pressed('Click')}, ${pressed('Sticking')})`)
     check(/75 bpm · 75%/.test(where()), `The chosen speed survives a restart: ${where()}`)
+    check(document.querySelector('.chordview-option[data-view="score"]')?.getAttribute('aria-checked') === 'true' && !document.querySelector('.practice-kit'),
+      'The chosen drum score view survives a restart')
+    document.querySelector('.chordview-option[data-view="kit"]').click()
     await wait(() => document.querySelector('.practice-kit')?.dataset.style === 'acoustic:ClayStudyModel', 'The kit and look survive a restart')
     toggle('Count-in').click(); toggle('Click').click(); toggle('Sticking').click()
     await wait(() => pressed('Sticking') === 'true' && document.querySelector('.kit-hand'), 'Sticking returns with its legend')
     await back()
     const saved = JSON.parse(localStorage.getItem('mizan:practice'))
-    check(Object.keys(saved).length === 5 && saved.kitStyle === 'acoustic:ClayStudyModel' && saved.countIn === true && saved.rate === 0.75 && saved.click === true && saved.sticking === true,
+    check(Object.keys(saved).length === 6 && saved.drumsView === 'kit' && saved.kitStyle === 'acoustic:ClayStudyModel' && saved.countIn === true && saved.rate === 0.75 && saved.click === true && saved.sticking === true,
       `Preferences saved: ${localStorage.getItem('mizan:practice')}`)
     for (const key of Object.keys(localStorage)) if (key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:course:') || key === 'mizan:practice') localStorage.removeItem(key)
     return `Course restart checks passed at ${width}px: count-in, click, sticking and speed restored after reload, then reset.`
@@ -2494,7 +2536,7 @@ async function courseChecks(width, phase) {
   await wait(() => guide() === 'score', 'The drum score on its own before leaving')
   await back()
   await openLesson('Ghost notes in a groove')
-  await wait(() => guide() === 'kit' && document.querySelector('.practice-kit'), `A lesson opened from the list starts on the kit again (${guide()})`)
+  await wait(() => guide() === 'score' && !document.querySelector('.practice-kit'), `A lesson opened from the list keeps the drum score view (${guide()})`)
   check(pressed('Click') === 'false' && pressed('Sticking') === 'false' && pressed('Count-in') === 'false', 'The choices follow to another lesson, overriding its defaults')
   check(/60 bpm · 75%/.test(where()), `Speed follows too: ${where()}`)
   await wait(() => document.querySelectorAll('.score-ghost').length === 8 && document.querySelectorAll('.score-ghost-paren').length === 16,
@@ -2502,7 +2544,7 @@ async function courseChecks(width, phase) {
   await back()
   check(tabs()[1].getAttribute('aria-selected') === 'true', 'Back from a lesson returns to the Drum course tab')
   await showTab('songs')
-  // Song: a suggested sticking, and choosing another track starts it from the top.
+  // Song: a suggested sticking, and choosing another track keeps its position.
   const song = [...document.querySelectorAll('.song-open')].find((element) => element.textContent.includes('Paper Rain'))
   check(song, 'Library has a song to open')
   song.click()
@@ -2515,7 +2557,7 @@ async function courseChecks(width, phase) {
   document.querySelector('.track-button').click()
   await wait(() => document.querySelector('.track-menu'), 'The track menu opens')
   ;[...document.querySelectorAll('.track-item[role="menuitemradio"]')].find((element) => element.textContent.includes('Drum kit')).click()
-  await wait(() => bar() === 1 && toggle('Sticking'), `Choosing another track starts it at bar 1 (${where()})`)
+  await wait(() => bar() === 3 && toggle('Sticking'), `Choosing another track keeps bar 3 (${where()})`)
   check(pressed('Click') === 'false', 'The song opens with the saved click choice')
   toggle('Sticking').click()
   await wait(() => document.querySelectorAll('.score-hand-right').length > 4, 'The song shows suggested sticking letters')
@@ -2528,5 +2570,5 @@ async function courseChecks(width, phase) {
   check(added.every((key) => key.startsWith('mizan:course:') || key.startsWith('mizan:mixer:') || key === 'mizan:practice'), `Lesson state is namespaced: ${added}`)
   check(JSON.parse(after['mizan:course:position:snare-fill']).rate === 0.75, 'The lesson keeps the practised speed')
   return `Course checks passed at ${width}px: sections, lesson defaults, sticking letters and legend, speed, view change keeps position, ` +
-    'lesson change from paused and playing starts at bar 1, count-in/click/sticking/speed follow lessons, ghost parentheses, track change resets, suggested sticking.'
+    'lesson change from paused and playing starts at bar 1, count-in/click/sticking/speed and views follow lessons, ghost parentheses, track change keeps position, suggested sticking.'
 }

@@ -62,7 +62,9 @@ The library searches saved songs first, then YouTube after a short pause. Search
 
 The job panel shows total and per-step time. Instrument bars show isolated-stem loudness. CPU and RAM readouts cover the host and transcription worker.
 
-The Sounds and tracks picker groups **Transcribed** scores, **Creative** practice parts, and **Recording** audio. Use mute, solo, and volume on each row. **Synth only** plays score notes; **Original only** plays the full recording. Selecting a score changes the view. You can delete a transcribed score while keeping its recording.
+The Sounds and tracks picker groups **Transcribed** scores, **Creative** practice parts, and **Recording** audio. Use mute, solo, and volume on each row. **Synth only** plays score notes; **Original only** plays the full recording. When you select another score, playback keeps its position. When you open a different song or lesson, playback stops. The new piece opens from the top. You can delete a transcribed score while keeping its recording.
+
+Mizan remembers your piano view (**Score**, **Hands & keys**, or **3D keyboard**) and drum view (**Score** or **Drum kit**) separately. These choices apply across songs, lessons, and app restarts. A song without that instrument does not change its saved view. If a 3D view cannot load, its flat guide appears without replacing your saved choice.
 
 While paused, select a chord name or shape to hear it. During playback, chord clicks seek to that point. **Follow Melody** builds a practice line from the lead melody; **Follow Chords** builds one from chord tones.
 

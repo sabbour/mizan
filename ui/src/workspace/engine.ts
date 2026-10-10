@@ -334,6 +334,12 @@ export class Engine {
     void this.prepare(countIn)
   }
 
+  /** Lead the selected score without rebuilding the recording or restarting its clock. */
+  selectPart(id: string | null): void {
+    this.selectedPart = id
+    this.updateMix()
+  }
+
   refreshMix(): void {
     this.updateMix()
     if (!this.playing || !this.recording) return

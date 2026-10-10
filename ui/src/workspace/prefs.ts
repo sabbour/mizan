@@ -1,7 +1,9 @@
 /**
- * Choices that follow the player across songs, lessons and restarts: count-in, speed, click, the sticking letters
- * and the drum kit's look. Each is stored only when the player changes it, so an absent value keeps the default.
+ * Choices that follow the player across songs, lessons and restarts. Each is stored only when the player changes it,
+ * so an absent value keeps the default.
  */
+import type { PracticeView } from './PracticeViewPicker'
+
 export type KitType = 'acoustic' | 'electronic'
 export const KIT_TYPES: KitType[] = ['electronic', 'acoustic']
 /** Looks apply to either kit and draw its full geometry. `ClayStudyModel` is shown as "Hand-painted clay". */
@@ -20,7 +22,15 @@ export const splitKitStyle = (style: KitStyle) => {
   const [kit, look] = style.split(':') as [KitType, Look]
   return { kit, look }
 }
-export type PracticePrefs = { countIn?: boolean; rate?: number; click?: boolean; sticking?: boolean; kitStyle?: KitStyle }
+export type PracticePrefs = {
+  countIn?: boolean
+  rate?: number
+  click?: boolean
+  sticking?: boolean
+  kitStyle?: KitStyle
+  pianoView?: Exclude<PracticeView, 'kit'>
+  drumsView?: Extract<PracticeView, 'score' | 'kit'>
+}
 
 const KEY = 'mizan:practice'
 const SWITCHES = ['countIn', 'click', 'sticking'] as const
@@ -48,6 +58,14 @@ function read(warn: boolean): PracticePrefs {
     if (!(key in saved)) continue
     if (typeof saved[key] === 'boolean') prefs[key] = saved[key]
     else if (warn) console.warn(`Ignoring the saved ${key} preference; it is not on or off.`, saved[key])
+  }
+  if ('pianoView' in saved) {
+    if (saved.pianoView === 'score' || saved.pianoView === 'hands' || saved.pianoView === 'keyboard') prefs.pianoView = saved.pianoView
+    else if (warn) console.warn('Ignoring the saved piano view; it is not one of the offered views.', saved.pianoView)
+  }
+  if ('drumsView' in saved) {
+    if (saved.drumsView === 'score' || saved.drumsView === 'kit') prefs.drumsView = saved.drumsView
+    else if (warn) console.warn('Ignoring the saved drum view; it is not one of the offered views.', saved.drumsView)
   }
   if ('kitStyle' in saved) {
     if (KIT_STYLES.includes(saved.kitStyle as KitStyle)) prefs.kitStyle = saved.kitStyle as KitStyle

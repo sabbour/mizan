@@ -33,12 +33,10 @@ type Props = {
   onBack?: () => void
   onDeleteTrack?: (trackId: string) => Promise<void>
   analysisNotice?: ReactNode
-  /** Starting choices for this song only, e.g. a drum lesson opens with the click on and the 3D kit. */
+  /** Starting choices when the player has not saved preferences, e.g. a drum lesson opens with the 3D kit. */
   defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView; noteNames?: boolean; fingering?: boolean }
   /** Told when Note letters or Fingering change, so the next lesson can keep them. */
   onGuides?: (guides: { noteNames: boolean; fingering: boolean }) => void
-  /** Told when the player picks a piano or drum practice view, so the next lesson can open on it. */
-  onPracticeView?: (instrument: 'piano' | 'drums', view: PracticeView) => void
 }
 
 const DEMO = buildSong()
@@ -47,7 +45,7 @@ const EMPTY_STEMS: Stem[] = []
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onPracticeView, onGuides,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onGuides,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
@@ -72,7 +70,10 @@ export function Workspace({
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
-  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: defaults?.piano ?? 'score', drums: defaults?.drums ?? 'score' })
+  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({
+    piano: prefs.pianoView ?? defaults?.piano ?? 'score',
+    drums: prefs.drumsView ?? defaults?.drums ?? 'score',
+  })
   const [noteNames, setNoteNames] = useState(defaults?.noteNames ?? false)
   // Finger numbers on the piano keyboards; on unless the player turned them off.
   const [fingering, setFingering] = useState(defaults?.fingering ?? true)
@@ -222,10 +223,12 @@ export function Workspace({
     engine.refresh()
   }, [engine, rate, loop, click, voiced, song, creative])
   useEffect(() => {
-    // The selected part leads the mix a little; a part alone (solo) has nothing to lead over.
-    Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)), selectedPart: track?.id ?? null })
+    Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)) })
     engine.refreshMix()
-  }, [engine, silent, volumes, track?.id])
+  }, [engine, silent, volumes])
+  useEffect(() => {
+    engine.selectPart(track?.id ?? null)
+  }, [engine, track?.id])
   useEffect(() => {
     engine.countIn = countIn
   }, [engine, countIn])
@@ -353,13 +356,6 @@ export function Workspace({
   const toggleSticking = useCallback(() => setShowSticking((on) => { savePref('sticking', !on); return !on }), [])
   // A look only: the engine, position and sounds are untouched.
   const chooseKitStyle = useCallback((style: KitStyle) => { setKitStyle(style); savePref('kitStyle', style) }, [])
-  // Choosing another track starts it from the beginning, stopped, like opening a new piece.
-  const chooseTrack = useCallback((id: string) => {
-    if (id === track?.id) return
-    engine.pause()
-    engine.seek(0)
-    setTrackId(id)
-  }, [engine, track])
   const setVolume = useCallback((id: string, value: number) => {
     setVolumes((current) => ({ ...current, [id]: Math.max(0, Math.min(1.25, value)) }))
   }, [])
@@ -475,14 +471,14 @@ export function Workspace({
           <PracticeViewPicker instrument={instrument} value={practice[instrument]}
             onChange={(view) => {
               setPractice((current) => ({ ...current, [instrument]: view }))
-              onPracticeView?.(instrument, view)
+              savePref(instrument === 'piano' ? 'pianoView' : 'drumsView', view)
             }} />
         )}
         <TrackPicker
           tracks={tracks}
           stems={visibleStems}
           value={track?.id ?? ''}
-          onChange={chooseTrack}
+          onChange={setTrackId}
           onDelete={onDeleteTrack ? async (id) => {
             engine.pause()
             await onDeleteTrack(id)
