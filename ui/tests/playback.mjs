@@ -2000,12 +2000,26 @@ async function pianoChecks(width) {
   const still = []
   for (let i = 0; i < 6; i++) { still.push(hands().querySelector('canvas').getContext('2d').getImageData(0, 0, 40, 40).data.join()); await sleep(80) }
   check(new Set(still).size === 1, 'Paused, nothing pulses')
-  document.querySelector('.chordview-option[data-view="keyboard"]').click()
-  await wait(() => piano()?.dataset.ready === 'true', 'Back to the 3D keyboard')
-  // Next lesson: from the top, stopped, still on the keyboard.
+  // Next and Previous keep the guide the player chose (here Hands & keys), each lesson from the top and stopped.
+  const view = () => document.querySelector('.chordview-option[aria-checked="true"]')?.dataset.view
+  const fresh = (guide) => bar() === 1 && playButton().getAttribute('aria-label') === 'Play' && view() === guide &&
+    document.querySelector('.track-button')?.textContent.includes('Piano')
   document.querySelector('.lesson-nav button:last-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: repeated eighth-note chords', 'The next piano lesson opens')
-  await wait(() => bar() === 1 && playButton().getAttribute('aria-label') === 'Play' && piano()?.dataset.ready === 'true', 'It starts at bar 1, stopped, on the 3D keyboard')
+  await wait(() => fresh('hands') && hands() && !piano(), `Next keeps Hands & keys, on the piano part, at bar 1, stopped (${view()})`)
+  document.querySelector('.lesson-nav button:first-child').click()
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: chords on the four beats', 'The previous piano lesson opens')
+  await wait(() => fresh('hands') && hands(), `Previous keeps Hands & keys (${view()})`)
+  document.querySelector('.chordview-option[data-view="score"]').click()
+  await wait(() => view() === 'score' && !hands() && !piano(), 'Score on its own')
+  document.querySelector('.lesson-nav button:last-child').click()
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'R&B and soul piano: repeated eighth-note chords', 'The next piano lesson opens again')
+  await wait(() => fresh('score') && !hands() && !piano(), `Next keeps the score on its own (${view()})`)
+  // Leaving the lessons forgets the choice: the next lesson opened from the list starts on the 3D keyboard.
+  document.querySelector('.ws-back').click()
+  await wait(() => document.querySelector('#course-piano'), 'Back to the piano lessons')
+  await open('R&B and soul piano: chords on the four beats')
+  await wait(() => fresh('keyboard') && piano()?.dataset.ready === 'true', `A lesson opened from the list starts on the 3D keyboard (${view()})`)
   document.querySelector('.ws-back').click()
   await wait(() => document.querySelector('#course-piano') && document.querySelector('.course-genre-option[aria-checked="true"]')?.dataset.genre === 'R&B and soul',
     'Back returns to the piano lessons of the same genre')
@@ -2196,10 +2210,23 @@ async function courseChecks(width, phase) {
     check(bar() === 3 && playButton().getAttribute('aria-label') === 'Play', `Changing the kit style does not move or start playback (${where()})`)
     check(JSON.parse(localStorage.getItem('mizan:practice')).kitStyle === style, 'The kit style is remembered')
   }
-  // Changing lesson starts the new one at bar 1, stopped, at the speed the player chose.
+  // Next and Previous keep the drum guide the player chose: the score on its own stays the score on its own.
+  const guide = () => document.querySelector('.chordview-option[aria-checked="true"]')?.dataset.view
+  const drumPart = document.querySelector('.track-button')?.textContent
+  const fresh = (title, view) => document.querySelector('.ws-song')?.textContent === title && bar() === 1 && playButton().getAttribute('aria-label') === 'Play' &&
+    guide() === view && document.querySelector('.track-button')?.textContent === drumPart && !document.querySelector('.practice-kit') === (view === 'score')
+  document.querySelector('.chordview-option[data-view="score"]').click()
+  await wait(() => guide() === 'score' && !document.querySelector('.practice-kit'), 'The drum score on its own')
+  document.querySelector('.lesson-nav button:last-child').click()
+  await wait(() => fresh('Lesson 24: Fill around the toms', 'score'), `Next keeps the drum score on its own, on the drums, at bar 1, stopped (${guide()}, ${where()})`)
+  document.querySelector('.lesson-nav button:first-child').click()
+  await wait(() => fresh('Lesson 23: Groove, fill, crash', 'score'), `Previous keeps the drum score on its own (${guide()}, ${where()})`)
+  document.querySelector('.chordview-option[data-view="kit"]').click()
+  await wait(() => guide() === 'kit' && document.querySelector('.practice-kit'), 'Back to the kit')
+  // Changing lesson starts the new one at bar 1, stopped, at the speed the player chose, still on the kit.
   document.querySelector('.lesson-nav button:last-child').click()
   await wait(() => document.querySelector('.ws-song')?.textContent === 'Lesson 24: Fill around the toms', 'Next lesson opens')
-  await wait(() => /75 bpm · 75%/.test(where()) && bar() === 1, `The next lesson starts at bar 1 at the chosen speed: ${where()}`)
+  await wait(() => /75 bpm · 75%/.test(where()) && bar() === 1 && fresh('Lesson 24: Fill around the toms', 'kit'), `The next lesson starts at bar 1 at the chosen speed, on the kit: ${where()}`)
   const toms = () => [...document.querySelectorAll('.kit-pill[data-piece]')].map((pill) => pill.textContent).filter((name) => /tom/i.test(name))
   await wait(() => toms().join('|') === 'Tom 1|Tom 2|Floor tom', `The tom fill uses the five-piece kit's three toms: ${toms()}`)
   // While playing: changing lesson stops the old one and starts the new one from the top, not playing.
@@ -2253,8 +2280,11 @@ async function courseChecks(width, phase) {
   toggle('Click').click(); toggle('Sticking').click(); toggle('Count-in').click()
   await wait(() => !document.querySelector('.score-hand-left') && !document.querySelector('.kit-hand'), 'Sticking off hides the letters and hand legend')
   check(document.querySelector('.ws-where') && toggle('Sticking').querySelector('.toggle-state').textContent === 'off', 'Sticking reads off')
+  document.querySelector('.chordview-option[data-view="score"]').click()
+  await wait(() => guide() === 'score', 'The drum score on its own before leaving')
   await back()
   await openLesson('Ghost notes in a groove')
+  await wait(() => guide() === 'kit' && document.querySelector('.practice-kit'), `A lesson opened from the list starts on the kit again (${guide()})`)
   check(pressed('Click') === 'false' && pressed('Sticking') === 'false' && pressed('Count-in') === 'false', 'The choices follow to another lesson, overriding its defaults')
   check(/60 bpm · 75%/.test(where()), `Speed follows too: ${where()}`)
   await wait(() => document.querySelectorAll('.score-ghost').length === 8 && document.querySelectorAll('.score-ghost-paren').length === 16,

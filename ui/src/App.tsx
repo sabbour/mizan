@@ -1,6 +1,7 @@
 import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
+import type { PracticeView } from './workspace/PracticeViewPicker'
 import { Library, type LibraryTab } from './library/Library'
 import { JobPanel } from './library/JobPanel'
 import { Credits } from './Credits'
@@ -15,6 +16,7 @@ import { pianoLessonById, pianoLessonNote, pianoLessonSong } from './course/pian
 import { lessonPosition, saveLessonPosition } from './course/state'
 
 type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
+type LessonViews = { piano?: PracticeView; drums?: PracticeView }
 
 const NOTE: Record<Entry['source'], string> = { youtube: 'Draft transcription', midi: 'Imported MIDI', musicxml: 'Imported MusicXML' }
 
@@ -53,6 +55,10 @@ export default function App() {
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('songs')
   // Where the Course tab is (instrument, drum list, genre); Back shows the list a lesson came from. Not stored.
   const [courseBrowse, setCourseBrowse] = useState<CourseBrowse>(DEFAULT_BROWSE)
+  // The practice view chosen in this run of lessons, so Next and Previous keep it; cleared on Back. Not stored.
+  const [lessonViews, setLessonViews] = useState<LessonViews>({})
+  const keepLessonView = useCallback((instrument: 'piano' | 'drums', practice: PracticeView) =>
+    setLessonViews((current) => current[instrument] === practice ? current : { ...current, [instrument]: practice }), [])
   const openLesson = useCallback((id: string) => {
     setCourseBrowse((current) => browseTo(id, current))
     setView({ kind: 'lesson', id })
@@ -80,6 +86,7 @@ export default function App() {
 
   const back = useCallback(() => {
     setView({ kind: 'library' })
+    setLessonViews({})
     queue.bump()
   }, [queue])
 
@@ -127,7 +134,8 @@ export default function App() {
             songId={`course:${lesson.id}`}
             start={practised.start}
             note={lessonNote(lesson)}
-            defaults={{ click: true, drums: 'kit' }}
+            defaults={{ click: true, drums: lessonViews.drums ?? 'kit' }}
+            onPracticeView={keepLessonView}
             onPosition={(position) => saveLessonPosition(lesson, position)}
             onBack={back}
             analysisNotice={<LessonPanel lesson={lesson} onLesson={openLesson} />}
@@ -141,7 +149,8 @@ export default function App() {
             songId={`course:${pianoLesson.id}`}
             start={practised.start}
             note={pianoLessonNote(pianoLesson)}
-            defaults={{ click: true, piano: 'keyboard' }}
+            defaults={{ click: true, piano: lessonViews.piano ?? 'keyboard', drums: lessonViews.drums }}
+            onPracticeView={keepLessonView}
             onPosition={(position) => saveLessonPosition(pianoLesson, position)}
             onBack={back}
             analysisNotice={<PianoLessonPanel lesson={pianoLesson} onLesson={openLesson} />}

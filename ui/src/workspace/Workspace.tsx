@@ -35,6 +35,8 @@ type Props = {
   analysisNotice?: ReactNode
   /** Starting choices for this song only, e.g. a drum lesson opens with the click on and the 3D kit. */
   defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView }
+  /** Told when the player picks a piano or drum practice view, so the next lesson can open on it. */
+  onPracticeView?: (instrument: 'piano' | 'drums', view: PracticeView) => void
 }
 
 const DEMO = buildSong()
@@ -43,7 +45,7 @@ const EMPTY_STEMS: Stem[] = []
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onPracticeView,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
@@ -460,7 +462,10 @@ export function Workspace({
         {track?.id === 'harmony-line' && <HarmonyLineView value={harmony} onChange={setHarmony} />}
         {!chart && (instrument === 'piano' || instrument === 'drums') && (
           <PracticeViewPicker instrument={instrument} value={practice[instrument]}
-            onChange={(view) => setPractice((current) => ({ ...current, [instrument]: view }))} />
+            onChange={(view) => {
+              setPractice((current) => ({ ...current, [instrument]: view }))
+              onPracticeView?.(instrument, view)
+            }} />
         )}
         <TrackPicker
           tracks={tracks}
