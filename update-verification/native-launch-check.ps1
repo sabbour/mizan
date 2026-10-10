@@ -1,67 +1,49 @@
+#Requires -Version 5.1
 param(
     [string]$ExpectedVersion = '0.2.30.16',
     [string]$Output = (Join-Path $PSScriptRoot 'native-launch-runtime.json')
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -NoProfile -NonInteractive -File $PSCommandPath -ExpectedVersion $ExpectedVersion -Output $Output
+    exit $LASTEXITCODE
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
 namespace MizanVerification {
-    [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"),
-     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IApplicationActivationManager {
-        void ActivateApplication(
-            [MarshalAs(UnmanagedType.LPWStr)] string appId,
-            [MarshalAs(UnmanagedType.LPWStr)] string arguments,
-            uint options, out uint processId);
-        void ActivateForFile(
-            [MarshalAs(UnmanagedType.LPWStr)] string appId,
-            IntPtr items, [MarshalAs(UnmanagedType.LPWStr)] string verb,
-            out uint processId);
-        void ActivateForProtocol(
-            [MarshalAs(UnmanagedType.LPWStr)] string appId,
-            IntPtr items, out uint processId);
-    }
-
-    public static class Activation {
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        static extern int SHCreateItemFromParsingName(
-            string path, IntPtr context, ref Guid iid, out IntPtr item);
-        [DllImport("shell32.dll")]
-        static extern int SHCreateShellItemArrayFromShellItem(
-            IntPtr item, ref Guid iid, out IntPtr items);
-        [DllImport("ole32.dll")]
-        static extern int CoAllowSetForegroundWindow(IntPtr unknown, IntPtr reserved);
-
-        public static uint OpenFile(string appId, string path) {
-            var manager = (IApplicationActivationManager)Activator.CreateInstance(
-                Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")));
-            IntPtr item = IntPtr.Zero, items = IntPtr.Zero;
-            var managerPointer = Marshal.GetIUnknownForObject(manager);
-            try {
-                Marshal.ThrowExceptionForHR(CoAllowSetForegroundWindow(managerPointer, IntPtr.Zero));
-                var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-                Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(
-                    path, IntPtr.Zero, ref itemId, out item));
-                var arrayId = new Guid("B63EA76D-1F85-456F-A19C-48159EFA858B");
-                Marshal.ThrowExceptionForHR(SHCreateShellItemArrayFromShellItem(
-                    item, ref arrayId, out items));
-                manager.ActivateForFile(appId, items, "open", out var processId);
-                return processId;
-            } finally {
-                if (items != IntPtr.Zero) Marshal.Release(items);
-                if (item != IntPtr.Zero) Marshal.Release(item);
-                Marshal.Release(managerPointer);
-                Marshal.FinalReleaseComObject(manager);
-            }
-        }
+    public static class NativeWindow {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Rect { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+        [DllImport("user32.dll")]
+        public static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hwnd);
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
     }
 }
 '@
+
+$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition `
+        -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1
+} | Select-Object -First 1
+if (!$asTask) { throw 'Windows asynchronous file APIs are unavailable.' }
+function Wait-WindowsOperation($Operation, [Type]$ResultType) {
+    $task = $asTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
+    $task.GetAwaiter().GetResult()
+}
 
 $package = Get-AppxPackage -Name Mizan
 if (!$package -or [string]$package.Version -ne $ExpectedVersion -or [string]$package.Status -ne 'Ok') {
@@ -69,6 +51,55 @@ if (!$package -or [string]$package.Version -ne $ExpectedVersion -or [string]$pac
 }
 if (Get-Process -Name 'Mizan.Shell' -ErrorAction SilentlyContinue) {
     throw 'The cold-open check needs Mizan closed. No existing app was closed.'
+}
+
+function Read-WindowText($App) {
+    $rect = New-Object MizanVerification.NativeWindow+Rect
+    if (![MizanVerification.NativeWindow]::GetWindowRect($App.MainWindowHandle, [ref]$rect)) {
+        throw 'Could not read the test app window bounds.'
+    }
+    $image = New-Object Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
+    $graphics = [Drawing.Graphics]::FromImage($image)
+    $dc = $graphics.GetHdc()
+    try {
+        if (![MizanVerification.NativeWindow]::PrintWindow($App.MainWindowHandle, $dc, 2)) {
+            throw 'Could not capture the test app window.'
+        }
+    }
+    finally {
+        $graphics.ReleaseHdc($dc)
+        $graphics.Dispose()
+    }
+    $path = Join-Path $temp 'window.png'
+    try {
+        $limit = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]::MaxImageDimension
+        $scale = [Math]::Min(1, $limit / [Math]::Max($image.Width, $image.Height))
+        $scaled = New-Object Drawing.Bitmap $image, ([int]($image.Width * $scale)), ([int]($image.Height * $scale))
+        try { $scaled.Save($path, [Drawing.Imaging.ImageFormat]::Png) }
+        finally { $scaled.Dispose() }
+    }
+    finally { $image.Dispose() }
+    $file = Wait-WindowsOperation `
+        ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]::GetFileFromPathAsync($path)) `
+        ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime])
+    $stream = Wait-WindowsOperation ($file.OpenReadAsync()) `
+        ([Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType=WindowsRuntime])
+    try {
+        $decoder = Wait-WindowsOperation `
+            ([Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime]::CreateAsync($stream)) `
+            ([Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime])
+        $bitmap = Wait-WindowsOperation ($decoder.GetSoftwareBitmapAsync()) `
+            ([Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType=WindowsRuntime])
+        try {
+            $engine = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]::TryCreateFromUserProfileLanguages()
+            if (!$engine) { throw 'Windows text recognition is unavailable for the current languages.' }
+            $result = Wait-WindowsOperation ($engine.RecognizeAsync($bitmap)) `
+                ([Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType=WindowsRuntime])
+            return $result.Text -replace '\s+', ' '
+        }
+        finally { $bitmap.Dispose() }
+    }
+    finally { $stream.Dispose() }
 }
 
 function Wait-MidiDialog([string]$FileName) {
@@ -100,6 +131,23 @@ function Wait-MidiDialog([string]$FileName) {
                     [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
                 return @{ processId = $app.Id; title = $title; cancelInvoked = $true; importOffered = $true }
             }
+            if ($app.MainWindowHandle -ne [IntPtr]::Zero) {
+                $text = Read-WindowText $app
+                if ($text -match [Regex]::Escape($FileName) -and $text -match '\bCancel\b' `
+                        -and [Regex]::Matches($text, '\bImport\b').Count -ge 2) {
+                    [MizanVerification.NativeWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+                    if ([MizanVerification.NativeWindow]::GetForegroundWindow() -ne $app.MainWindowHandle) {
+                        throw 'The test app is not in the foreground; no key was sent.'
+                    }
+                    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+                    Start-Sleep -Milliseconds 500
+                    if ((Read-WindowText $app) -match [Regex]::Escape($FileName)) {
+                        throw 'The native MIDI import prompt did not close after Escape.'
+                    }
+                    return @{ processId = $app.Id; title = $FileName; cancelInvoked = $true
+                        importOffered = $true; visibleTextVerified = $true }
+                }
+            }
         }
         Start-Sleep -Milliseconds 300
     }
@@ -118,10 +166,17 @@ try {
         $name = 'Mizan activation check.' + $extension
         $path = Join-Path $temp $name
         [IO.File]::WriteAllBytes($path, $midi)
-        $activationId = [MizanVerification.Activation]::OpenFile($appId, $path)
+        $file = Wait-WindowsOperation `
+            ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]::GetFileFromPathAsync($path)) `
+            ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime])
+        $options = [Windows.System.LauncherOptions, Windows.System, ContentType=WindowsRuntime]::new()
+        $options.TargetApplicationPackageFamilyName = $package.PackageFamilyName
+        $launched = Wait-WindowsOperation `
+            ([Windows.System.Launcher, Windows.System, ContentType=WindowsRuntime]::LaunchFileAsync($file, $options)) `
+            ([bool])
+        if (!$launched) { throw "Windows rejected Mizan's registered file activation for $name." }
         $result = Wait-MidiDialog $name
         $result.extension = $extension
-        $result.activationProcessId = $activationId
         $results += $result
         Start-Sleep -Milliseconds 500
     }
@@ -133,7 +188,7 @@ try {
     Write-Output 'Native .mid cold-open and .midi running-open show explicit import; both cancelled; one app left running.'
 }
 finally {
-    foreach ($name in @('Mizan activation check.mid', 'Mizan activation check.midi')) {
+    foreach ($name in @('Mizan activation check.mid', 'Mizan activation check.midi', 'window.png')) {
         $path = Join-Path $temp $name
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
     }
