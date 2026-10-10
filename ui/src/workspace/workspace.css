@@ -222,13 +222,18 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* The title on its own line, its subtitle under it, so the subtitle never takes the title's width. */
 .ws-title {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 1px;
   min-width: 0;
 }
 
+.ws-title > .ws-back { grid-row: 1 / span 2; }
+.ws-title > .ws-song, .ws-title > .ws-draft { grid-column: 2; }
 .ws-song {
   margin: 0;
   min-width: 0;
@@ -1449,8 +1454,8 @@
 .practice-piano .practice-stage,
 .ws-split > .practice-piano .practice-stage { flex: none; width: 100%; height: auto; min-height: 150px; aspect-ratio: 3 / 1; }
 
-@media (max-width: 600px) {
-  /* Phones: play and stepping first, then speed and Go to, then the switches; nothing wider than the screen. */
+@media (max-width: 680px) {
+  /* Narrow windows and phones: play and stepping first, then speed and Go to, then the switches; nothing wider than the screen. */
   .transport { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'main main' 'speed go' 'tools tools'; row-gap: 10px; }
   .transport-main { justify-self: center; }
   .goto input { width: 104px; }

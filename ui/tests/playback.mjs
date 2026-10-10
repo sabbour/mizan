@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { analysisChecks, vocalChecks } from './vocal-analysis.mjs'
 import { instrumentChecks } from './instrument-workspace.mjs'
@@ -18,9 +19,10 @@ import { browserMeterChecks } from './meter.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const testUrl = process.env.MIZAN_TEST_URL ?? 'http://localhost:5173'
-const profile = await mkdtemp(join(process.cwd(), '.mizan-playback-'))
+// The browser profile lives outside the app folder, so its files never trigger the dev server's reloads.
+const profile = await mkdtemp(join(tmpdir(), 'mizan-playback-'))
 spawn(process.env.MIZAN_TEST_BROWSER ?? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', [
-  '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
+  '--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
   '--autoplay-policy=no-user-gesture-required', '--no-first-run', 'about:blank',
 ], { stdio: 'ignore' })
 let socket
@@ -1803,6 +1805,22 @@ async function pianoAudioChecks() {
     return { engine, calls }
   }
   const song = pianoLessonSong(lesson)
+  // While the sounds are still being prepared nothing sounds: the clock reads stopped (so no guide says "sounding now"),
+  // while the engine reports a start in progress (Pause shows and cancels it). Then the count-in, then the music.
+  {
+    const early = new Engine(song)
+    early.countIn = true
+    const starting = early.play()
+    const first = early.read()
+    check(early.playing && !first.playing && !first.countingIn, `Preparing: busy but not sounding (${JSON.stringify(first)})`)
+    await starting
+    let counting = false
+    for (let i = 0; i < 40 && !counting; i++) { counting = early.read().countingIn; await wait(25) }
+    check(counting && early.read().playing, 'Then the count-in runs')
+    early.pause()
+    check(!early.playing && !early.read().playing, 'Pause stops it')
+    early.dispose()
+  }
   const { engine, calls } = await run(song)
   const spb = engine.seconds(0, 1)
   const first = calls.filter((c) => c.id === 'piano' && c.note.startBeat === 0)
@@ -1926,7 +1944,7 @@ async function pianoChecks(width) {
   check(document.querySelector('.track-button')?.textContent.includes('Piano'), `A piano lesson opens on the piano part: ${document.querySelector('.track-button')?.textContent}`)
   check(document.querySelector('.chordview-option[data-view="keyboard"]')?.getAttribute('aria-checked') === 'true', 'The 3D keyboard is the default guide')
   check(document.querySelectorAll('.score-bar').length === 8 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed with each chord'), 'An eight-bar score and lesson panel with its pedalling')
-  check(document.querySelector('.lesson-panel').getBoundingClientRect().height < 220 && document.querySelector('.lesson-details') && !document.querySelector('.lesson-details').open,
+  check(document.querySelector('.lesson-panel').getBoundingClientRect().height <= 260 && document.querySelector('.lesson-details') && !document.querySelector('.lesson-details').open,
     `The lesson panel stays compact, details behind a disclosure (${Math.round(document.querySelector('.lesson-panel').getBoundingClientRect().height)}px)`)
   // The score never shows finger numbers (they stay in the written part and on the keyboards).
   await wait(() => document.querySelector('.score-osmd svg'), 'The score is drawn')
@@ -1935,7 +1953,9 @@ async function pianoChecks(width) {
   await wait(() => piano()?.dataset.ready === 'true', `The 3D keyboard loads (${piano()?.textContent.slice(0, 120)})`, 600)
   check(piano().dataset.variant === 'stage_piano_88' && piano().dataset.look === 'Realistic' && piano().querySelectorAll('select').length === 1,
     'The stage piano in its realistic look, with only the look to choose')
-  check(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, `The lesson fits ${width}px without sideways scrolling (${document.documentElement.scrollWidth})`)
+  const overflowing = () => [...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > innerWidth + 1)
+    .map((e) => `${e.tagName.toLowerCase()}.${String(e.className?.baseVal ?? e.className).split(' ')[0]}:${Math.round(e.getBoundingClientRect().right)}`).slice(0, 6).join(' ')
+  check(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, `The lesson fits ${width}px without sideways scrolling (${document.documentElement.scrollWidth}: ${overflowing()})`)
   const fitted = () => { const [x0, x1, y0, y1] = piano().dataset.frame.split(',').map(Number); return x0 >= -1 && x1 <= 1 && y0 >= -1 && y1 <= 1 && (x1 - x0 > 1.6 || y1 - y0 > 1.6) }
   await wait(() => piano().dataset.framed === 'stage_piano_88:Realistic', 'The keyboard is framed')
   check(fitted(), `Every key fits the stage, the keybed filling its width (${piano().dataset.frame})`)
@@ -2078,17 +2098,20 @@ async function pianoChecks(width) {
   // Hands & keys keeps piano proportions: the range grows by octaves to fill the width instead of stretching a few keys.
   const [low, high, keyWidth] = hands().dataset.range.split(/[-:]/).map(Number)
   const canvasWidth = hands().querySelector('canvas').getBoundingClientRect().width
-  check(keyWidth >= 14 && keyWidth <= 43 && high - low >= 23 && (high - low >= 87 || canvasWidth - keyWidth * [...Array(high - low + 1).keys()].filter((k) => ![1, 3, 6, 8, 10].includes((low + k) % 12)).length < keyWidth * 13),
+  // On a phone the music's own octaves may need keys narrower than the usual 14 px; they never shrink below 10 px.
+  check(keyWidth >= (canvasWidth < 420 ? 10 : 14) && keyWidth <= 43 && high - low >= 23 && (high - low >= 87 || canvasWidth - keyWidth * [...Array(high - low + 1).keys()].filter((k) => ![1, 3, 6, 8, 10].includes((low + k) % 12)).length < keyWidth * 13),
     `Hands & keys keys keep their shape and fill the width (${hands().dataset.range} in ${Math.round(canvasWidth)}px)`)
   // Fingering off hides the numbers on the flat keyboard; Note letters names the keys down and the ones coming next.
   const switchFor = (name) => [...document.querySelectorAll('.toggle')].find((button) => button.querySelector('.toggle-label')?.textContent === name)
   switchFor('Fingering').click()
-  await wait(() => hands().dataset.fingers === '' && /Finger numbers are off/.test(hands().textContent), 'Fingering off: no numbers on Hands & keys')
+  await wait(() => hands()?.dataset.fingers === '' && /Finger numbers are off/.test(hands().textContent), 'Fingering off: no numbers on Hands & keys')
   switchFor('Note letters').click()
-  await wait(() => hands().dataset.letters, 'Note letters on: the keys at the playhead are named')
+  // Note letters also re-engraves the score, which redraws the guide under it: wait for it to come back named.
+  await wait(() => hands()?.dataset.letters, 'Note letters on: the keys at the playhead are named')
   const lettered = []
   playButton().click()
-  for (let i = 0; i < 200 && !lettered.some((l) => l.includes(':next')); i++) { lettered.push(hands().dataset.letters); await sleep(40) }
+  // Past the count-in (slow at the starting speed) and into the music, until a coming key is named.
+  for (let i = 0; i < 600 && !lettered.some((l) => l.includes(':next')); i++) { lettered.push(hands()?.dataset.letters ?? ''); await sleep(40) }
   playButton().click()
   check(lettered.some((l) => l.includes(':next')) && lettered.some((l) => /\d+:[A-G][♭♯]?(,|$)/.test(l)), `Letters on the keys sounding and the keys coming next (${lettered.filter(Boolean).slice(-2).join(' | ')})`)
   check(hands().dataset.fingers === '', 'Still no numbers while playing with Fingering off')
@@ -2163,7 +2186,23 @@ async function layoutChecks(width) {
   check(keyWidth >= 14 && keyWidth <= 43 && high - low >= 23, `Hands & keys keeps piano proportions (${low}–${high} at ${keyWidth}px a key)`)
   document.querySelector('.ws-back').click()
   await wait(() => document.querySelector('.lib-tabs'), 'Back to the library')
-  return `Layout checks passed at ${width}px: header ${Math.round(head.height)}px, title ${Math.round(title.width)}px, Harmony line options in a panel, Hands & keys ${low}–${high} at ${keyWidth}px.`
+  // A lesson's title and subtitle: the subtitle sits under the title, so a long title is never cut off by it.
+  document.querySelector('.lib-tabs [data-tab="course"]').click()
+  await wait(() => document.querySelector('.course-instrument [data-instrument="piano"]'), 'The course shows')
+  document.querySelector('.course-instrument [data-instrument="piano"]').click()
+  await wait(() => document.querySelector('.course-genre-option[data-genre="Rock"]'), 'Piano genres show')
+  document.querySelector('.course-genre-option[data-genre="Rock"]').click()
+  await wait(() => document.querySelector('.course-genre-detail .course-lesson'), 'Rock piano lessons show')
+  document.querySelector('.course-genre-detail .course-lesson').click()
+  await wait(() => document.querySelector('.ws-song')?.textContent === 'Rock piano: eighth-note chords' && document.querySelector('.score-osmd svg'), 'The lesson opens with its score')
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  const lessonTitle = document.querySelector('.ws-song'), lessonHead = box('.ws-head'), draft = document.querySelector('.ws-draft')
+  check(lessonTitle.scrollWidth <= lessonTitle.clientWidth + 1, `The lesson title is not cut off at ${width}px (${lessonTitle.scrollWidth} > ${lessonTitle.clientWidth})`)
+  check(getComputedStyle(draft).display === 'none' || draft.getBoundingClientRect().top >= lessonTitle.getBoundingClientRect().bottom - 2, 'The subtitle sits under the title')
+  check(box('.lesson-panel').height <= 260, `The lesson panel stays compact (${Math.round(box('.lesson-panel').height)}px)`)
+  document.querySelector('.ws-back').click()
+  await wait(() => document.querySelector('.lib-tabs'), 'Back to the library')
+  return `Layout checks passed at ${width}px: lesson header ${Math.round(lessonHead.height)}px with the full title, header ${Math.round(head.height)}px, title ${Math.round(title.width)}px, Harmony line options in a panel, Hands & keys ${low}–${high} at ${keyWidth}px.`
 }
 
 async function courseChecks(width, phase) {

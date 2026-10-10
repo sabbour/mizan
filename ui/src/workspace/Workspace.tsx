@@ -261,8 +261,10 @@ export function Workspace({
   useFrame(engine, (t) => {
     const bar = barAt(song, t.beat) + 1
     const chordIdx = chordAt(song, t.beat)
-    if (bar !== pos.bar || chordIdx !== pos.chordIdx || t.playing !== pos.playing || t.countBeat !== pos.countBeat) {
-      setPos({ bar, chordIdx, playing: t.playing, countBeat: t.countBeat })
+    // The transport is busy (Pause shows) from the moment play is pressed, while sounds are still being prepared.
+    const busy = engine.playing
+    if (bar !== pos.bar || chordIdx !== pos.chordIdx || busy !== pos.playing || t.countBeat !== pos.countBeat) {
+      setPos({ bar, chordIdx, playing: busy, countBeat: t.countBeat })
     }
     const bpm = Math.round(engine.getEffectiveQuarterBpm())
     if (bpm !== effectiveBpmRef.current) {

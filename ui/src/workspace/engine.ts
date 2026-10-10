@@ -249,7 +249,8 @@ export class Engine {
   }
 
   read(): Transport {
-    if (!this.ctx || !this.timer) return { playing: this.starting, countingIn: false, countBeat: 0, beat: this.pausedBeat }
+    // While sounds are still being prepared nothing sounds yet: the clock reads as stopped (``engine.playing`` still says a start is pending).
+    if (!this.ctx || !this.timer) return { playing: false, countingIn: false, countBeat: 0, beat: this.pausedBeat }
     const now = this.ctx.currentTime
     let a = this.anchors[0]
     for (const x of this.anchors) if (x.time <= now) a = x
