@@ -26,6 +26,7 @@ update-verification/*.json
 update-verification/*.png
 update-verification/installed-edge-*/
 update-verification/midi-pytest-temp/
+update-verification/native-midi-*/
 update-verification/mizan-update-gate-*/
 update-verification/__pycache__/
 update-verification/.pytest_cache/
