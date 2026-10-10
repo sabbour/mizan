@@ -1,5 +1,5 @@
 import type { Feedback } from './kitRenderer'
-import type { Target, Vec3 } from './kitAsset'
+import type { AnyTarget, Target, Vec3 } from './kitAsset'
 import type { Hand } from './sticking'
 
 /**
@@ -37,8 +37,9 @@ export const PULSE_SECONDS = 0.45
 /** Share of the gap to the piece's next note that a pulse may use; the rest stays dark, then anticipates. */
 export const PULSE_SHARE = 0.45
 
-const colours = (target: Target, hand: Strike['hand'], sticking: boolean): { tint: Vec3; tint2: Vec3; split: boolean } => {
-  if (!sticking || !hand) return { tint: PIECE_GLOW[target], tint2: PIECE_GLOW[target], split: false }
+const colours = (target: AnyTarget, hand: Strike['hand'], sticking: boolean): { tint: Vec3; tint2: Vec3; split: boolean } => {
+  const own = PIECE_GLOW[target as Target] ?? [1, 1, 1]
+  if (!sticking || !hand) return { tint: own, tint2: own, split: false }
   if (hand === 'both') return { tint: HAND_GLOW.left, tint2: HAND_GLOW.right, split: true }
   return { tint: HAND_GLOW[hand], tint2: HAND_GLOW[hand], split: false }
 }
@@ -50,8 +51,8 @@ function lastAt(list: Strike[], beat: number) {
   return lo - 1
 }
 
-export function feedbackAt(strikes: Map<Target, Strike[]>, clock: Clock, options: FeedbackOptions): Map<Target, Feedback> {
-  const out = new Map<Target, Feedback>()
+export function feedbackAt<T extends AnyTarget>(strikes: Map<T, Strike[]>, clock: Clock, options: FeedbackOptions): Map<T, Feedback> {
+  const out = new Map<T, Feedback>()
   if (!clock.playing) return out
   const { secondsPerBeat, loop, countLength, sticking, reduced } = options
   for (const [target, list] of strikes) {

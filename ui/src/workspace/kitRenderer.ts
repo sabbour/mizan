@@ -1,5 +1,5 @@
 import type { HatState } from './kit'
-import type { Item, Prepared, Target, Vec3 } from './kitAsset'
+import type { AnyTarget, Item, Prepared, Vec3 } from './kitAsset'
 import type { Look } from './prefs'
 
 /**
@@ -23,8 +23,10 @@ export type Feedback = {
   since: number
   /** Note strength 0..1 (ghost notes are quieter). */
   velocity: number
+  /** 0..1, how far a piano key or pedal is held down now. */
+  press?: number
 }
-export type FrameState = { hat: HatState; feedback: Map<Target, Feedback>; selected: ReadonlySet<Target> }
+export type FrameState = { hat: HatState; feedback: ReadonlyMap<AnyTarget, Feedback>; selected: ReadonlySet<AnyTarget> }
 
 const LOOK_INDEX: Record<Look, number> = { Realistic: 0, ClayStudyModel: 1, NeonRhythm: 2, TechnicalBlueprint: 3 }
 /** Background and floor tone per look; the neon stage is dark for contrast. Blueprint outlines its translucent parts too. */
@@ -191,6 +193,8 @@ export function motionMatrix(item: Pick<Item, 'motion' | 'angle' | 'target'>, fb
     }
     case 'hat': return hatOpen > 0 ? mul(translateY(hatOffset), rotX(0.025 * hatOpen * strength * decay * Math.sin(since * 30))) : translateY(hatOffset)
     case 'pedal': return rotX(-(item.angle ?? 0.15) * Math.exp(-since * 14) * (fb ? 1 : 0))
+    // A piano key or pedal turns on its rear hinge: a positive angle lowers the front.
+    case 'press': return rotX((item.angle ?? 0) * (fb?.press ?? 0))
     case 'beater': {
       // Pulled back as the note approaches, through the head at the hit, then settling.
       const back = 0.5 * (fb?.upcoming ?? 0) * (1 - Math.exp(-since * 30))
@@ -376,9 +380,10 @@ export class KitRenderer {
     gl.disable(gl.BLEND)
     gl.depthMask(true)
 
-    // Blueprint: selected or active pieces are opaque; the rest is drawn translucent after the opaque pass.
+    // Blueprint: selected or active pieces are opaque; the rest is drawn translucent after the opaque pass. Piano keys are
+    // always opaque, so the structure under the keybed never shows through the keys a player reads.
     const active = (item: Uploaded) => !!item.target && (state.selected.has(item.target) || ((state.feedback.get(item.target)?.pulse ?? 0) + (state.feedback.get(item.target)?.upcoming ?? 0) > 0.05))
-    const translucent = (item: Uploaded) => item.material.blend && !active(item)
+    const translucent = (item: Uploaded) => item.material.blend && !active(item) && !item.target?.startsWith('key:')
     for (const item of this.items) {
       if (translucent(item)) continue
       this.bind(item)

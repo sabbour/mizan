@@ -27,7 +27,13 @@ export type PianoNote = {
   beats: number
   hand: 'right' | 'left'
   velocity?: number
+  /** The finger that plays the note (1 thumb to 5 little finger). Only authored lessons set it; it is never guessed. */
+  finger?: 1 | 2 | 3 | 4 | 5
 }
+/** A written pedal: sustain (64), sostenuto (66) or soft (67), held from `startBeat` for `beats`. Only authored lessons set it. */
+export type Pedal = { controller: 64 | 66 | 67; startBeat: number; beats: number }
+/** A chord name shown over the score and keyboard; it is not played. */
+export type ChordLabel = { startBeat: number; beats: number; symbol: string }
 export type MelodyNote = Omit<PianoNote, 'hand'>
 
 export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'snare' | 'floortom' | 'kick'
@@ -86,6 +92,10 @@ export type Song = {
   drums: DrumHit[]
   /** Pitched draft notes keyed by the id of each transcribed `other` track. */
   instrumentNotes?: Record<string, MelodyNote[]>
+  /** Written piano pedalling; absent means the source does not say, never "no pedal". */
+  pedals?: Pedal[]
+  /** Chord names to display over an authored part that does not come from `chords` (so nothing extra is played). */
+  chordLabels?: ChordLabel[]
   confidence: Record<Exclude<Instrument, 'other'>, Confidence[]> & { other?: Confidence[] }
   /** Score beat to recording seconds, present for aligned imports. */
   tempoMap?: { beat: number; time: number }[]

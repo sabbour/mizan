@@ -9,7 +9,9 @@ import { fromHost } from './library/adapt'
 import { useQueue } from './library/useQueue'
 import { activeAnalysis, analysisProgress, decodingErrorHeadline, jobTitle } from './library/format'
 import { lessonById, lessonNote, lessonSong } from './course/curriculum'
-import { LessonPanel } from './course/Course'
+import { LessonPanel, PianoLessonPanel } from './course/Course'
+import { browseTo, DEFAULT_BROWSE, type CourseBrowse } from './course/browse'
+import { pianoLessonById, pianoLessonNote, pianoLessonSong } from './course/piano'
 import { lessonPosition, saveLessonPosition } from './course/state'
 
 type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
@@ -49,6 +51,12 @@ export default function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
   // Songs or Drum course, kept while a song or lesson is open so Back returns to the same tab.
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('songs')
+  // Where the Course tab is (instrument, drum list, genre); Back shows the list a lesson came from. Not stored.
+  const [courseBrowse, setCourseBrowse] = useState<CourseBrowse>(DEFAULT_BROWSE)
+  const openLesson = useCallback((id: string) => {
+    setCourseBrowse((current) => browseTo(id, current))
+    setView({ kind: 'lesson', id })
+  }, [])
   const [openError, setOpenError] = useState<string | null>(null)
   const [openRevision, setOpenRevision] = useState(0)
   const [reprocessing, setReprocessing] = useState(false)
@@ -81,9 +89,11 @@ export default function App() {
   const done = queue.finished
   const opened = view.kind === 'song' || view.kind === 'job' ? view.opened : undefined
   const lesson = view.kind === 'lesson' ? lessonById(view.id) : undefined
+  const pianoLesson = view.kind === 'lesson' && !lesson ? pianoLessonById(view.id) : undefined
   // One song and starting setup per opened lesson, so the workspace keeps its engine across renders. A lesson always
   // starts at bar 1; its loop and other saved choices carry over.
-  const practised = useMemo(() => lesson && { song: lessonSong(lesson), start: { ...lessonPosition(lesson), bar: 1 } }, [lesson])
+  const practised = useMemo(() => lesson ? { song: lessonSong(lesson), start: { ...lessonPosition(lesson), bar: 1 } }
+    : pianoLesson && { song: pianoLessonSong(pianoLesson), start: { ...lessonPosition(pianoLesson), bar: 1 } }, [lesson, pianoLesson])
   const updating = opened && activeAnalysis(queue.jobs, opened.entry.id)
   const updated = opened && done?.songId === opened.entry.id
   const decodingHeadline = decodingErrorHeadline(opened?.song.decodingErrors?.count)
@@ -120,7 +130,21 @@ export default function App() {
             defaults={{ click: true, drums: 'kit' }}
             onPosition={(position) => saveLessonPosition(lesson, position)}
             onBack={back}
-            analysisNotice={<LessonPanel lesson={lesson} onLesson={(id) => setView({ kind: 'lesson', id })} />}
+            analysisNotice={<LessonPanel lesson={lesson} onLesson={openLesson} />}
+          />
+        </WorkspaceBoundary>
+      ) : pianoLesson && practised ? (
+        <WorkspaceBoundary key={`course:${pianoLesson.id}`} onBack={back}>
+          <Workspace
+            key={`course:${pianoLesson.id}`}
+            song={practised.song}
+            songId={`course:${pianoLesson.id}`}
+            start={practised.start}
+            note={pianoLessonNote(pianoLesson)}
+            defaults={{ click: true, piano: 'keyboard' }}
+            onPosition={(position) => saveLessonPosition(pianoLesson, position)}
+            onBack={back}
+            analysisNotice={<PianoLessonPanel lesson={pianoLesson} onLesson={openLesson} />}
           />
         </WorkspaceBoundary>
       ) : opened ? (
@@ -171,7 +195,9 @@ export default function App() {
           onQueueChange={queue.refresh}
           onOpen={(e) => void open(e.id)}
           onCredits={() => setView({ kind: 'credits' })}
-          onLesson={(id) => setView({ kind: 'lesson', id })}
+          onLesson={openLesson}
+          courseBrowse={courseBrowse}
+          onCourseBrowse={setCourseBrowse}
           tab={libraryTab}
           onTab={setLibraryTab}
           onDetails={(j) => setView((v) => (v.kind === 'job' && v.id === j.id ? { kind: 'library' } : { kind: 'job', id: j.id }))}

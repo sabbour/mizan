@@ -7,13 +7,9 @@ import { KitBuilder, LOOKS } from './kits/common.mjs'
 import { M, mesh, merge, rod, roundedBox, lathe, transform, v } from './kits/gltf.mjs'
 import { fbm, materialSet, realistic } from './kits/textures.mjs'
 
+/** The one instrument the app offers: an 88-key stage piano on an X stand. */
 export const PIANO_VARIANTS = {
-  digital_keyboard_61: { file: 'KeyboardDigital61.glb', name: '61-key digital keyboard', low: 36, high: 96, width: 1.03, depth: 0.4, bodyHeight: 0.12, kind: 'digital' },
-  digital_keyboard_76: { file: 'KeyboardDigital76.glb', name: '76-key digital keyboard', low: 28, high: 103, width: 1.22, depth: 0.4, bodyHeight: 0.12, kind: 'digital' },
-  digital_keyboard_88: { file: 'KeyboardDigital88.glb', name: '88-key digital piano', low: 21, high: 108, width: 1.4, depth: 0.4, bodyHeight: 0.12, kind: 'digital' },
-  stage_piano_88: { file: 'StagePiano88.glb', name: '88-key stage piano', low: 21, high: 108, width: 1.38, depth: 0.36, bodyHeight: 0.12, kind: 'stage' },
-  upright_piano_88: { file: 'UprightPiano88.glb', name: '88-key upright piano', low: 21, high: 108, width: 1.5, depth: 0.6, bodyHeight: 1.22, kind: 'upright' },
-  grand_piano_88: { file: 'GrandPiano88.glb', name: '88-key grand piano', low: 21, high: 108, width: 1.5, depth: 1.8, bodyHeight: 0.18, kind: 'grand' },
+  stage_piano_88: { file: 'StagePiano88.glb', name: '88-key stage piano', low: 21, high: 108, width: 1.38, depth: 0.36, bodyHeight: 0.12 },
 }
 
 const WHITE_PITCHES = new Set([0, 2, 4, 5, 7, 9, 11])
@@ -169,26 +165,6 @@ function extrude(points, bottom, top, bevel = 0) {
   return out
 }
 
-function rim(points, thickness, bottom, top) {
-  points = cleanContour(points)
-  const inner = insetContour(points, thickness)
-  const out = mesh()
-  const at = (p, y) => [p[0], y, p[1]]
-  for (let i = 0; i < points.length; i++) {
-    const j = (i + 1) % points.length
-    for (const [a, b, c, d] of [
-      [at(points[i], bottom), at(points[i], top), at(points[j], bottom), at(points[j], top)],
-      [at(inner[j], bottom), at(inner[j], top), at(inner[i], bottom), at(inner[i], top)],
-      [at(points[i], top), at(inner[i], top), at(points[j], top), at(inner[j], top)],
-      [at(inner[i], bottom), at(points[i], bottom), at(inner[j], bottom), at(points[j], bottom)],
-    ]) {
-      triangle(out, a, b, c, 4)
-      triangle(out, c, b, d, 4)
-    }
-  }
-  return out
-}
-
 function whiteGeometry(midi, spec, lod) {
   const left = -WHITE_WIDTH / 2, right = WHITE_WIDTH / 2
   const l = midi > spec.low && !isWhite(midi - 1) ? 0.0067 : 0
@@ -197,24 +173,6 @@ function whiteGeometry(midi, spec, lod) {
     [left + l, 0], [right - r, 0], [right - r, 0.1], [right, 0.1],
     [right, WHITE_LENGTH], [left, WHITE_LENGTH], [left, 0.1], [left + l, 0.1],
   ], -0.012, 0, lod === 2 ? 0 : 0.0007)
-}
-
-function grandContour(width, depth, lod) {
-  const front = -0.07, rear = 0.12 - depth, half = width / 2
-  const out = [[-half, front], [half, front]]
-  const curves = [
-    [[half, front], [half * 0.98, -0.48], [half * 0.35, -0.58], [half * 0.23, -0.97]],
-    [[half * 0.23, -0.97], [half * 0.12, rear + 0.14], [-half * 0.12, rear], [-half * 0.5, rear]],
-    [[-half * 0.5, rear], [-half * 0.96, rear], [-half, rear + 0.3], [-half, -0.92]],
-    [[-half, -0.92], [-half, -0.6], [-half, -0.3], [-half, front]],
-  ]
-  for (const [a, b, c, d] of curves) {
-    for (let i = 1; i <= [12, 7, 4][lod]; i++) {
-      const t = i / [12, 7, 4][lod], s = 1 - t
-      out.push([0, 1].map((axis) => s ** 3 * a[axis] + 3 * s * s * t * b[axis] + 3 * s * t * t * c[axis] + t ** 3 * d[axis]))
-    }
-  }
-  return cleanContour(out)
 }
 
 function buildLevel(kit, variant, spec, lod) {
@@ -266,9 +224,9 @@ function buildLevel(kit, variant, spec, lod) {
   }
 
   const keyWidth = whites.length * KEY_SPACING
-  const caseMat = spec.kind === 'upright' ? 'wood' : spec.kind === 'grand' ? 'lacquer' : 'plastic'
+  const caseMat = 'plastic'
   const cheekWidth = (spec.width - keyWidth) / 2 - 0.004
-  const bodyRear = 0.12 - (spec.kind === 'upright' || spec.kind === 'grand' ? 0.4 : spec.depth)
+  const bodyRear = 0.12 - spec.depth
   add('Case_Base', groups.Case, atBox(0, 0.672, (bodyRear + 0.12) / 2, spec.width, 0.044, 0.12 - bodyRear), caseMat)
   for (const side of [-1, 1]) {
     add(`Case_Cheek_${side < 0 ? 'Left' : 'Right'}`, groups.Case,
@@ -278,7 +236,7 @@ function buildLevel(kit, variant, spec, lod) {
   add('Keybed_FeltStrip', groups.Keybed, atBox(0, 0.743, KEY_REAR - 0.01, keyWidth, 0.014, 0.012, 0.001), 'felt', 'rubber')
   add('Case_FallboardRail', groups.Case, atBox(0, 0.747, KEY_REAR - 0.018, keyWidth + 0.015, 0.042, 0.012), caseMat)
 
-  if (spec.kind === 'digital' || spec.kind === 'stage') {
+  {
     add('Controls_Panel', groups.Controls, atBox(0, 0.735, (bodyRear - 0.063) / 2, spec.width - 0.016, 0.07, -0.063 - bodyRear, 0.004), 'panel', 'hardware')
     const screenWorld = M.t(0, 0.7715, -0.116)
     add('Display_Screen', groups.Display, atBox(0, 0, 0, 0.096, 0.003, 0.039, 0.001), 'glass', 'screen', screenWorld)
@@ -310,53 +268,7 @@ function buildLevel(kit, variant, spec, lod) {
     ), 'rubber', 'rubber')
   }
 
-  if (spec.kind === 'upright') {
-    add('Case_LowerCabinet', groups.Case, atBox(0, 0.348, -0.185, spec.width - 0.09, 0.66, 0.49, 0.009), 'wood')
-    add('Case_UpperCabinet', groups.Case, atBox(0, 0.995, -0.22, spec.width, 0.45, 0.52, 0.009), 'wood')
-    add('Case_UpperPanel', groups.Case, atBox(0, 0.996, 0.044, spec.width - 0.12, 0.325, 0.015, 0.003), 'wood')
-    add('Case_PanelTrim', groups.Case, merge(
-      atBox(0, 0.828, 0.055, spec.width - 0.1, 0.012, 0.02), atBox(0, 1.164, 0.055, spec.width - 0.1, 0.012, 0.02),
-    ), 'brass', 'hardware')
-    const lidWorld = M.t(0, 1.223, -0.472)
-    add('Upright_TopLid', groups.OptionalPianoComponents, atBox(0, 0.006, 0.258, spec.width + 0.012, 0.012, 0.538, 0.003), 'wood', 'drum', lidWorld,
-      { pivot: 'rear hinge', axis: 'x' })
-    for (const side of [-1, 1]) {
-      add(`Stand_UprightToe_${side < 0 ? 'Left' : 'Right'}`, groups.Stand,
-        atBox(side * (spec.width / 2 - 0.065), 0.036, -0.03, 0.082, 0.072, 0.39, 0.007), 'wood')
-    }
-  } else if (spec.kind === 'grand') {
-    const contour = grandContour(spec.width, spec.depth, lod)
-    add('Grand_CurvedRim', groups.Case, rim(contour, 0.029, 0.69, 0.85), 'lacquer')
-    const inside = insetContour(contour, 0.033)
-    add('Grand_Soundboard', groups.OptionalPianoComponents, extrude(inside, 0.716, 0.73, 0.001), 'soundboard')
-    const frame = merge(
-      rod([-0.53, 0.758, -0.2], [-0.27, 0.758, -1.45], 0.025, [20, 12, 6][lod]),
-      rod([0.08, 0.758, -0.19], [-0.12, 0.758, -1.34], 0.021, [20, 12, 6][lod]),
-      rod([0.54, 0.758, -0.2], [0.1, 0.758, -0.94], 0.019, [20, 12, 6][lod]),
-      rod([-0.56, 0.758, -0.34], [0.5, 0.758, -0.34], 0.022, [20, 12, 6][lod]),
-    )
-    add('Grand_CastFrame', groups.OptionalPianoComponents, frame, 'brass', 'hardware')
-    if (lod < 2) {
-      const strings = []
-      for (let i = 0; i < 88; i++) {
-        const ratio = i / 87, x = -0.52 + ratio * 1.04
-        for (let wire = 0; wire < (lod === 0 && i > 18 ? 2 : 1); wire++) {
-          strings.push(rod([x + wire * 0.0025, 0.79, -0.18], [-0.31 + ratio * 0.58 + wire * 0.0025, 0.79, -1.49 + ratio * 0.97], 0.0007, [6, 4][lod]))
-        }
-      }
-      add('Grand_Strings', groups.OptionalPianoComponents, merge(...strings), 'steel', 'hardware')
-    }
-    const hinge = M.chain(M.t(-spec.width / 2, 0.864, 0), M.rz(0.3))
-    add('Grand_Lid', groups.OptionalPianoComponents,
-      extrude(contour.map(([x, z]) => [x + spec.width / 2, z]), -0.005, 0.007, 0.001),
-      'lacquer', 'drum', hinge, { pivot: 'left longitudinal hinge', axis: 'z', angle: 0.3 })
-    add('Grand_LidProp', groups.OptionalPianoComponents,
-      rod([0.42, 0.847, -0.55], M.point(hinge, [1.12, -0.006, -0.55]), 0.012, [20, 12, 6][lod]), 'wood')
-    for (const [name, x, z] of [['FrontLeft', -0.59, -0.16], ['FrontRight', 0.59, -0.16], ['Rear', -0.33, -1.35]]) {
-      add(`Stand_GrandLeg_${name}`, groups.Stand, atBox(x, 0.346, z, 0.088, 0.656, 0.088, 0.012), 'lacquer')
-      add(`Stand_GrandFoot_${name}`, groups.Stand, atBox(x, 0.016, z, 0.102, 0.032, 0.102, 0.008), 'rubber', 'rubber')
-    }
-  } else if (spec.kind === 'stage') {
+  {
     add('Stand_XBrace_Left', groups.Stand, rod([-0.46, 0.043, -0.046], [0.46, 0.627, -0.046], 0.023, [24, 16, 8][lod]), 'panel', 'hardware')
     add('Stand_XBrace_Right', groups.Stand, rod([0.46, 0.043, 0.006], [-0.46, 0.627, 0.006], 0.023, [24, 16, 8][lod]), 'panel', 'hardware')
     add('Stand_XBrace_Hinge', groups.Stand, rod([0, 0.335, -0.09], [0, 0.335, 0.05], 0.034, [24, 16, 8][lod]), 'panel', 'hardware')
@@ -368,21 +280,9 @@ function buildLevel(kit, variant, spec, lod) {
         atBox(x, 0.004, -0.231, 0.052, 0.008, 0.059, 0.003), atBox(x, 0.004, 0.158, 0.052, 0.008, 0.059, 0.003),
       ), 'rubber', 'rubber')
     }
-  } else {
-    for (const side of [-1, 1]) {
-      const x = side * (spec.width / 2 - 0.076)
-      add(`Stand_${side < 0 ? 'Left' : 'Right'}`, groups.Stand, atBox(x, 0.334, -0.035, 0.052, 0.632, 0.265, 0.005), 'plastic')
-      add(`Stand_Foot_${side < 0 ? 'Left' : 'Right'}`, groups.Stand, atBox(x, 0.018, -0.025, 0.075, 0.036, 0.445, 0.006), 'plastic')
-      add(`Stand_Rubber_${side < 0 ? 'Left' : 'Right'}`, groups.Stand, merge(
-        atBox(x, 0.004, -0.213, 0.067, 0.008, 0.045, 0.002), atBox(x, 0.004, 0.163, 0.067, 0.008, 0.045, 0.002),
-      ), 'rubber', 'rubber')
-    }
-    add('Stand_Crossbar', groups.Stand, atBox(0, 0.415, -0.162, spec.width - 0.13, 0.115, 0.033, 0.004), 'plastic')
   }
 
-  const restWorld = spec.kind === 'upright'
-    ? M.chain(M.t(0, 0.806, 0.065), M.rx(-0.24))
-    : M.chain(M.t(0, 0.77, -0.22), M.rx(-0.18))
+  const restWorld = M.chain(M.t(0, 0.77, -0.22), M.rx(-0.18))
   const restWidth = Math.min(0.65, spec.width - 0.36)
   const rest = add('MusicRest_Board', groups.MusicRest, atBox(0, 0.144, 0, restWidth, 0.288, 0.012, 0.006), caseMat, 'drum', restWorld,
     { pivot: 'lower hinge', axis: 'x' })
@@ -399,13 +299,6 @@ function buildLevel(kit, variant, spec, lod) {
     add(`Pedal_${name}_Hinge`, groups.Pedals, rod([i * 0.068 - 0.022, 0.038, 0.171], [i * 0.068 + 0.022, 0.038, 0.171], 0.006, [16, 12, 8][lod]), 'steel', 'hardware')
     pedals.push({ name: `Pedal_${name}`, controller, actuation })
   }
-  if (spec.kind === 'grand') {
-    add('Pedals_Lyre', groups.Pedals, merge(
-      rod([-0.072, 0.64, -0.045], [-0.072, 0.07, 0.178], 0.019, [16, 12, 8][lod]),
-      rod([0.072, 0.64, -0.045], [0.072, 0.07, 0.178], 0.019, [16, 12, 8][lod]),
-    ), 'lacquer')
-  }
-
   const benchZ = 0.605
   const cushion = add('Bench_Cushion', groups.Bench, atBox(0, 0.475, benchZ, 0.56, 0.05, 0.325, 0.018), 'vinyl', 'rubber')
   add('Bench_Piping', cushion, merge(
@@ -444,7 +337,7 @@ function bounds(doc, root) {
 export async function buildPianos(outDir, { maps = true } = {}) {
   await mkdir(outDir, { recursive: true })
   const manifest = {
-    schemaVersion: 1, defaultVariant: 'digital_keyboard_88',
+    schemaVersion: 1, defaultVariant: 'stage_piano_88',
     axes: { units: 'metres', up: '+Y', playerRight: '+X', player: '+Z', keyDepressionAxis: '+X' },
     runtimeLooks: ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint'],
     variants: {},
@@ -470,7 +363,7 @@ export async function buildPianos(outDir, { maps = true } = {}) {
       lod: { triangles, budgets: LOD_BUDGETS, screenCoverage: [0.35, 0.12, 0] },
       bounds: bounds(doc, main.root),
       runtime: 'Key and pedal actuation follows explicit MIDI-valued note/controller data on the shared transport. Highlights, hand/finger/note labels, chord states and guidance are applied per key at runtime. Missing fingering or pedal data is not inferred.',
-      reference: variant === 'digital_keyboard_88' ? 'User-supplied multi-view digital piano sheet; written dimensions and MIDI layout are authoritative.' : 'Original unbranded instrument variant using the same modular keybed and credible real-world proportions.',
+      reference: 'Original unbranded instrument variant using the same modular keybed and credible real-world proportions.',
     }
     Object.assign(root.extras, metadata, { MSFT_screencoverage: [0.35, 0.12, 0] })
     doc.json.scenes = [{ name: 'KeyboardInstrument', nodes: [main.root] }]

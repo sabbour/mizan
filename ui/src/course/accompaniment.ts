@@ -182,7 +182,7 @@ export function genreBacking(style: string, bars: number, beatsPerBar: number, f
   const spec = STYLES[style]
   if (!spec) throw new Error(`No backing for the ${style} style`)
   if (bars !== 2 && bars !== 4) throw new Error(`Genre backing needs two or four bars, not ${bars}`)
-  const chords = bars === 2 ? [...spec.progression.two] : [...spec.progression.four]
+  const chords = progression(style, bars)
   const bass: MelodyNote[] = []
   const harmony: MelodyNote[] = []
   for (let bar = 0; bar < bars; bar++) {
@@ -195,17 +195,20 @@ export function genreBacking(style: string, bars: number, beatsPerBar: number, f
     for (const [at, beats, velocity = 0.6] of clip(spec.comping[bar % spec.comping.length], end))
       for (const midi of tones) harmony.push({ trackId: 'harmony', midi, startBeat: start + at, beats, velocity })
   }
-  const progression = chords.join(' – ')
+  const written = chords.join(' – ')
   return {
     style, chords,
     tracks: [
       { id: 'bass', instrument: 'other', gmProgram: spec.bass.program, name: spec.bass.name,
-        detail: `Backing bass line over ${progression}, original and generated for this lesson (not transcribed)` },
+        detail: `Backing bass line over ${written}, original and generated for this lesson (not transcribed)` },
       { id: 'harmony', instrument: 'other', gmProgram: spec.harmony.program, name: spec.harmony.name,
-        detail: `Backing chords ${progression}, original and generated for this lesson (not transcribed)` },
+        detail: `Backing chords ${written}, original and generated for this lesson (not transcribed)` },
     ],
     notes: { bass, harmony },
   }
 }
 
 export const backingKey = (style: string) => STYLES[style].key
+
+/** The style's chords for a two- or four-bar lesson, one per bar. */
+export const progression = (style: string, bars: number) => bars === 2 ? [...STYLES[style].progression.two] : [...STYLES[style].progression.four]

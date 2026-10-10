@@ -9,9 +9,12 @@ import { LOOKS } from './prefs'
  */
 
 export type Target = KitPiece | 'hatPedal'
+/** A piano key by MIDI pitch, or a piano pedal by its MIDI controller (64 sustain, 66 sostenuto, 67 soft). */
+export type KeyTarget = `key:${number}` | `pedal:${number}`
+export type AnyTarget = Target | KeyTarget
 export type Vec3 = [number, number, number]
 /** How a part reacts to a hit: heads press in, cymbals wobble, the hi-hat top rides its rod, pedals and the beater swing. */
-export type Motion = 'head' | 'cymbal' | 'hat' | 'pedal' | 'beater'
+export type Motion = 'head' | 'cymbal' | 'hat' | 'pedal' | 'beater' | 'press'
 export type MaterialView = {
   name: string
   base: [number, number, number, number]
@@ -33,7 +36,7 @@ export type Item = {
   material: MaterialView
   /** World matrix of the item's frame (identity for merged static batches). */
   frame: Float32Array
-  target?: Target
+  target?: AnyTarget
   /** The part glows with its target's feedback (a playable surface). */
   glows: boolean
   motion?: Motion
@@ -43,8 +46,8 @@ export type Item = {
 export type Prepared = { items: Item[]; anchors: Map<KitPiece, Vec3>; center: Vec3; radius: number; hatStates: Record<string, number>; images: number }
 export type Asset = { json: Gltf; bin: Uint8Array; images: Promise<(ImageBitmap | null)[]> }
 
-type Node = { name: string; mesh?: number; children?: number[]; translation?: number[]; rotation?: number[]; extras?: Record<string, unknown>; extensions?: Record<string, { ids?: number[] }> }
-type Gltf = {
+export type Node = { name: string; mesh?: number; children?: number[]; translation?: number[]; rotation?: number[]; extras?: Record<string, unknown>; extensions?: Record<string, { ids?: number[] }> }
+export type Gltf = {
   scenes: { nodes: number[] }[]; scene?: number
   nodes: Node[]
   meshes: { name: string; primitives: { attributes: Record<string, number>; indices: number; material: number; extensions?: { KHR_materials_variants?: { mappings: { material: number; variants: number[] }[] } } }[] }[]
@@ -89,16 +92,19 @@ const cache = new Map<string, Promise<Asset>>()
 export const kitBase = () => (globalThis as { __mizanKitAssets?: string }).__mizanKitAssets ?? `${import.meta.env.BASE_URL ?? '/'}models/`
 
 /** Fetches and parses a kit once per session; later looks and remounts reuse it. */
-export function loadKit(kit: KitType): Promise<Asset> {
-  const url = kitBase() + KIT_FILE[kit]
+export const loadKit = (kit: KitType): Promise<Asset> => loadGlb(KIT_FILE[kit])
+
+/** Fetches and parses a model in the models folder once per session. */
+export function loadGlb(file: string): Promise<Asset> {
+  const url = kitBase() + file
   let pending = cache.get(url)
   if (!pending) {
     pending = (async () => {
       const response = await fetch(url)
-      if (!response.ok) throw new Error(`${KIT_FILE[kit]} is not available (${response.status})`)
+      if (!response.ok) throw new Error(`${file} is not available (${response.status})`)
       const bytes = new Uint8Array(await response.arrayBuffer())
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-      if (view.getUint32(0, true) !== 0x46546c67) throw new Error(`${KIT_FILE[kit]} is not a binary glTF file`)
+      if (view.getUint32(0, true) !== 0x46546c67) throw new Error(`${file} is not a binary glTF file`)
       const jsonLength = view.getUint32(12, true)
       const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as Gltf
       const binLength = view.getUint32(20 + jsonLength, true)
@@ -116,7 +122,7 @@ export function loadKit(kit: KitType): Promise<Asset> {
           return await createImageBitmap(blob, { ...size, resizeQuality: 'high' })
         } catch (error) {
           // The kit still draws, with that map's plain material colour instead of the texture.
-          console.error(`${KIT_FILE[kit]}: texture ${index}${image.name ? ` (${image.name})` : ''} could not be decoded; drawing its material without it.`, error)
+          console.error(`${file}: texture ${index}${image.name ? ` (${image.name})` : ''} could not be decoded; drawing its material without it.`, error)
           return null
         }
       }))
@@ -129,12 +135,12 @@ export function loadKit(kit: KitType): Promise<Asset> {
 }
 
 // ---------- small matrix helpers (column-major) ----------
-const mul = (a: ArrayLike<number>, b: ArrayLike<number>) => {
+export const mul = (a: ArrayLike<number>, b: ArrayLike<number>) => {
   const out = new Float32Array(16)
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) out[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]
   return out
 }
-const trs = (node: Node) => {
+export const trs = (node: Node) => {
   const [x, y, z, w] = node.rotation ?? [0, 0, 0, 1]
   const [tx, ty, tz] = node.translation ?? [0, 0, 0]
   return new Float32Array([
@@ -144,9 +150,9 @@ const trs = (node: Node) => {
     tx, ty, tz, 1,
   ])
 }
-const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+export const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
 
-function read(asset: Asset, accessorIndex: number): Float32Array | Uint32Array {
+export function read(asset: Asset, accessorIndex: number): Float32Array | Uint32Array {
   const { json, bin } = asset
   const a = json.accessors[accessorIndex]
   const view = json.bufferViews[a.bufferView]
@@ -158,7 +164,7 @@ function read(asset: Asset, accessorIndex: number): Float32Array | Uint32Array {
   return Uint32Array.from(new Uint16Array(buffer.slice(offset, offset + a.count * 2)))
 }
 
-function material(json: Gltf, index: number): MaterialView {
+export function material(json: Gltf, index: number): MaterialView {
   const m = json.materials[index]
   const pbr = m.pbrMetallicRoughness ?? {}
   return {

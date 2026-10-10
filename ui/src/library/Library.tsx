@@ -5,7 +5,9 @@ import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
 import { activeAnalysis, analysisProgress, ago, clock, decodingErrorHeadline, jobExecutionLabel, jobQueueLabel, jobQueuePosition, jobTitle, jobStageLabel, jobStagePercent, resumeParts, sourceLine, took } from './format'
 import { CourseSection } from '../course/Course'
+import type { CourseBrowse } from '../course/browse'
 import { LESSONS } from '../course/curriculum'
+import { PIANO_LESSONS } from '../course/piano'
 import './library.css'
 
 type Problem = { message: string; fix: string | null }
@@ -17,9 +19,12 @@ type Props = {
   version: number
   onQueueChange: () => void
   onOpen: (entry: Entry) => void
-  /** Opens a built-in drum course lesson. */
+  /** Opens a built-in drum or piano lesson. */
   onLesson: (id: string) => void
-  /** Songs or Drum course; held by the app so it survives opening a song or lesson. */
+  /** Where the Course tab is (instrument, drum list, genre); held by the app, not stored. */
+  courseBrowse: CourseBrowse
+  onCourseBrowse: (value: CourseBrowse) => void
+  /** Songs or Course; held by the app so it survives opening a song or lesson. */
   tab: LibraryTab
   onTab: (tab: LibraryTab) => void
   onDetails: (job: QueueJob) => void
@@ -57,9 +62,9 @@ function inFolder(entry: Entry, id: string) {
 }
 
 export type LibraryTab = 'songs' | 'course'
-const TABS: { id: LibraryTab; label: string }[] = [{ id: 'songs', label: 'Songs' }, { id: 'course', label: 'Drum course' }]
+const TABS: { id: LibraryTab; label: string }[] = [{ id: 'songs', label: 'Songs' }, { id: 'course', label: 'Course' }]
 
-export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDetails, selectedJob, onCredits, tab, onTab: setTab }: Props) {
+export function Library({ jobs, version, onQueueChange, onOpen, onLesson, courseBrowse, onCourseBrowse, onDetails, selectedJob, onCredits, tab, onTab: setTab }: Props) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedFolder, setSelectedFolder] = useState('all')
@@ -884,7 +889,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
                 ;(event.currentTarget.parentElement?.querySelector(`[data-tab="${TABS[to].id}"]`) as HTMLElement | null)?.focus()
               }}>
               {item.label}
-              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length}</span>
+              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length + PIANO_LESSONS.length}</span>
               {item.id === 'songs' && queueJobs.length > 0 && tab !== 'songs' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
             </button>
           ))}
@@ -956,7 +961,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, onDeta
         </div>
 
         <div role="tabpanel" id="lib-panel-course" aria-labelledby="lib-tab-course" hidden={tab !== 'course'}>
-          {tab === 'course' && <CourseSection onLesson={onLesson} />}
+          {tab === 'course' && <CourseSection onLesson={onLesson} browse={courseBrowse} onBrowse={onCourseBrowse} />}
         </div>
       </main>
 

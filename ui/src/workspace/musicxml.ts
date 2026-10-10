@@ -365,6 +365,12 @@ function typeOf(duration: number, division = DIV): string {
 const SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
 
+/** Spell in flats in a flat key, for authored music with no analysed chords to spell from (Eb major, F minor). */
+function keyFlats(song: Song): boolean {
+  if (song.chords.length || !song.key) return false
+  return (song.key.mode === 'major' ? ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'] : ['D', 'G', 'C', 'F', 'Bb', 'Eb']).includes(song.key.tonic)
+}
+
 function pitch(midi: number, flats: boolean): string {
   const base = Math.ceil(midi - 0.5)
   const name = (flats ? FLAT : SHARP)[((base % 12) + 12) % 12]
@@ -372,7 +378,7 @@ function pitch(midi: number, flats: boolean): string {
   return `<pitch><step>${name[0]}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${Math.floor(base / 12) - 1}</octave></pitch>`
 }
 
-type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean }
+type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean; finger?: number }
 type Event = { pos: number; dur: number; heads: Head[] }
 
 function voice(events: Event[], voiceNo: number, staff: number, stem: string | null, barDivs: number, division = DIV): string {
@@ -400,8 +406,9 @@ function voice(events: Event[], voiceNo: number, staff: number, stem: string | n
         const start = head.start || index < lengths.length - 1
         const ties = `${stop ? '<tie type="stop"/>' : ''}${start ? '<tie type="start"/>' : ''}`
         const articulation = head.staccato && !stop && !index ? '<articulations><staccato/></articulations>' : ''
-        const notation = stop || start || articulation
-          ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}${articulation}</notations>`
+        const fingering = head.finger && !stop && !index ? `<technical><fingering>${head.finger}</fingering></technical>` : ''
+        const notation = stop || start || articulation || fingering
+          ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}${articulation}${fingering}</notations>`
           : ''
         xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length, division)}${stem ? `<stem>${stem}</stem>` : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : ''}</note>`
       })
@@ -433,7 +440,7 @@ function measureOpen(n: number, attributes: string, song: Song): string {
 const KIND: Record<string, string> = {
   '': 'major', m: 'minor', '7': 'dominant', m7: 'minor-seventh', maj7: 'major-seventh', add9: 'major',
   sus4: 'suspended-fourth', sus2: 'suspended-second', dim: 'diminished', aug: 'augmented',
-  m7b5: 'half-diminished', '6': 'major-sixth', m6: 'minor-sixth',
+  m7b5: 'half-diminished', '6': 'major-sixth', m6: 'minor-sixth', '5': 'power', '9': 'dominant-ninth',
 }
 
 const step = (letter: string, acc: string | undefined, tag: 'root' | 'bass') =>
@@ -465,7 +472,8 @@ function annotations(song: Song, bar: number, chords: boolean, scale = 1): strin
     xml += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit>${compound ? '<beat-unit-dot/>' : ''}<per-minute>${Math.round(compound ? tempo / 1.5 : tempo)}</per-minute></metronome></direction-type><sound tempo="${Math.round(tempo * 1000) / 1000}"/></direction>`
   }
   let cursor = 0
-  for (const c of song.chords) {
+  const names = song.chords.length ? song.chords : song.chordLabels ?? []
+  for (const c of names) {
     const pos = (grid.toDiv(c.startBeat) - span.startDiv) * scale
     if (!chords || pos < 0 || pos >= (span.endDiv - span.startDiv) * scale || c.symbol === null) continue
     const h = harmony(c.symbol)
@@ -482,17 +490,18 @@ function annotations(song: Song, bar: number, chords: boolean, scale = 1): strin
 export function pianoXml(song: Song, chords = true): string {
   const grid = notationGrid(song)
   const DIV = grid.division
+  const spelled = keyFlats(song)
   const notes = notationNotes(song.piano, 'piano', song).map((note) => ({
     ...note,
     flats: song.chords.find((chord) =>
-      chord.startBeat <= note.startBeat && chord.startBeat + chord.beats > note.startBeat)?.flats ?? false,
+      chord.startBeat <= note.startBeat && chord.startBeat + chord.beats > note.startBeat)?.flats ?? spelled,
   }))
   const attrs = `<attributes><divisions>${DIV}</divisions><key><fifths>0</fifths></key>${timeXml(song)}<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes>`
   const lines = voiceLines(notes.map((note) => ({
     startDiv: note.startDiv,
     endDiv: note.endDiv,
     staff: note.source.hand === 'left' ? 2 : 1,
-    head: { xml: pitch(note.midi, note.flats), staccato: note.staccato },
+    head: { xml: pitch(note.midi, note.flats), staccato: note.staccato, finger: note.source.finger },
   })), true)
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
@@ -635,7 +644,7 @@ export function instrumentXml(song: Song, track: Track): string {
       startDiv: note.startDiv,
       endDiv: note.endDiv,
       staff: split && note.midi < 60 ? 2 : 1,
-      head: { xml: pitch(base, false), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
+      head: { xml: pitch(base, keyFlats(song)), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
     }
   }))
   const measures: string[] = []

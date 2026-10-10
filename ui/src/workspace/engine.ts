@@ -476,10 +476,18 @@ export class Engine {
         }
       }
     })
+    // A written sustain pedal holds a piano note until the pedal lifts; without written pedalling notes end as written.
+    const sustains = (song.pedals ?? []).filter((pedal) => pedal.controller === 64)
+    const released = (n: PianoNote) => {
+      const end = n.startBeat + n.beats
+      const pedal = sustains.find((item) => item.startBeat < end - 1e-9 && end < item.startBeat + item.beats - 1e-9)
+      return pedal ? pedal.startBeat + pedal.beats : end
+    }
     const note = (n: PianoNote, id: string) => {
-      if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) return
+      const end = id === 'piano' ? released(n) : n.startBeat + n.beats
+      if (!inRange(n.startBeat) && !(resume && n.startBeat < from && end > from)) return
       const start = Math.max(n.startBeat, from)
-      const duration = this.seconds(start, n.startBeat + n.beats)
+      const duration = this.seconds(start, end)
       if (id === 'piano') this.piano(at(start), n, duration, n.trackId ?? song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano')
       else this.lead(at(start), n, duration, id)
     }

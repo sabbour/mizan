@@ -6,13 +6,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { M, readGlb, v } from './kits/gltf.mjs'
 
+/** The one instrument the app offers. */
 const EXPECTED = {
-  digital_keyboard_61: { file: 'KeyboardDigital61.glb', low: 36, high: 96, white: 36, black: 25 },
-  digital_keyboard_76: { file: 'KeyboardDigital76.glb', low: 28, high: 103, white: 45, black: 31 },
-  digital_keyboard_88: { file: 'KeyboardDigital88.glb', low: 21, high: 108, white: 52, black: 36 },
   stage_piano_88: { file: 'StagePiano88.glb', low: 21, high: 108, white: 52, black: 36 },
-  upright_piano_88: { file: 'UprightPiano88.glb', low: 21, high: 108, white: 52, black: 36 },
-  grand_piano_88: { file: 'GrandPiano88.glb', low: 21, high: 108, white: 52, black: 36 },
 }
 const GROUPS = ['Case', 'Keybed', 'Controls', 'Display', 'Speakers', 'MusicRest', 'Stand', 'Pedals', 'Bench', 'OptionalPianoComponents']
 const PITCHES = ['C', 'Cs', 'D', 'Ds', 'E', 'F', 'Fs', 'G', 'Gs', 'A', 'As', 'B']
@@ -189,8 +185,7 @@ function validate(doc, bin, expected, variant, { geometry = true } = {}) {
       assert.equal(node.extras.actuation.axis, 'x')
       assert.ok(node.extras.actuation.angle > 0 && node.extras.actuation.angle < 0.2)
     }
-    if (variant === 'upright_piano_88') assert.ok(named.has('Upright_TopLid'))
-    if (variant === 'grand_piano_88') for (const name of ['Grand_CurvedRim', 'Grand_Soundboard', 'Grand_CastFrame', 'Grand_Lid', 'Grand_LidProp']) assert.ok(named.has(name))
+    for (const name of ['Stand_XBrace_Left', 'Stand_XBrace_Right', 'Stand_XBrace_Hinge']) assert.ok(named.has(name), `LOD${lod}: X stand ${name}`)
     let triangles = 0, primitives = 0
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
     for (const index of seen) {
@@ -218,12 +213,7 @@ function validate(doc, bin, expected, variant, { geometry = true } = {}) {
     assert.ok(approx(min[1], 0), `LOD${lod}: floating or underground instrument`)
     assert.ok(max[2] > 0.75 && max[2] < 0.8, `LOD${lod}: bench placement`)
     assert.ok(max[0] - min[0] >= 1 && max[0] - min[0] < 1.56, `LOD${lod}: credible instrument width`)
-    if (variant === 'digital_keyboard_88') {
-      assert.ok(approx(max[0] - min[0], 1.4), 'Default digital piano width')
-      assert.ok(max[1] >= 1.04 && max[1] < 1.1, 'Default digital piano music rest height')
-    }
-    if (variant === 'upright_piano_88') assert.ok(max[1] >= 1.05 && max[1] <= 1.35, 'Upright height')
-    if (variant === 'grand_piano_88') assert.ok(max[2] - min[2] >= 2.2 && max[2] - min[2] <= 2.8, 'Grand case length and bench')
+    assert.ok(approx(max[0] - min[0], 1.38), 'Stage piano width')
     summary.push({ lod, triangles, primitives, keys: meshes.size, bounds: { min, max } })
   }
   return summary
@@ -238,7 +228,7 @@ for (let i = 0; i < args.length; i++) {
   } else throw new Error(`Unknown or incomplete piano validation argument: ${args[i]}`)
 }
 const manifest = JSON.parse(await readFile(join(directory, 'KeyboardInstruments.json'), 'utf8'))
-assert.equal(manifest.defaultVariant, 'digital_keyboard_88')
+assert.equal(manifest.defaultVariant, 'stage_piano_88')
 assert.deepEqual(Object.keys(manifest.variants), Object.keys(EXPECTED))
 const results = []
 for (const [variant, expected] of Object.entries(EXPECTED)) {
@@ -254,4 +244,4 @@ for (const [variant, expected] of Object.entries(EXPECTED)) {
   console.log(`${expected.file}: exact MIDI/key/material/pivot/hierarchy/PBR contracts and closed geometry passed for all 3 LODs`)
 }
 if (report) await writeFile(report, JSON.stringify({ passed: true, assets: results }, null, 2))
-console.log('All six piano variants passed. Visual reference comparison and actual runtime animation remain separate acceptance checks.')
+console.log('The stage piano passed. Visual reference comparison and actual runtime animation remain separate acceptance checks.')

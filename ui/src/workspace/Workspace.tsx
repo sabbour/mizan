@@ -15,6 +15,7 @@ import { ChordView, type ChordMode } from './ChordView'
 import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
 import { DrumKitView } from './DrumKitView'
+import { PianoView } from './PianoView'
 import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
 import './workspace.css'
@@ -33,7 +34,7 @@ type Props = {
   onDeleteTrack?: (trackId: string) => Promise<void>
   analysisNotice?: ReactNode
   /** Starting choices for this song only, e.g. a drum lesson opens with the click on and the 3D kit. */
-  defaults?: { click?: boolean; drums?: PracticeView }
+  defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView }
 }
 
 const DEMO = buildSong()
@@ -67,7 +68,7 @@ export function Workspace({
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
-  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: 'score', drums: defaults?.drums ?? 'score' })
+  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({ piano: defaults?.piano ?? 'score', drums: defaults?.drums ?? 'score' })
   const [noteNames, setNoteNames] = useState(false)
   const [smooth, setSmooth] = useState(false)
   // The accompaniment as played: with smooth voicing, each chord in the inversion nearest the one before (read as C/E).
@@ -106,6 +107,7 @@ export function Workspace({
   )
   // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
   const kitPane = !chart && instrument === 'drums' && practice.drums === 'kit'
+  const keyboardPane = !chart && instrument === 'piano' && practice.piano === 'keyboard'
   const sticking = useMemo(() => instrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
     [instrument, showSticking, viewed])
   const xml = useMemo(() => {
@@ -489,6 +491,12 @@ export function Workspace({
           <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={false} instrument="drums" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="kit" onPick={pick} previewId={track?.id ?? 'chords'} />
           {/* The 3D kit sits beside the score, outside it, so redrawing the score never restarts the kit. */}
           <DrumKitView song={viewed} engine={engine} sticking={sticking} style={kitStyle} onStyle={chooseKitStyle} />
+        </div>
+      ) : keyboardPane ? (
+        <div className="ws-split">
+          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames} instrument="piano" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="keyboard" onPick={pick} previewId={track?.id ?? 'chords'} />
+          {/* Like the kit, the 3D keyboard sits beside the score so redrawing the score never restarts it. */}
+          <PianoView song={viewed} engine={engine} />
         </div>
       ) : chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />

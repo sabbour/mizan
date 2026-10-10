@@ -67,6 +67,29 @@
   .ws-split > .practice-kit .practice-stage { height: 180px; min-height: 0; }
 }
 .practice-hands .practice-canvas { display: block; width: 100%; max-width: 1320px; height: 150px; margin: 0 auto; }
+/* The 3D keyboard: written finger numbers over the keys that are down, in the hand's colour. */
+.piano-fingers { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.piano-finger {
+  --lift: 0px;
+  position: absolute;
+  translate: -50% calc(-100% - var(--lift));
+  margin-top: -6px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: #fff;
+  font: 700 12px/18px "Archivo Variable", sans-serif;
+  text-align: center;
+}
+/* A stacked number keeps a line down to its key. */
+.piano-finger::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1.5px; height: calc(var(--lift) + 6px); translate: -50% 0; background: currentColor; opacity: 0.55; }
+.piano-finger-left { background: var(--hand-left); color: #fff; }
+.piano-finger-left::after { background: var(--hand-left); }
+.piano-finger-right::after { background: var(--hand-right); }
+.piano-finger-right { background: var(--hand-right); }
+.practice-piano > .practice-failure { position: static; display: block; padding: 8px 12px; }
+.practice-piano .practice-stage[hidden] { display: none; }
+.practice-piano > .practice-hands { margin: 0; }
 .practice-kit .practice-stage { position: relative; max-width: 1320px; height: 280px; margin: 0 auto; }
 .practice-kit .practice-canvas { display: block; width: 100%; height: 100%; }
 .kit-label {
@@ -106,8 +129,8 @@
 }
 .practice-note { color: var(--ink-3); }
 .legend-key { display: inline-block; width: 12px; height: 12px; margin-right: -6px; border-radius: 2px; }
-.legend-right { background: var(--accent); }
-.legend-left { background: var(--ink-2); }
+.legend-right { background: var(--hand-right); }
+.legend-left { background: var(--hand-left); }
 .kit-pill {
   padding: 2px 8px;
   border: 1px solid var(--line-2);
@@ -1377,6 +1400,15 @@
 .lesson-steps ol { max-width: 75ch; margin: 6px 0 0; padding-left: 20px; line-height: 1.5; }
 .lesson-note { max-width: 75ch; margin: 6px 0 0; color: var(--ink-2); font-size: 12px; }
 .lesson-nav { display: flex; flex-shrink: 0; gap: 8px; }
+.lesson-facts div { min-width: 0; }
+.lesson-facts dd { min-width: 0; overflow-wrap: anywhere; }
+.lesson-counts { max-width: 100%; }
+@media (max-width: 960px) {
+  /* Narrow windows: the header's parts wrap onto rows instead of widening the page. */
+  .ws-head { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+  .ws-title { flex: 1 1 100%; }
+  .lesson-panel { flex: 1 1 100%; min-width: 0; }
+}
 @media (max-width: 760px) {
   .lesson-panel { flex-direction: column; }
 }
@@ -1385,4 +1417,15 @@
   .lesson-facts { display: none; }
   .lesson-goal { font-size: 13px; }
   .lesson-nav .btn { padding-block: 4px; }
+}
+
+/* The 3D piano's stage is shaped like a keybed, so the frame is spent on the keys rather than the stand. */
+.practice-piano .practice-stage,
+.ws-split > .practice-piano .practice-stage { flex: none; width: 100%; height: auto; min-height: 150px; aspect-ratio: 3 / 1; }
+
+@media (max-width: 600px) {
+  /* Phones: play and stepping first, then speed and Go to, then the switches; nothing wider than the screen. */
+  .transport { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'main main' 'speed go' 'tools tools'; row-gap: 10px; }
+  .transport-main { justify-self: center; }
+  .goto input { width: 104px; }
 }

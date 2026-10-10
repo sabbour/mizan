@@ -1,4 +1,4 @@
-export type PracticeView = 'score' | 'hands' | 'kit'
+export type PracticeView = 'score' | 'hands' | 'kit' | 'keyboard'
 
 type Props = { instrument: 'piano' | 'drums'; value: PracticeView; onChange: (view: PracticeView) => void }
 
@@ -6,9 +6,10 @@ type Props = { instrument: 'piano' | 'drums'; value: PracticeView; onChange: (vi
 export function PracticeViewPicker({ instrument, value, onChange }: Props) {
   const options: { id: PracticeView; label: string; hint: string }[] = [
     { id: 'score', label: 'Score', hint: 'The score on its own' },
-    instrument === 'piano'
-      ? { id: 'hands', label: 'Hands & keys', hint: 'A keyboard under the score: keys sounding now, by hand, with suggested fingers' }
-      : { id: 'kit', label: 'Drum kit', hint: 'A 3D kit under the score that lights each drum as it is hit' },
+    ...(instrument === 'piano' ? [
+      { id: 'hands' as const, label: 'Hands & keys', hint: 'A keyboard under the score: keys sounding now, by hand, with suggested fingers' },
+      { id: 'keyboard' as const, label: '3D keyboard', hint: 'A 3D piano beside the score: keys press as they play, in their hand\'s colour, with written fingers' },
+    ] : [{ id: 'kit' as const, label: 'Drum kit', hint: 'A 3D kit under the score that lights each drum as it is hit' }]),
   ]
   return (
     <div className="chordview-bar">
