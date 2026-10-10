@@ -176,7 +176,7 @@ try {
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -190,10 +190,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -224,7 +224,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
