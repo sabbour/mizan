@@ -21,3 +21,11 @@
 /host/engine-benchmark*.json
 /host/provider-benchmark.json
 /spikes/local_onnx_results/
+
+update-verification/*.json
+update-verification/*.png
+update-verification/installed-edge-*/
+update-verification/midi-pytest-temp/
+update-verification/mizan-update-gate-*/
+update-verification/__pycache__/
+update-verification/.pytest_cache/
