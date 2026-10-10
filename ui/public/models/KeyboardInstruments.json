@@ -1,0 +1,535 @@
+{
+  "schemaVersion": 1,
+  "defaultVariant": "digital_keyboard_88",
+  "axes": {
+    "units": "metres",
+    "up": "+Y",
+    "playerRight": "+X",
+    "player": "+Z",
+    "keyDepressionAxis": "+X"
+  },
+  "runtimeLooks": [
+    "Realistic",
+    "ClayStudyModel",
+    "NeonRhythm",
+    "TechnicalBlueprint"
+  ],
+  "variants": {
+    "digital_keyboard_61": {
+      "file": "KeyboardDigital61.glb",
+      "name": "61-key digital keyboard",
+      "low": 36,
+      "high": 96,
+      "keys": 61,
+      "whiteKeys": 36,
+      "blackKeys": 25,
+      "bytes": 6444368,
+      "sha256": "b00d671134e3e820071457206a1b2e8ced4c48540f3e327101afae5a543d0f45",
+      "triangles": [
+        59600,
+        31552,
+        11744
+      ],
+      "dimensions": {
+        "bodyWidth": 1.03,
+        "bodyDepth": 0.4,
+        "bodyHeight": 0.12,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.5149999856948853,
+          0,
+          -0.28299999237060547
+        ],
+        "max": [
+          0.5149999856948853,
+          1.0544211487754072,
+          0.7674999833106995
+        ],
+        "size": [
+          1.0299999713897705,
+          1.0544211487754072,
+          1.050499975681305
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    },
+    "digital_keyboard_76": {
+      "file": "KeyboardDigital76.glb",
+      "name": "76-key digital keyboard",
+      "low": 28,
+      "high": 103,
+      "keys": 76,
+      "whiteKeys": 45,
+      "blackKeys": 31,
+      "bytes": 6929952,
+      "sha256": "a6a7b65467088bdd178567c030b32d0ca9664752ef40c2ddb64185340f3cd77a",
+      "triangles": [
+        63572,
+        33796,
+        12596
+      ],
+      "dimensions": {
+        "bodyWidth": 1.22,
+        "bodyDepth": 0.4,
+        "bodyHeight": 0.12,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.6100000143051147,
+          0,
+          -0.28299999237060547
+        ],
+        "max": [
+          0.6100000143051147,
+          1.0544211487754072,
+          0.7674999833106995
+        ],
+        "size": [
+          1.2200000286102295,
+          1.0544211487754072,
+          1.050499975681305
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    },
+    "digital_keyboard_88": {
+      "file": "KeyboardDigital88.glb",
+      "name": "88-key digital piano",
+      "low": 21,
+      "high": 108,
+      "keys": 88,
+      "whiteKeys": 52,
+      "blackKeys": 36,
+      "bytes": 7326904,
+      "sha256": "897cd079354fdd84f7ba2a52fb79c827e2d4444378630be13c5f326c308e4890",
+      "triangles": [
+        66868,
+        35652,
+        13300
+      ],
+      "dimensions": {
+        "bodyWidth": 1.4,
+        "bodyDepth": 0.4,
+        "bodyHeight": 0.12,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.699999988079071,
+          0,
+          -0.28299999237060547
+        ],
+        "max": [
+          0.699999988079071,
+          1.0544211487754072,
+          0.7674999833106995
+        ],
+        "size": [
+          1.399999976158142,
+          1.0544211487754072,
+          1.050499975681305
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    },
+    "stage_piano_88": {
+      "file": "StagePiano88.glb",
+      "name": "88-key stage piano",
+      "low": 21,
+      "high": 108,
+      "keys": 88,
+      "whiteKeys": 52,
+      "blackKeys": 36,
+      "bytes": 7299092,
+      "sha256": "a8f8a8b94bd1a9c5cc9158a7cf11d8cb139b60fca0d4853585445f4759e541ed",
+      "triangles": [
+        65944,
+        35496,
+        13432
+      ],
+      "dimensions": {
+        "bodyWidth": 1.38,
+        "bodyDepth": 0.36,
+        "bodyHeight": 0.12,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.6899999976158142,
+          0,
+          -0.2774635771351108
+        ],
+        "max": [
+          0.6899999976158142,
+          1.0544211487754072,
+          0.7674999833106995
+        ],
+        "size": [
+          1.3799999952316284,
+          1.0544211487754072,
+          1.0449635604458103
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    },
+    "upright_piano_88": {
+      "file": "UprightPiano88.glb",
+      "name": "88-key upright piano",
+      "low": 21,
+      "high": 108,
+      "keys": 88,
+      "whiteKeys": 52,
+      "blackKeys": 36,
+      "bytes": 5736496,
+      "sha256": "f3a5b2d894adebe8b0138ab29e355320db01c68781fa8dcc4340c0a21e30eb62",
+      "triangles": [
+        46108,
+        24940,
+        9372
+      ],
+      "dimensions": {
+        "bodyWidth": 1.5,
+        "bodyDepth": 0.6,
+        "bodyHeight": 1.22,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.7559999823570251,
+          0,
+          -0.48299999994039533
+        ],
+        "max": [
+          0.7559999823570251,
+          1.2350000001043082,
+          0.7674999833106995
+        ],
+        "size": [
+          1.5119999647140503,
+          1.2350000001043082,
+          1.2504999832510948
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    },
+    "grand_piano_88": {
+      "file": "GrandPiano88.glb",
+      "name": "88-key grand piano",
+      "low": 21,
+      "high": 108,
+      "keys": 88,
+      "whiteKeys": 52,
+      "blackKeys": 36,
+      "bytes": 6800480,
+      "sha256": "44e867bf6f4e041f3254d8dff9e000ba1089c1a0e0fb7a456cc455c819c1906f",
+      "triangles": [
+        58724,
+        30116,
+        10036
+      ],
+      "dimensions": {
+        "bodyWidth": 1.5,
+        "bodyDepth": 1.8,
+        "bodyHeight": 0.18,
+        "benchHeight": 0.5
+      },
+      "bounds": {
+        "min": [
+          -0.7520686415104815,
+          0,
+          -1.6799999475479126
+        ],
+        "max": [
+          0.75,
+          1.3139676656223052,
+          0.7674999833106995
+        ],
+        "size": [
+          1.5020686415104816,
+          1.3139676656223052,
+          2.447499930858612
+        ]
+      },
+      "pedals": [
+        {
+          "name": "Pedal_Soft",
+          "controller": 67,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sostenuto",
+          "controller": 66,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        },
+        {
+          "name": "Pedal_Sustain",
+          "controller": 64,
+          "actuation": {
+            "axis": "x",
+            "angle": 0.09103477803741508,
+            "travel": 0.01,
+            "pivot": "rear hinge",
+            "front": [
+              0,
+              0,
+              0.11
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
