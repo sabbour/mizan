@@ -371,7 +371,13 @@ function keyFlats(song: Song): boolean {
   return (song.key.mode === 'major' ? ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'] : ['D', 'G', 'C', 'F', 'Bb', 'Eb']).includes(song.key.tonic)
 }
 
-function pitch(midi: number, flats: boolean): string {
+function pitch(midi: number, flats: boolean, spelled?: string): string {
+  if (spelled) {
+    const natural = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[spelled[0]]!
+    const alter = [...spelled.slice(1)].reduce((sum, mark) => sum + (mark === '#' ? 1 : -1), 0)
+    const octave = Math.round((midi - natural - alter) / 12) - 1
+    return `<pitch><step>${spelled[0]}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${octave}</octave></pitch>`
+  }
   const base = Math.ceil(midi - 0.5)
   const name = (flats ? FLAT : SHARP)[((base % 12) + 12) % 12]
   const alter = (name[1] === '#' ? 1 : name[1] === 'b' ? -1 : 0) + midi - base
@@ -441,6 +447,7 @@ const KIND: Record<string, string> = {
   '': 'major', m: 'minor', '7': 'dominant', m7: 'minor-seventh', maj7: 'major-seventh', add9: 'major',
   sus4: 'suspended-fourth', sus2: 'suspended-second', dim: 'diminished', aug: 'augmented',
   m7b5: 'half-diminished', '6': 'major-sixth', m6: 'minor-sixth', '5': 'power', '9': 'dominant-ninth',
+  m9: 'minor-ninth', maj9: 'major-ninth',
 }
 
 const step = (letter: string, acc: string | undefined, tag: 'root' | 'bass') =>
@@ -501,7 +508,7 @@ export function pianoXml(song: Song, chords = true): string {
     startDiv: note.startDiv,
     endDiv: note.endDiv,
     staff: note.source.hand === 'left' ? 2 : 1,
-    head: { xml: pitch(note.midi, note.flats), staccato: note.staccato, finger: note.source.finger },
+    head: { xml: pitch(note.midi, note.flats, note.source.spell), staccato: note.staccato, finger: note.source.finger },
   })), true)
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {

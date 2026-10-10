@@ -1,351 +1,310 @@
-import type { BarMeter, ChordLabel, Pedal, PianoNote, Song } from '../workspace/song'
-import { backingKey, GENRE_STYLE, genreBacking, parseChord, progression } from './accompaniment'
-import { lessonById, lessonHits, lessonMeter } from './curriculum'
+import { backingKey, GENRE_STYLE, parseChord, progression } from './accompaniment'
+import { lessonById, lessonMeter } from './curriculum'
+import { PIANO_INSPIRED } from './pianoInspired'
+import { arrange, pianoSong, type Arp, type Finger, type LeftCell, type LeftPalette, type Mode, type PianoLesson, type RightPalette, type Strokes } from './pianoParts'
+import { tonalLesson, tonalList } from './pianoTonal'
+
+export type { PianoLesson } from './pianoParts'
 
 /**
- * Piano lessons by genre: five per style, the same styles and progressions as the drum genres. Each lesson is an
- * original two-hand part with written fingering (and pedalling where it matters), played over an original drum and
- * bass backing. The piano part is the lesson; the backing never doubles it.
+ * Piano lessons by genre: ten per style over the same styles, keys and progressions as the drum genres. Steps 1–5 are
+ * eight-bar phrases that teach one thing each; steps 6–10 are sixteen-bar pieces with an A and a B section, richer
+ * chords, syncopation, broken chords, a moving bass and a full arrangement. Each is an original two-hand part with
+ * written fingering (and pedalling where it matters), over an original drum and bass backing that never doubles it.
  */
-
-type Finger = NonNullable<PianoNote['finger']>
-/** Left-hand degrees from the chord root: as for the bass, `8` is the octave and `7` the chord's seventh. */
-type Degree = 'R' | '3' | '5' | '6' | '7' | '8'
-/** One left-hand stroke: start and length in quarter-note beats, the degrees played together, and the finger for each. */
-type LeftCell = [start: number, beats: number, degrees: Degree[], fingers: Finger[]][]
-/** Right-hand chord strokes: start and length in quarter-note beats. */
-type Strokes = [start: number, beats: number][]
-
-type Mode = 'major' | 'minor' | 'mixolydian' | 'dorian'
-const MODES: Record<Mode, number[]> = {
-  major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10], mixolydian: [0, 2, 4, 5, 7, 9, 10], dorian: [0, 2, 3, 5, 7, 9, 10],
-}
 
 type Genre = {
   /** The drum genre's first lesson: its style, meter, tempo and groove back the piano. */
   drums: string
   /** The scale the fills run down. */
   mode: Mode
-  /** Two right-hand rhythms, easier first; each a list of bars taken in turn. */
-  right: [Strokes[], Strokes[]]
-  left: { basic: LeftCell[]; ostinato: LeftCell[] }
-  /** Steps whose chords are held with the sustain pedal, changed each bar. */
+  right: RightPalette
+  left: LeftPalette
+  /** Steps (from 0) whose chords are held with the sustain pedal, changed with each chord. */
   pedal?: number[]
-  words: { right: [string, string]; left: [string, string]; feel: string }
+  words: { right: [string, string]; left: [string, string]; feel: string; advanced: [string, string, string, string, string] }
 }
 
 const each = (beats: number[], length: number): Strokes => beats.map((beat) => [beat, length])
-const quarters = (degrees: Degree[], fingers: Finger[], length = 1): LeftCell => [0, 1, 2, 3].map((beat) => [beat, length, degrees, fingers])
+const quarters = (degrees: LeftCell[number][2], fingers: Finger[], length = 1): LeftCell => [0, 1, 2, 3].map((beat) => [beat, length, degrees, fingers])
+/** A broken chord in even notes: the voicing's notes from the bottom in this order, `length` beats each. */
+const broken = (order: number[], length = 0.5): Arp => order.map((index, step) => [step * length, length, index])
+const walk = (degrees: LeftCell[number][2][number][], length = 1): LeftCell => degrees.map((degree, step) => [step * length, length, [degree]])
 
 const GENRES: Genre[] = [
   {
     drums: 'genre-rock', mode: 'mixolydian',
-    right: [[each([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5], 0.5)], [[[0, 1.5], [1.5, 1], [2.5, 1.5]]]],
-    left: {
-      basic: [[[0, 2, ['R', '8'], [5, 1]], [2, 2, ['R', '8'], [5, 1]]]],
-      ostinato: [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.5, [beat % 2 ? '5' : '8'], [beat % 2 ? 2 : 1]]] as LeftCell)],
+    right: {
+      A: [each([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5], 0.5)], B: [[[0, 1.5], [1.5, 1], [2.5, 1.5]]],
+      C: [[[0, 0.5], [0.5, 0.5], [1, 1], [2.5, 0.5], [3, 1]]], K: [[[0, 1.5], [1.5, 2.5]]],
+      S: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2.5, 0.75], [3.25, 0.75]]], P: [broken([0, 2, 1, 2, 0, 2, 1, 2])],
     },
-    words: { right: ['eighth-note chords', 'pushed chords'], left: ['octaves', 'rolling root, octave and fifth'], feel: 'Straight eighths' },
+    left: {
+      b: [[0, 2, ['R', '8'], [5, 1]], [2, 2, ['R', '8'], [5, 1]]],
+      o: [0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.5, [beat % 2 ? '5' : '8'], [beat % 2 ? 2 : 1]]] as LeftCell),
+      t: walk(['R', '3', '5', '>']), m: walk(['R', '8', 'R', '8', '5', '8', '5', '>'], 0.5),
+    },
+    words: { right: ['eighth-note chords', 'pushed chords'], left: ['octaves', 'rolling root, octave and fifth'], feel: 'Straight eighths',
+      advanced: ['add9 and sus4 voicings', 'pushed off-beat chords', 'broken-chord eighths', 'walking octave bass', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-blues-shuffle', mode: 'mixolydian',
-    right: [[each([1, 3], 0.75)], [each([0, 1, 2, 3], 0.75)]],
-    left: {
-      basic: [[[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]]],
-      ostinato: [[0, 1, 2, 3].map((beat) => [beat, 1, ['R', beat % 2 ? '6' : '5'], [5, beat % 2 ? 1 : 2]])],
+    right: {
+      A: [each([1, 3], 0.75)], B: [each([0, 1, 2, 3], 0.75)], C: [[[0, 0.75], [1, 0.75], [2.5, 0.5], [3, 0.75]]], K: [[[0, 0.75], [1, 3]]],
+      S: [each([0.5, 1.5, 2.5, 3.5], 0.5)], P: [broken([0, 1, 2, 3, 2, 1, 0, 1])],
     },
-    words: { right: ['chords on 2 and 4', 'four chords to the bar'], left: ['open fifths', 'shuffle fifth and sixth'], feel: 'Shuffle feel, written in straight quarters' },
+    left: {
+      b: [[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]],
+      o: [0, 1, 2, 3].map((beat) => [beat, 1, ['R', beat % 2 ? '6' : '5'], [5, beat % 2 ? 1 : 2]]),
+      t: walk(['R', '3', '5', '>']), m: walk(['R', '8', '6', '5']),
+    },
+    words: { right: ['chords on 2 and 4', 'four chords to the bar'], left: ['open fifths', 'shuffle fifth and sixth'], feel: 'Shuffle feel, written in straight quarters',
+      advanced: ['four-note seventh voicings', 'off-beat organ stabs', 'broken seventh chords', 'boogie walk', 'sixteen-bar blues arrangement'] },
   },
   {
     drums: 'genre-reggae', mode: 'minor',
-    right: [[each([1, 3], 0.5)], [each([1, 1.25, 3, 3.25], 0.25)]],
-    left: {
-      basic: [[[0, 1.5, ['R'], [5]], [2, 1, ['5'], [2]]]],
-      ostinato: [[[0, 1.5, ['R'], [5]], [2, 1, ['5'], [2]], [3, 1, ['8'], [1]]]],
+    right: {
+      A: [each([1, 3], 0.5)], B: [each([1, 1.25, 3, 3.25], 0.25)], C: [[[1, 0.5], [2.5, 0.25], [3, 0.5]]], K: [[[1, 0.5], [3, 1]]],
+      S: [[[0.5, 0.25], [1, 0.5], [2.5, 0.25], [3, 0.5]]], P: [[[0.5, 0.25, 0], [1, 0.5, 2], [1.5, 0.25, 1], [2.5, 0.25, 0], [3, 0.5, 2], [3.5, 0.25, 1]]],
     },
-    words: { right: ['skank on 2 and 4', 'double skank'], left: ['root and fifth', 'root, fifth and octave'], feel: 'One drop: chords on the off-beats 2 and 4' },
+    left: {
+      b: [[0, 1.5, ['R'], [5]], [2, 1, ['5'], [2]]], o: [[0, 1.5, ['R'], [5]], [2, 1, ['5'], [2]], [3, 1, ['8'], [1]]],
+      t: [[0, 1.5, ['R']], [2, 1, ['5']], [3, 1, ['>']]], m: [[0, 1, ['R']], [1, 0.5, ['3']], [1.5, 0.5, ['5']], [2, 1.5, ['8']], [3.5, 0.5, ['5']]],
+    },
+    words: { right: ['skank on 2 and 4', 'double skank'], left: ['root and fifth', 'root, fifth and octave'], feel: 'One drop: chords on the off-beats 2 and 4',
+      advanced: ['seventh-chord skanks', 'pushed skanks', 'organ bubble', 'melodic bass line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-pop', mode: 'major', pedal: [0],
-    right: [[each([0, 2], 2)], [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]]],
-    left: {
-      basic: [[[0, 4, ['R', '8'], [5, 1]]]],
-      ostinato: [[[0, 0.75, ['R'], [5]], [0.75, 0.75, ['5'], [2]], [1.5, 0.5, ['8'], [1]], [2, 0.75, ['R'], [5]], [2.75, 0.75, ['5'], [2]], [3.5, 0.5, ['8'], [1]]]],
+    drums: 'genre-pop', mode: 'major', pedal: [0, 5, 7],
+    right: {
+      A: [each([0, 2], 2)], B: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]],
+      C: [[[0, 1], [1, 1], [2, 1.5], [3.5, 0.5]]], K: [[[0, 4]]], S: [[[0, 0.75], [0.75, 1.25], [2.5, 0.5], [3, 1]]],
+      P: [broken([0, 1, 2, 3, 0, 1, 2, 3])],
     },
-    words: { right: ['half-note chords', 'the 3 + 3 + 2 pulse'], left: ['whole-note octaves', '3 + 3 + 2 root, fifth and octave'], feel: 'Straight eighths, 3 + 3 + 2 pulse' },
+    left: {
+      b: [[0, 4, ['R', '8'], [5, 1]]],
+      o: [[0, 0.75, ['R'], [5]], [0.75, 0.75, ['5'], [2]], [1.5, 0.5, ['8'], [1]], [2, 0.75, ['R'], [5]], [2.75, 0.75, ['5'], [2]], [3.5, 0.5, ['8'], [1]]],
+      t: [[0, 2, ['R', '8'], [5, 1]], [2, 1, ['5']], [3, 1, ['>']]], m: [[0, 1.5, ['R']], [1.5, 1, ['5']], [2.5, 0.5, ['8']], [3, 1, ['3']]],
+    },
+    words: { right: ['half-note chords', 'the 3 + 3 + 2 pulse'], left: ['whole-note octaves', '3 + 3 + 2 root, fifth and octave'], feel: 'Straight eighths, 3 + 3 + 2 pulse',
+      advanced: ['add9 and seventh voicings', 'syncopated pushes', 'broken-chord eighths', 'moving bass line', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-disco', mode: 'dorian',
-    right: [[each([0.5, 1.5, 2.5, 3.5], 0.5)], [[[0, 0.5], [0.75, 0.25], [1.5, 0.5], [2.5, 0.25], [2.75, 0.25], [3.5, 0.5]]]],
-    left: {
-      basic: [quarters(['R'], [5], 0.75)],
-      ostinato: [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.5, ['8'], [1]]] as LeftCell)],
+    right: {
+      A: [each([0.5, 1.5, 2.5, 3.5], 0.5)], B: [[[0, 0.5], [0.75, 0.25], [1.5, 0.5], [2.5, 0.25], [2.75, 0.25], [3.5, 0.5]]],
+      C: [[[0, 0.25], [0.5, 0.5], [1.5, 0.25], [2, 0.5], [3.5, 0.5]]], K: [[[0.5, 0.5], [1.5, 2.5]]],
+      S: [[[0.25, 0.25], [0.75, 0.5], [1.5, 0.25], [2.25, 0.25], [2.75, 0.5], [3.5, 0.5]]], P: [broken([0, 1, 2, 3, 2, 1, 2, 3])],
     },
-    words: { right: ['off-beat chords', 'sixteenth-note stabs'], left: ['four on the floor', 'octave bounce'], feel: 'Four on the floor, chords between the beats' },
+    left: {
+      b: quarters(['R'], [5], 0.75),
+      o: [0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.5, ['8'], [1]]] as LeftCell),
+      t: [[0, 0.5, ['R']], [0.5, 0.5, ['8']], [1, 0.5, ['R']], [1.5, 0.5, ['8']], [2, 1, ['5']], [3, 1, ['>']]],
+      m: walk(['R', '8', '5', '8', 'R', '8', '7', '8'], 0.5),
+    },
+    words: { right: ['off-beat chords', 'sixteenth-note stabs'], left: ['four on the floor', 'octave bounce'], feel: 'Four on the floor, chords between the beats',
+      advanced: ['ninth-chord voicings', 'sixteenth-note pushes', 'broken-chord eighths', 'octave-and-seventh bass', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-jazz-swing', mode: 'major',
-    right: [[each([0, 2], 2)], [each([1, 3], 0.75)]],
-    left: {
-      basic: [[[0, 2, ['R', '7'], [5, 1]], [2, 2, ['R', '7'], [5, 1]]]],
-      ostinato: [[[0, 1, ['R'], [5]], [1, 1, ['3'], [3]], [2, 1, ['5'], [2]], [3, 1, ['6'], [1]]]],
+    right: {
+      A: [each([0, 2], 2)], B: [each([1, 3], 0.75)], C: [[[0, 0.75], [1.5, 1]]], K: [[[0, 4]]], S: [[[0, 0.5], [1.5, 1], [3.5, 0.5]]],
+      P: [broken([0, 1, 2, 3, 2, 1, 0, 1])],
     },
-    words: { right: ['half-note voicings', 'comping on 2 and 4'], left: ['root and seventh shells', 'walking quarters'], feel: 'Swing, written in straight quarters' },
+    left: {
+      b: [[0, 2, ['R', '7'], [5, 1]], [2, 2, ['R', '7'], [5, 1]]],
+      o: [[0, 1, ['R'], [5]], [1, 1, ['3'], [3]], [2, 1, ['5'], [2]], [3, 1, ['6'], [1]]],
+      t: walk(['R', '3', '5', '>']), m: walk(['R', '5', '3', '>']),
+    },
+    words: { right: ['half-note voicings', 'comping on 2 and 4'], left: ['root and seventh shells', 'walking quarters'], feel: 'Swing, written in straight quarters',
+      advanced: ['ninth-chord voicings', 'anticipated comping', 'broken-chord eighths', 'walking bass line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-bossa-nova', mode: 'major', pedal: [0],
-    right: [[each([0], 4)], [[[0, 1], [1.5, 1], [3, 1]], [[1, 1], [2.5, 1.5]]]],
-    left: {
-      basic: [[[0, 2, ['R'], [5]], [2, 2, ['5'], [1]]]],
-      ostinato: [[[0, 1.5, ['R'], [5]], [1.5, 0.5, ['5'], [1]], [2, 1.5, ['5'], [1]], [3.5, 0.5, ['R'], [5]]]],
+    drums: 'genre-bossa-nova', mode: 'major', pedal: [0, 5],
+    right: {
+      A: [each([0], 4)], B: [[[0, 1], [1.5, 1], [3, 1]], [[1, 1], [2.5, 1.5]]], C: [[[0.5, 1], [2, 1], [3.5, 0.5]]], K: [[[0, 4]]],
+      S: [[[0, 0.5], [1, 1], [2.5, 1.5]]], P: [[[0, 0.5, 0], [0.5, 0.5, 1], [1, 0.5, 2], [1.5, 0.5, 3], [2, 1, 2], [3, 1, 1]]],
     },
-    words: { right: ['held chords', 'the two-bar bossa figure'], left: ['root and fifth', 'bossa bass'], feel: 'Straight eighths, two-bar pattern' },
+    left: {
+      b: [[0, 2, ['R'], [5]], [2, 2, ['5'], [1]]],
+      o: [[0, 1.5, ['R'], [5]], [1.5, 0.5, ['5'], [1]], [2, 1.5, ['5'], [1]], [3.5, 0.5, ['R'], [5]]],
+      t: [[0, 1.5, ['R']], [1.5, 0.5, ['5']], [2, 1, ['5']], [3, 1, ['>']]], m: [[0, 1.5, ['R']], [1.5, 0.5, ['3']], [2, 1.5, ['5']], [3.5, 0.5, ['>']]],
+    },
+    words: { right: ['held chords', 'the two-bar bossa figure'], left: ['root and fifth', 'bossa bass'], feel: 'Straight eighths, two-bar pattern',
+      advanced: ['ninth-chord voicings', 'anticipated bossa figure', 'broken-chord guitar figure', 'moving bossa bass', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-metal', mode: 'minor',
-    right: [[each([0, 1, 2, 3], 1)], [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5], [beat + 0.5, 0.25], [beat + 0.75, 0.25]] as Strokes)]],
-    left: {
-      basic: [quarters(['R', '8'], [5, 1])],
-      ostinato: [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.25, ['R'], [5]], [beat + 0.75, 0.25, ['R'], [5]]] as LeftCell)],
+    right: {
+      A: [each([0, 1, 2, 3], 1)], B: [[0, 1, 2, 3].flatMap((beat) => [[beat, 0.5], [beat + 0.5, 0.25], [beat + 0.75, 0.25]] as Strokes)],
+      C: [[[0, 0.5], [0.5, 0.5], [1, 1], [2, 0.5], [2.5, 0.5], [3, 1]]], K: [[[0, 2], [2, 2]]],
+      S: [[[0, 0.75], [0.75, 0.75], [1.5, 0.5], [2, 0.75], [2.75, 0.75], [3.5, 0.5]]], P: [broken([0, 1, 2, 1, 0, 1, 2, 1])],
     },
-    words: { right: ['quarter-note power chords', 'galloping power chords'], left: ['quarter-note octaves', 'gallop'], feel: 'Sixteenth-note gallop' },
+    left: {
+      b: quarters(['R', '8'], [5, 1]),
+      o: [0, 1, 2, 3].flatMap((beat) => [[beat, 0.5, ['R'], [5]], [beat + 0.5, 0.25, ['R'], [5]], [beat + 0.75, 0.25, ['R'], [5]]] as LeftCell),
+      t: [[0, 0.5, ['R']], [0.5, 0.5, ['R']], [1, 0.5, ['R']], [1.5, 0.5, ['R']], [2, 1, ['5']], [3, 1, ['>']]],
+      m: walk(['R', 'R', '8', 'R', '5', 'R', '8', '5'], 0.5),
+    },
+    words: { right: ['quarter-note power chords', 'galloping power chords'], left: ['quarter-note octaves', 'gallop'], feel: 'Sixteenth-note gallop',
+      advanced: ['full triad voicings', 'syncopated gallop', 'broken-chord eighths', 'pedal-point bass', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-drum-and-bass', mode: 'minor',
-    right: [[each([0], 4)], [[[0, 0.5], [1.5, 0.5], [2.5, 1]]]],
-    left: {
-      basic: [[[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]]],
-      ostinato: [[[0, 1.75, ['R'], [5]], [2.5, 1, ['8'], [1]], [3.5, 0.5, ['7'], [2]]]],
+    right: {
+      A: [each([0], 4)], B: [[[0, 0.5], [1.5, 0.5], [2.5, 1]]], C: [[[0, 1.5], [2, 0.5], [3, 1]]], K: [[[0, 4]]],
+      S: [[[0.75, 0.75], [2.5, 0.5], [3.25, 0.75]]], P: [broken([0, 1, 2, 3, 2, 1, 2, 3])],
     },
-    words: { right: ['held pads', 'syncopated stabs'], left: ['open fifths', 'two-step bass'], feel: 'Fast two-step, chords felt in half time' },
+    left: {
+      b: [[0, 2, ['R', '5'], [5, 1]], [2, 2, ['R', '5'], [5, 1]]], o: [[0, 1.75, ['R'], [5]], [2.5, 1, ['8'], [1]], [3.5, 0.5, ['7'], [2]]],
+      t: [[0, 1.75, ['R']], [2.5, 1, ['5']], [3.5, 0.5, ['>']]], m: [[0, 1.5, ['R']], [1.5, 0.5, ['8']], [2.5, 0.75, ['5']], [3.25, 0.75, ['7']]],
+    },
+    words: { right: ['held pads', 'syncopated stabs'], left: ['open fifths', 'two-step bass'], feel: 'Fast two-step, chords felt in half time',
+      advanced: ['ninth-chord pads', 'syncopated stabs over the break', 'broken-chord eighths', 'moving sub line', 'sixteen-bar arrangement'] },
   },
   {
-    drums: 'genre-soul-ballad', mode: 'major', pedal: [0, 1, 2, 3, 4],
-    right: [[each([0, 1.5, 3, 4.5], 1.5)], [Array.from({ length: 12 }, (_, eighth) => [eighth / 2, 0.5] as [number, number])]],
-    left: {
-      basic: [[[0, 3, ['R', '8'], [5, 1]], [3, 3, ['R', '8'], [5, 1]]]],
-      ostinato: [[0, 1.5, 3, 4.5].flatMap((pulse) => [[pulse, 0.5, ['R'], [5]], [pulse + 0.5, 0.5, ['5'], [2]], [pulse + 1, 0.5, ['8'], [1]]] as LeftCell)],
+    drums: 'genre-soul-ballad', mode: 'major', pedal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    right: {
+      A: [each([0, 1.5, 3, 4.5], 1.5)], B: [Array.from({ length: 12 }, (_, eighth) => [eighth / 2, 0.5] as [number, number])],
+      C: [[[0, 1], [1, 0.5], [1.5, 1.5], [3, 1], [4, 0.5], [4.5, 1.5]]], K: [[[0, 3], [3, 3]]],
+      S: [[[0, 1], [1, 1.5], [2.5, 0.5], [3, 1], [4, 1], [5, 1]]], P: [broken([0, 1, 2, 3, 2, 1, 0, 1, 2, 3, 2, 1])],
     },
-    words: { right: ['chords on the four beats', 'repeated eighth-note chords'], left: ['octaves', 'rolling triplet arpeggios'], feel: '12/8: four beats of three eighths' },
+    left: {
+      b: [[0, 3, ['R', '8'], [5, 1]], [3, 3, ['R', '8'], [5, 1]]],
+      o: [0, 1.5, 3, 4.5].flatMap((pulse) => [[pulse, 0.5, ['R'], [5]], [pulse + 0.5, 0.5, ['5'], [2]], [pulse + 1, 0.5, ['8'], [1]]] as LeftCell),
+      t: walk(['R', '3', '5', '>'], 1.5), m: [[0, 1.5, ['R']], [1.5, 1, ['3']], [2.5, 0.5, ['5']], [3, 1.5, ['8']], [4.5, 1, ['5']], [5.5, 0.5, ['>']]],
+    },
+    words: { right: ['chords on the four beats', 'repeated eighth-note chords'], left: ['octaves', 'rolling triplet arpeggios'], feel: '12/8: four beats of three eighths',
+      advanced: ['seventh-chord voicings', 'pushed triplet chords', 'triplet arpeggios', 'walking 12/8 bass', 'sixteen-bar arrangement'] },
   },
   {
     drums: 'genre-funk', mode: 'mixolydian',
-    right: [[each([0, 1.5, 2.5], 0.5)], [each([0.25, 0.75, 1.5, 2.25, 2.75, 3.5], 0.25)]],
-    left: {
-      basic: [[[0, 1, ['R'], [5]], [2, 1, ['R'], [5]]]],
-      ostinato: [[[0, 0.5, ['R'], [5]], [0.75, 0.25, ['8'], [1]], [1.5, 0.25, ['7'], [2]], [1.75, 0.25, ['8'], [1]], [2.5, 0.5, ['5'], [2]], [3.25, 0.25, ['R'], [5]], [3.5, 0.5, ['3'], [3]]]],
+    right: {
+      A: [each([0, 1.5, 2.5], 0.5)], B: [each([0.25, 0.75, 1.5, 2.25, 2.75, 3.5], 0.25)],
+      C: [[[0, 0.25], [0.5, 0.25], [1, 0.5], [2, 0.25], [2.5, 0.25], [3, 0.5]]], K: [[[0, 0.5], [1.5, 2.5]]],
+      S: [each([0.25, 1, 1.75, 2.5, 3.25, 3.75], 0.25)], P: [broken([0, 2, 1, 3, 0, 2, 1, 3])],
     },
-    words: { right: ['short chord stabs', 'sixteenth-note chops'], left: ['roots on 1 and 3', 'syncopated bass line'], feel: 'Straight sixteenths, syncopated' },
+    left: {
+      b: [[0, 1, ['R'], [5]], [2, 1, ['R'], [5]]],
+      o: [[0, 0.5, ['R'], [5]], [0.75, 0.25, ['8'], [1]], [1.5, 0.25, ['7'], [2]], [1.75, 0.25, ['8'], [1]], [2.5, 0.5, ['5'], [2]], [3.25, 0.25, ['R'], [5]], [3.5, 0.5, ['3'], [3]]],
+      t: [[0, 0.5, ['R']], [0.75, 0.25, ['8']], [1.5, 0.5, ['5']], [2.5, 0.5, ['3']], [3, 0.5, ['5']], [3.5, 0.5, ['>']]],
+      m: [[0, 0.5, ['R']], [0.75, 0.25, ['R']], [1.5, 0.5, ['8']], [2.25, 0.25, ['7']], [2.5, 0.5, ['5']], [3.5, 0.5, ['3']]],
+    },
+    words: { right: ['short chord stabs', 'sixteenth-note chops'], left: ['roots on 1 and 3', 'syncopated bass line'], feel: 'Straight sixteenths, syncopated',
+      advanced: ['ninth-chord voicings', 'sixteenth-note pushes', 'broken-chord clav line', 'syncopated octave bass', 'sixteen-bar arrangement'] },
   },
 ]
 
-export const PIANO_STAGES = ['Right-hand rhythm', 'Second right-hand rhythm', 'Left-hand pattern', 'Fill', 'Four-bar phrase']
+export const PIANO_STAGES = ['Right-hand rhythm', 'Second right-hand rhythm', 'Left-hand pattern', 'Fill', 'Four-bar phrase',
+  'Richer voicings', 'Syncopation', 'Broken chords', 'Moving bass', 'Sixteen-bar arrangement']
 
-export type PianoLesson = {
-  id: string
-  instrument: 'piano'
-  style: string
-  feel: string
-  /** The step in its genre, 1 to 5. */
-  level: number
-  title: string
-  goal: string
-  meter: { numerator: number; denominator: number }
-  tempo: { start: number; target: number }
-  hands: string
-  steps: string[]
-  bars: number
-  sections?: { name: string; bars: number }[]
-  chords: string[]
-  notes: PianoNote[]
-  pedals?: Pedal[]
-}
+/** Each step's plan, one letter per bar: the right-hand cell, the left-hand cell and any fill (`1` chord tones up, `2` a run down). */
+const PLANS: { right: string; left: string; fills: string }[] = [
+  { right: 'AAAK AACK', left: 'bbbb bbbb', fills: '' },
+  { right: 'BBBK BBAK', left: 'bbbb bbbb', fills: '' },
+  { right: 'AAAK AACK', left: 'ooot ooot', fills: '' },
+  { right: 'AAAA AACA', left: 'bbbb bbbb', fills: '...1 ...2' },
+  { right: 'BBCK BBCB', left: 'ooot oooo', fills: '.... ...2' },
+  { right: 'AAAK AACK BBBK BBCB', left: 'bbbb bbbb bbbb bbbb', fills: '.... .... .... ...2' },
+  { right: 'SSAK SSCK SSAK SSCS', left: 'ooot ooot ooot oooo', fills: '.... .... .... ...2' },
+  { right: 'PPPK PPPK BBPP PPBP', left: 'bbbb bbbb bbbb bbbb', fills: '.... .... .... ...2' },
+  { right: 'AAAK AAAK BBBK BBBB', left: 'mmmt mmmt mmmt mmmm', fills: '.... .... .... ...2' },
+  { right: 'BBCK BBCA SSPP SSCS', left: 'ooot oooo mmmt mmmm', fills: '.... ...1 .... ...2' },
+]
+const SUFFIX = ['rhythm', 'second-rhythm', 'left-hand', 'fill', 'phrase', 'voicings', 'syncopation', 'broken-chords', 'moving-bass', 'arrangement']
 
 const SLUG: Record<string, string> = {
   'genre-rock': 'rock', 'genre-blues-shuffle': 'blues', 'genre-reggae': 'reggae', 'genre-pop': 'pop', 'genre-disco': 'disco',
   'genre-jazz-swing': 'jazz', 'genre-bossa-nova': 'bossa-nova', 'genre-metal': 'metal', 'genre-drum-and-bass': 'drum-and-bass',
   'genre-soul-ballad': 'soul', 'genre-funk': 'funk',
 }
-const pc = (midi: number) => ((midi % 12) + 12) % 12
 
-/** The right hand's close voicing from middle C up, moved to the inversion nearest the previous chord. */
-function rightVoicing(symbol: string, previous: number[] | null): number[] {
-  const { root, intervals } = parseChord(symbol)
-  // Ninths leave out the fifth so four fingers hold the colour notes; power chords keep root, fifth and octave.
-  const tones = intervals.length > 4 ? intervals.filter((interval) => interval !== 7) : intervals
-  const classes = [...new Set(tones.map((interval) => (root + interval) % 12))]
-  const options: number[][] = []
-  for (let bottom = 60; bottom < 72; bottom++) {
-    if (!classes.includes(pc(bottom))) continue
-    const voiced = [bottom]
-    for (let pitch = bottom + 1; voiced.length < classes.length; pitch++) if (classes.includes(pc(pitch))) voiced.push(pitch)
-    // A power chord doubles its root an octave up.
-    if (intervals.includes(12) && voiced.length < 3) voiced.push(bottom + 12)
-    options.push(voiced)
-  }
-  const centre = previous ? previous.reduce((a, b) => a + b) / previous.length : 66
-  return options.reduce((best, option) => {
-    const distance = (voiced: number[]) => Math.abs(voiced.reduce((a, b) => a + b) / voiced.length - centre)
-    return distance(option) < distance(best) ? option : best
-  })
-}
-
-/** Written fingering for a right-hand block chord: thumb on the lowest note, fifth finger on the top. */
-function rightFingers(pitches: number[]): Finger[] {
-  if (pitches.length === 4) return [1, 2, 3, 5]
-  if (pitches.length === 2) return [1, pitches[1] - pitches[0] >= 7 ? 5 : 3]
-  // A fourth on top (a first inversion, or a power chord's octave) takes 1-2-5; otherwise 1-3-5.
-  return pitches[2] - pitches[1] === 5 ? [1, 2, 5] : [1, 3, 5]
-}
-
-function leftPitch(symbol: string, degree: Degree): number {
-  const { root, intervals } = parseChord(symbol)
-  const low = 36 + root % 12
-  const third = intervals.includes(3) ? 3 : intervals.includes(4) ? 4 : 7
-  const seventh = intervals.includes(11) ? 11 : 10
-  return low + { R: 0, '3': third, '5': 7, '6': 9, '7': seventh, '8': 12 }[degree]
-}
-
-const clip = <T extends [number, number, ...unknown[]]>(cell: T[], end: number): T[] =>
-  cell.filter(([start]) => start < end).map((item) => [item[0], Math.min(item[1], end - item[0]), ...item.slice(2)] as T)
-
-/** Five notes down the scale from the first scale note at or above A4, fingers 5 to 1, over the second half of a bar. */
-function fill(tonic: number, mode: Mode, start: number, half: number): PianoNote[] {
-  const scale = MODES[mode].map((step) => (tonic + step) % 12)
-  let top = 69
-  while (!scale.includes(pc(top))) top++
-  const run = [top]
-  for (let pitch = top - 1; run.length < 5; pitch--) if (scale.includes(pc(pitch))) run.push(pitch)
-  const rhythm: [number, number][] = half === 3 ? [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.5], [2, 1]] : [[0, 0.5], [0.5, 0.5], [1, 0.5], [1.5, 0.25], [1.75, 0.25]]
-  return run.map((midi, index) => ({ trackId: 'piano', hand: 'right', midi, startBeat: start + rhythm[index][0], beats: rhythm[index][1],
-    velocity: index ? 0.6 : 0.7, finger: (5 - index) as Finger }))
+/** Sections of a phrase: two four-bar halves (or an A and a B section), the last bar marked when it ends in a fill. */
+export function phraseSections(bars: number, fills: number[]) {
+  const halves = bars === 16 ? ['A section', 'B section'] : ['Phrase', 'Answer']
+  const last = fills.includes(bars - 1)
+  return [{ name: halves[0], bars: bars / 2 }, { name: halves[1], bars: bars / 2 - (last ? 1 : 0) }, ...last ? [{ name: 'Fill', bars: 1 }] : []]
 }
 
 function build(genre: Genre, stage: number): PianoLesson {
   const drums = lessonById(genre.drums)!
-  const style = GENRE_STYLE[drums.style!]
-  const { beatsPerBar } = lessonMeter(drums)
-  const bars = stage === 4 ? 4 : 2
-  const fills = Array.from({ length: bars }, (_, bar) => stage >= 3 && bar === bars - 1)
-  const chords = progression(style, bars)
-  const right = genre.right[stage === 1 || stage === 4 ? 1 : 0]
-  const left = stage >= 2 ? genre.left.ostinato : genre.left.basic
-  const key = backingKey(style)
-  const tonic = parseChord(key.tonic).root
-  const notes: PianoNote[] = []
-  let previous: number[] | null = null
-  for (let bar = 0; bar < bars; bar++) {
-    const start = bar * beatsPerBar
-    const end = fills[bar] ? beatsPerBar / 2 : beatsPerBar
-    const voiced = rightVoicing(chords[bar], previous)
-    previous = voiced
-    const fingers = rightFingers(voiced)
-    for (const [at, beats] of clip(right[bar % right.length], end))
-      voiced.forEach((midi, index) => notes.push({ trackId: 'piano', hand: 'right', midi, startBeat: start + at, beats, finger: fingers[index],
-        velocity: Math.abs(at - Math.round(at)) < 1e-9 ? 0.66 : 0.58 }))
-    if (fills[bar]) {
-      // The left hand holds the root while the right hand plays the fill.
-      notes.push({ trackId: 'piano', hand: 'left', midi: leftPitch(chords[bar], 'R'), startBeat: start + end, beats: beatsPerBar - end, finger: 5, velocity: 0.55 })
-      notes.push(...fill(tonic, genre.mode, start + end, beatsPerBar - end))
-    }
-    for (const [at, beats, degrees, fingers] of clip(left[bar % left.length], end))
-      degrees.forEach((degree, index) => notes.push({ trackId: 'piano', hand: 'left', midi: leftPitch(chords[bar], degree), startBeat: start + at, beats,
-        finger: fingers[index], velocity: 0.55 }))
-  }
-  notes.sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)
-  const pedalled = genre.pedal?.includes(stage)
-  const pedals: Pedal[] | undefined = pedalled
-    ? Array.from({ length: bars }, (_, bar) => ({ controller: 64 as const, startBeat: bar * beatsPerBar + 0.25, beats: beatsPerBar - 0.5 })) : undefined
   const name = drums.style!
-  const { right: rh, left: lh, feel } = genre.words
-  const title = `${name} piano: ${[rh[0], rh[1], `${lh[1]} in the left hand`, 'fill', 'four-bar phrase'][stage]}`
-  const leftWords = stage >= 2 ? lh[1] : lh[0]
-  const rightWords = stage === 1 || stage === 4 ? rh[1] : rh[0]
+  const style = GENRE_STYLE[name]
+  const { beatsPerBar } = lessonMeter(drums)
+  const bars = stage < 5 ? 8 : 16
+  const chords = progression(style, bars)
+  const plan = PLANS[stage]
+  const pedalled = !!genre.pedal?.includes(stage)
+  const id = `piano-${SLUG[genre.drums]}-${SUFFIX[stage]}`
+  const { notes, pedals, fills } = arrange({
+    id, beatsPerBar, chords, right: plan.right, left: plan.left, fills: plan.fills, palette: { right: genre.right, left: genre.left },
+    rich: stage >= 5, pedal: pedalled, tonic: parseChord(backingKey(style).tonic).root, mode: genre.mode,
+  })
+  const { right: rh, left: lh, feel, advanced } = genre.words
+  const title = `${name} piano: ${[rh[0], rh[1], `${lh[1]} in the left hand`, 'fill', 'four-bar phrase', ...advanced][stage]}`
+  const leftWords = [lh[0], lh[0], lh[1], lh[0], lh[1], lh[0], lh[1], lh[0], 'a moving bass line', `${lh[1]} and a moving bass`][stage]
+  const rightWords = [rh[0], rh[1], rh[0], rh[0], rh[1], advanced[0], advanced[1], advanced[2], rh[0], `${rh[1]}, ${advanced[1]} and ${advanced[2]}`][stage]
+  const written = chords.join(' – ')
   const goal = [
-    `Hold the ${lh[0]} in the left hand while the right hand plays ${rh[0]} over ${chords.join(' – ')}.`,
-    `Keep the ${lh[0]} steady while the right hand changes to ${rh[1]}.`,
-    `The left hand takes the ${lh[1]}; the right hand returns to ${rh[0]} on top.`,
-    `One bar of groove, then the right hand runs five notes down the scale while the left hand holds the root.`,
-    `Put it together: ${rh[1]} over the ${lh[1]} for three bars, then the fill into the top.`,
+    `Hold the ${lh[0]} in the left hand while the right hand plays ${rh[0]} through an eight-bar phrase over ${written}; bars 4 and 8 close each half with a held chord.`,
+    `Keep the ${lh[0]} steady while the right hand changes to ${rh[1]}; bar 7 answers with the first rhythm before the closing chord.`,
+    `The left hand takes the ${lh[1]}, walking up into the next chord in bars 4 and 8; the right hand returns to ${rh[0]} on top.`,
+    'Groove for three bars, then fill: chord tones climb in bar 4, and in bar 8 the right hand runs five notes down the scale while the left hand holds the root.',
+    `Put it together as a four-bar phrase and its answer: ${rh[1]} over the ${lh[1]}, a contrasting rhythm in bars 3 and 7, a held chord in bar 4 and the fill into the top.`,
+    `Sixteen bars in two sections over ${written}: ${advanced[0]} that move to the nearest notes of each new chord, a contrasting answer in each half and a run back to the top.`,
+    `Push the chords off the beat (${advanced[1]}) over the ${lh[1]}, with plainer answer bars, held chords every four bars and a run back to the top.`,
+    `Break each chord into ${advanced[2]}, the hand staying in one position per chord; held chords mark the A section and block chords break up the B section.`,
+    `The left hand plays ${advanced[3]}, leading into each chord change from a half step above, under a steady right hand that moves to the second rhythm in the B section.`,
+    `The whole piece: an A section of ${rh[1]} and its answer ending with climbing chord tones in bar 8, then a B section of ${advanced[1]} and ${advanced[2]} over the moving bass, and the run back to the top.`,
   ][stage]
-  const pedalStep = pedalled ? ['Press the sustain pedal just after each new chord and lift it just before the next bar, so chords join without blurring.'] : []
+  const pedalStep = pedalled ? ['Press the sustain pedal just after each new chord and lift it just before the next, so chords join without blurring.'] : []
   return {
-    id: `piano-${SLUG[genre.drums]}-${['rhythm', 'second-rhythm', 'left-hand', 'fill', 'phrase'][stage]}`,
-    instrument: 'piano', style: name, feel: `${feel}; ${rightWords} over ${leftWords}`, level: stage + 1, title, goal,
-    meter: drums.meter, tempo: { start: Math.round(drums.tempo.target * 0.6), target: drums.tempo.target },
+    id, instrument: 'piano', kind: 'genre', style: name, feel: `${feel}; ${rightWords} over ${leftWords}`, level: stage + 1, title, goal,
+    meter: drums.meter, tempo: { start: Math.round(drums.tempo.target * (stage < 5 ? 0.6 : 0.55)), target: drums.tempo.target },
     hands: `Right hand: ${rightWords}, written fingers 1–5 · Left hand: ${leftWords}${pedalled ? ' · Right foot: sustain pedal' : ''}`,
     steps: [
       'Play each hand alone first, with the drums and bass, reading the finger numbers over the notes.',
       ...pedalStep,
-      stage >= 3 ? 'In the fill the thumb finishes the run; land back on the first chord with the next bar.' : 'Keep the chords short where they are written short: the rests are part of the groove.',
+      fills.length ? 'In a fill the right hand plays alone over the held root; land back on the next chord with the next bar.'
+        : 'Keep the chords short where they are written short: the rests are part of the groove.',
+      bars === 16 ? 'Learn the A and B sections apart, then join them; the last bar leads back to the top.' : 'Learn the first four bars, then the answer; the last bar leads back to the top.',
       'Then put the hands together at the starting speed, and raise it as it settles.',
     ],
-    bars, chords, notes,
-    ...(stage >= 3 ? { sections: [{ name: 'Groove', bars: bars - 1 }, { name: 'Fill', bars: 1 }] } : {}),
+    bars, chords, notes, fills, sections: phraseSections(bars, fills),
+    backing: { style, drums: genre.drums },
     ...(pedals ? { pedals } : {}),
   }
 }
 
-export const PIANO_LESSONS: PianoLesson[] = GENRES.flatMap((genre) => [0, 1, 2, 3, 4].map((stage) => build(genre, stage)))
-export const pianoLessonById = (id: string) => PIANO_LESSONS.find((lesson) => lesson.id === id)
+/** The 110 genre lessons, ten per style, style by style. */
+export const PIANO_LESSONS: PianoLesson[] = GENRES.flatMap((genre) => PIANO_STAGES.map((_, stage) => build(genre, stage)))
+
+/** Any piano lesson: a genre lesson, an inspired study, or a progression or scale in a key. */
+export const pianoLessonById = (id: string): PianoLesson | undefined =>
+  PIANO_LESSONS.find((lesson) => lesson.id === id) ?? PIANO_INSPIRED.find((lesson) => lesson.id === id) ?? tonalLesson(id)
+
+/** The lessons in the same list as this one, for Previous and Next. */
+export function pianoLessonList(lesson: PianoLesson): PianoLesson[] {
+  if (lesson.kind === 'genre') return PIANO_LESSONS
+  if (lesson.kind === 'inspired') return PIANO_INSPIRED
+  return tonalList(lesson)
+}
+
+/** What the step teaches and where it sits, e.g. "Fill, 4 of 10". */
+export function pianoStep(lesson: PianoLesson): string {
+  const list = pianoLessonList(lesson)
+  if (lesson.kind === 'genre') return `${PIANO_STAGES[lesson.level - 1]}, ${lesson.level} of ${PIANO_STAGES.length}`
+  return `${lesson.kind === 'inspired' ? lesson.influence : lesson.title}, ${list.indexOf(lesson) + 1} of ${list.length}`
+}
+
+const SHELF = { genre: 'Piano by genre', inspired: 'Inspired piano', progression: 'Chord progressions', scale: 'Scales' }
+
 /** The workspace subtitle for a piano lesson. */
-export const pianoLessonNote = (lesson: PianoLesson) =>
-  `Piano by genre · ${lesson.style} · ${PIANO_STAGES[lesson.level - 1]}, ${lesson.level} of 5`
+export const pianoLessonNote = (lesson: PianoLesson) => `${SHELF[lesson.kind]} · ${lesson.style} · ${pianoStep(lesson)}`
+
 /** Each genre with its piano lessons, in order. */
 export const pianoGenres = () => [...new Set(PIANO_LESSONS.map((lesson) => lesson.style))]
   .map((style) => ({ style, lessons: PIANO_LESSONS.filter((lesson) => lesson.style === style) }))
 
 /** The lesson as a song: the piano part first, then the drum and bass backing on the same bars. */
-export function pianoLessonSong(lesson: PianoLesson): Song {
-  const drums = pianoGenreDrums(lesson)
-  const { beatsPerBar, pulse } = lessonMeter(lesson)
-  const style = GENRE_STYLE[lesson.style]
-  const fills = Array.from({ length: lesson.bars }, (_, bar) => !!lesson.sections && bar === lesson.bars - 1)
-  const backing = genreBacking(style, lesson.bars, beatsPerBar, fills)
-  const barMap: BarMeter[] = Array.from({ length: lesson.bars }, (_, index) => ({
-    startBeat: index * beatsPerBar, beats: beatsPerBar, numerator: lesson.meter.numerator, denominator: lesson.meter.denominator, status: 'explicit',
-  }))
-  let startBar = 1
-  const sections = (lesson.sections ?? [{ name: 'Exercise', bars: lesson.bars }]).map(({ name, bars }) => {
-    const section = { name, startBar, bars }
-    startBar += bars
-    return section
-  })
-  const chordLabels: ChordLabel[] = lesson.chords.map((symbol, bar) => ({ startBeat: bar * beatsPerBar, beats: beatsPerBar, symbol }))
-  const high = Array.from({ length: lesson.bars }, () => 'high' as const)
-  const bass = backing.tracks[0]
-  return {
-    title: lesson.title,
-    source: 'course',
-    tracks: [
-      { id: 'piano', instrument: 'piano', name: 'Piano', detail: 'Lesson part for both hands, with written fingering (authored, not transcribed)' },
-      { id: 'drums', instrument: 'drums', name: 'Drum kit', detail: 'Backing groove in this style, original (authored, not transcribed)' },
-      bass,
-    ],
-    bpm: lesson.tempo.target * pulse,
-    beatsPerBar,
-    beatUnit: lesson.meter.denominator,
-    barMap,
-    bars: lesson.bars,
-    key: backingKey(style),
-    sections,
-    chords: [],
-    chordLabels,
-    piano: lesson.notes,
-    vocals: [],
-    drums,
-    instrumentNotes: { bass: backing.notes.bass },
-    ...(lesson.pedals ? { pedals: lesson.pedals } : {}),
-    confidence: { piano: high, drums: high, chords: high, vocals: high, other: high },
-  }
-}
-
-/** The genre's basic drum groove, repeated to the lesson's length. */
-function pianoGenreDrums(lesson: PianoLesson) {
-  const groove = lessonById(Object.keys(SLUG).find((id) => lessonById(id)!.style === lesson.style)!)!
-  const { beatsPerBar } = lessonMeter(groove)
-  const loop = groove.bars.length * beatsPerBar
-  const hits = lessonHits(groove)
-  return Array.from({ length: Math.ceil(lesson.bars * beatsPerBar / loop) }, (_, copy) => hits.map((hit) => ({ ...hit, startBeat: hit.startBeat + copy * loop })))
-    .flat().filter((hit) => hit.startBeat < lesson.bars * beatsPerBar)
-}
+export const pianoLessonSong = pianoSong

@@ -1381,8 +1381,13 @@
   border: 1px solid var(--line);
   font-size: 13px;
 }
-.lesson-main { display: grid; gap: 6px; min-width: 0; }
-.lesson-goal { max-width: 75ch; margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.lesson-main { display: grid; gap: 4px; min-width: 0; }
+.lesson-goal { max-width: 90ch; margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.lesson-brief { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+/* Everything beyond the goal and the essentials stays one click away, so the score and the 3D guide keep the room. */
+.lesson-details[open] { display: grid; gap: 6px; max-height: 42vh; overflow: auto; padding-right: 8px; }
+.lesson-details[open] > summary { margin-bottom: 2px; }
+.lesson-subhead { margin: 4px 0 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
 .lesson-facts { display: flex; flex-wrap: wrap; gap: 2px 20px; margin: 0; }
 .lesson-facts div { display: flex; gap: 6px; }
 .lesson-facts dt { color: var(--ink-2); }

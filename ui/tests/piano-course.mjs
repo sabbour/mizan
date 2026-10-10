@@ -5,86 +5,154 @@ import { createServer } from 'vite'
 globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
-  const { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonById, pianoLessonSong } = await vite.ssrLoadModule('/src/course/piano.ts')
-  const { parseChord } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
+  const { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonById, pianoLessonList, pianoLessonSong } = await vite.ssrLoadModule('/src/course/piano.ts')
+  const { PIANO_INSPIRED } = await vite.ssrLoadModule('/src/course/pianoInspired.ts')
+  const { KEYS, KEY_NAMES, tonalLessons, scaleFingering } = await vite.ssrLoadModule('/src/course/pianoTonal.ts')
+  const { canFollow } = await vite.ssrLoadModule('/src/course/pianoParts.ts')
+  const { parseChord, progression, chordSpans, GENRE_STYLE } = await vite.ssrLoadModule('/src/course/accompaniment.ts')
   const { LESSONS, genres, lessonMeter } = await vite.ssrLoadModule('/src/course/curriculum.ts')
   const { freshPosition, lessonPosition } = await vite.ssrLoadModule('/src/course/state.ts')
+  const { browseTo, DEFAULT_BROWSE } = await vite.ssrLoadModule('/src/course/browse.ts')
   const { pianoXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
   const { songBeats } = await vite.ssrLoadModule('/src/workspace/meter.ts')
 
   const pc = (midi) => ((midi % 12) + 12) % 12
   const onGrid = (beat) => Math.abs(beat * 4 - Math.round(beat * 4)) < 1e-9
+  const LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
+  const spelledPc = (name) => pc(LETTER[name[0]] + [...name.slice(1)].reduce((sum, mark) => sum + (mark === '#' ? 1 : -1), 0))
+  const BLACK = [1, 3, 6, 8, 10]
+
+  /** Rules every written part keeps, whatever the shelf. */
+  function playable(lesson) {
+    const where = lesson.id
+    for (const note of lesson.notes) {
+      assert.ok(note.trackId === 'piano' && Number.isInteger(note.midi) && note.beats > 0 && onGrid(note.startBeat) && onGrid(note.beats), `${where} note on the grid`)
+      assert.ok([1, 2, 3, 4, 5].includes(note.finger), `${where} note has a written finger`)
+    }
+    for (const hand of ['right', 'left']) {
+      const notes = lesson.notes.filter((n) => n.hand === hand).sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)
+      const onsets = [...Map.groupBy(notes, (n) => n.startBeat).values()]
+      for (const together of onsets) {
+        const fingers = together.map((n) => n.finger)
+        assert.equal(new Set(fingers).size, fingers.length, `${where} ${hand} at ${together[0].startBeat}: one finger per key`)
+        assert.ok(fingers.every((f, i) => i === 0 || (hand === 'right' ? f > fingers[i - 1] : f < fingers[i - 1])), `${where} ${hand} at ${together[0].startBeat}: fingers follow the pitches (${fingers})`)
+        assert.ok(together.at(-1).midi - together[0].midi <= 12, `${where} ${hand} at ${together[0].startBeat}: within an octave`)
+        assert.equal(new Set(together.map((n) => n.midi)).size, together.length, `${where} ${hand}: no doubled key`)
+      }
+      // A line of single notes: each finger can follow the one before (steps in the hand's direction, thumb crossings, shifts on leaps or rests).
+      onsets.forEach((together, index) => {
+        const before = onsets[index - 1]
+        if (!before || before.length > 1 || together.length > 1) return
+        const [a] = before, [b] = together
+        assert.ok(canFollow(hand, { midi: a.midi, finger: a.finger, start: a.startBeat, end: a.startBeat + a.beats }, { midi: b.midi, finger: b.finger, start: b.startBeat }),
+          `${where} ${hand} ${a.midi}/${a.finger} at ${a.startBeat} then ${b.midi}/${b.finger}: the finger can follow`)
+      })
+      for (const [midi, same] of Map.groupBy(notes, (n) => n.midi))
+        same.forEach((n, i) => assert.ok(i === 0 || same[i - 1].startBeat + same[i - 1].beats <= n.startBeat + 1e-9, `${where} ${hand} ${midi} is released before it is struck again`))
+    }
+  }
+
+  /** Bar-by-bar content, so loops can be checked for real variation rather than one or two bars tiled. */
+  const barShapes = (lesson, beatsPerBar) => Array.from({ length: lesson.bars }, (_, bar) => JSON.stringify(lesson.notes
+    .filter((n) => Math.floor(n.startBeat / beatsPerBar + 1e-9) === bar).map((n) => [n.hand, n.midi, +(n.startBeat - bar * beatsPerBar).toFixed(3), n.beats, n.finger])))
+  const rhythms = (lesson, beatsPerBar) => Array.from({ length: lesson.bars }, (_, bar) => JSON.stringify(lesson.notes
+    .filter((n) => Math.floor(n.startBeat / beatsPerBar + 1e-9) === bar).map((n) => [n.hand, +(n.startBeat - bar * beatsPerBar).toFixed(3), n.beats])))
+
+  // ---- Genre lessons: ten per style, eight bars then sixteen ----
   const groups = pianoGenres()
-  assert.equal(PIANO_LESSONS.length, 55, 'fifty-five piano lessons')
-  assert.equal(LESSONS.length + PIANO_LESSONS.length, 155, 'one hundred and fifty-five lessons in all')
+  assert.equal(PIANO_LESSONS.length, 110, 'one hundred and ten genre lessons')
   assert.deepEqual(groups.map(({ style }) => style), genres().map(({ style }) => style), 'the same eleven genres, in the same order, as the drums')
-  assert.equal(new Set(PIANO_LESSONS.map((lesson) => lesson.id)).size, 55, 'unique ids')
+  assert.equal(new Set(PIANO_LESSONS.map((lesson) => lesson.id)).size, 110, 'unique ids')
   assert.ok(PIANO_LESSONS.every((lesson) => /^piano-/.test(lesson.id) && !LESSONS.some((drum) => drum.id === lesson.id)), 'piano ids are their own')
-  assert.equal(new Set(PIANO_LESSONS.map((lesson) => lesson.title)).size, 55, 'unique titles')
-  assert.equal(new Set(PIANO_LESSONS.map((lesson) => JSON.stringify(lesson.notes.map((n) => [n.hand, n.midi, n.startBeat, n.beats, n.finger])))).size, 55, 'every lesson plays a different part')
-  assert.deepEqual(PIANO_STAGES, ['Right-hand rhythm', 'Second right-hand rhythm', 'Left-hand pattern', 'Fill', 'Four-bar phrase'])
+  assert.equal(new Set(PIANO_LESSONS.map((lesson) => lesson.title)).size, 110, 'unique titles')
+  assert.equal(new Set(PIANO_LESSONS.map((lesson) => JSON.stringify(lesson.notes.map((n) => [n.hand, n.midi, n.startBeat, n.beats, n.finger])))).size, 110, 'every lesson plays a different part')
+  assert.deepEqual(PIANO_STAGES, ['Right-hand rhythm', 'Second right-hand rhythm', 'Left-hand pattern', 'Fill', 'Four-bar phrase',
+    'Richer voicings', 'Syncopation', 'Broken chords', 'Moving bass', 'Sixteen-bar arrangement'])
+  // The first five lessons of each style keep their ids and titles.
+  const ORIGINAL = ['rhythm', 'second-rhythm', 'left-hand', 'fill', 'phrase']
+  assert.equal(pianoLessonById('piano-rock-rhythm').title, 'Rock piano: eighth-note chords')
+  assert.equal(pianoLessonById('piano-soul-second-rhythm').title, 'R&B and soul piano: repeated eighth-note chords')
   const pedalled = new Set()
   for (const { style, lessons } of groups) {
-    assert.equal(lessons.length, 5, `${style}: five piano lessons`)
-    assert.deepEqual(lessons.map((lesson) => lesson.level), [1, 2, 3, 4, 5], `${style}: steps in order`)
-    assert.deepEqual(lessons.map((lesson) => lesson.bars), [2, 2, 2, 2, 4], `${style}: two-bar lessons, then a four-bar phrase`)
-    assert.deepEqual(lessons.map((lesson) => lesson.sections?.map((s) => `${s.name}:${s.bars}`).join() ?? ''), ['', '', '', 'Groove:1,Fill:1', 'Groove:3,Fill:1'])
-    const part = (lesson, hand) => JSON.stringify(lesson.notes.filter((n) => n.hand === hand && n.startBeat < lessonMeter(lesson).beatsPerBar).map((n) => [n.startBeat, n.beats]))
+    assert.equal(lessons.length, 10, `${style}: ten piano lessons`)
+    assert.deepEqual(lessons.map((lesson) => lesson.level), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], `${style}: steps in order`)
+    assert.deepEqual(lessons.map((lesson) => lesson.bars), [8, 8, 8, 8, 8, 16, 16, 16, 16, 16], `${style}: eight-bar foundations, then sixteen-bar pieces`)
+    const prefix = lessons[0].id.replace(/-rhythm$/, '')
+    assert.deepEqual(lessons.slice(0, 5).map((lesson) => lesson.id), ORIGINAL.map((suffix) => `${prefix}-${suffix}`), `${style}: the original ids`)
+    const { beatsPerBar } = lessonMeter(lessons[0])
+    const part = (lesson, hand, bar = 0) => JSON.stringify(lesson.notes.filter((n) => n.hand === hand && Math.floor(n.startBeat / beatsPerBar) === bar).map((n) => [n.startBeat % beatsPerBar, n.beats]))
     assert.notEqual(part(lessons[1], 'right'), part(lessons[0], 'right'), `${style}: step 2 changes the right-hand rhythm`)
     assert.equal(part(lessons[1], 'left'), part(lessons[0], 'left'), `${style}: step 2 keeps the left hand`)
     assert.notEqual(part(lessons[2], 'left'), part(lessons[0], 'left'), `${style}: step 3 changes the left hand`)
     assert.ok(lessons.every((lesson) => lesson.meter.numerator === lessons[0].meter.numerator && lesson.tempo.target === lessons[0].tempo.target), `${style}: one meter and tempo`)
+    assert.ok(lessons.slice(5).every((lesson) => lesson.notes.some((n) => n.hand === 'right' && lesson.notes.filter((m) => m.hand === 'right' && m.startBeat === n.startBeat).length === 4)),
+      `${style}: the sixteen-bar pieces use four-note voicings`)
+    assert.ok(lessons[7].notes.filter((n) => n.hand === 'right').some((n, i, all) => all.filter((m) => m.startBeat === n.startBeat).length === 1), `${style}: broken chords are single notes`)
   }
   for (const lesson of PIANO_LESSONS) {
     const where = lesson.id
     const { beatsPerBar } = lessonMeter(lesson)
+    const style = GENRE_STYLE[lesson.style]
     assert.ok(lesson.goal.length > 30 && lesson.steps.length >= 3 && lesson.hands.includes('Right hand') && lesson.hands.includes('Left hand'), `${where} explains the hands`)
     assert.ok(lesson.tempo.start < lesson.tempo.target, `${where} starts slower`)
-    assert.equal(lesson.chords.length, lesson.bars, `${where}: one chord per bar`)
-    const fillBar = lesson.sections ? lesson.bars - 1 : -1
-    // Every note: in its bar, on the sixteenth grid, written for one hand with one finger, each hand in its own register.
+    assert.deepEqual(lesson.chords, progression(style, lesson.bars), `${where}: the style's ${lesson.bars}-bar progression`)
+    assert.equal(lesson.sections.reduce((sum, s) => sum + s.bars, 0), lesson.bars, `${where}: sections cover the bars`)
+    const spans = chordSpans(lesson.chords, beatsPerBar)
+    const chordAt = (beat) => spans.findLast((span) => span.start <= beat + 1e-9)
+    const fills = lesson.fills ?? []
+    const inFill = (note) => fills.includes(Math.floor(note.startBeat / beatsPerBar)) && note.startBeat % beatsPerBar >= beatsPerBar / 2 - 1e-9
+    const leftLine = lesson.notes.filter((n) => n.hand === 'left').sort((a, b) => a.startBeat - b.startBeat)
     for (const note of lesson.notes) {
-      assert.ok(note.trackId === 'piano' && Number.isInteger(note.midi) && note.beats > 0 && onGrid(note.startBeat) && onGrid(note.beats), `${where} note on the grid`)
       const bar = Math.floor(note.startBeat / beatsPerBar)
-      assert.ok(note.startBeat + note.beats <= (bar + 1) * beatsPerBar + 1e-9, `${where} note stays in its bar`)
-      assert.ok([1, 2, 3, 4, 5].includes(note.finger), `${where} note has a written finger`)
+      const span = chordAt(note.startBeat)
+      assert.ok(note.startBeat + note.beats <= span.end + 1e-9, `${where} note at ${note.startBeat} stays in its chord and bar`)
       assert.ok(note.hand === 'right' ? note.midi >= 60 && note.midi <= 84 : note.midi >= 36 && note.midi <= 59, `${where} ${note.hand} hand in its register (${note.midi})`)
-      const { root, intervals } = parseChord(lesson.chords[bar])
-      const chordTones = intervals.map((i) => pc(root + i))
-      const inFill = bar === fillBar && note.startBeat >= bar * beatsPerBar + beatsPerBar / 2 - 1e-9
-      if (note.hand === 'left') assert.ok([...chordTones, pc(root + 9)].includes(pc(note.midi)), `${where} left-hand ${note.midi} belongs to ${lesson.chords[bar]}`)
-      else if (!inFill) assert.ok(chordTones.includes(pc(note.midi)), `${where} right-hand ${note.midi} belongs to ${lesson.chords[bar]}`)
+      const { root, intervals } = parseChord(span.symbol)
+      const tones = intervals.map((i) => pc(root + i))
+      if (note.hand === 'left') {
+        // Chord tones, the sixth of a boogie, or a half-step approach into the next note.
+        const next = leftLine.find((n) => n.startBeat > note.startBeat + 1e-9) ?? leftLine[0]
+        assert.ok([...tones, pc(root + 9)].includes(pc(note.midi)) || (next && Math.abs(next.midi - note.midi) <= 2), `${where} left-hand ${note.midi} at ${note.startBeat} belongs to ${span.symbol}`)
+      } else if (!inFill(note)) assert.ok(tones.includes(pc(note.midi)), `${where} right-hand ${note.midi} at ${note.startBeat} belongs to ${span.symbol}`)
+      void bar
     }
-    // Fingering: notes struck together take different fingers in pitch order (thumb lowest in the right hand, highest in
-    // the left), inside an octave; a held note is never struck again in the same hand.
-    for (const hand of ['right', 'left']) {
-      const notes = lesson.notes.filter((n) => n.hand === hand)
-      const onsets = Map.groupBy(notes, (n) => n.startBeat)
-      for (const [beat, together] of onsets) {
-        const sorted = [...together].sort((a, b) => a.midi - b.midi)
-        const fingers = sorted.map((n) => n.finger)
-        assert.equal(new Set(fingers).size, fingers.length, `${where} ${hand} at ${beat}: one finger per key`)
-        assert.ok(fingers.every((f, i) => i === 0 || (hand === 'right' ? f > fingers[i - 1] : f < fingers[i - 1])), `${where} ${hand} at ${beat}: fingers follow the pitches (${fingers})`)
-        assert.ok(sorted.at(-1).midi - sorted[0].midi <= 12, `${where} ${hand} at ${beat}: within an octave`)
-        assert.equal(new Set(sorted.map((n) => n.midi)).size, sorted.length, `${where} ${hand} at ${beat}: no doubled key`)
+    // Every chord of a split bar is played by both hands.
+    for (const span of spans) for (const hand of ['right', 'left'])
+      assert.ok(lesson.notes.some((n) => n.hand === hand && n.startBeat >= span.start - 1e-9 && n.startBeat < span.end - 1e-9), `${where} ${hand} hand plays ${span.symbol} at ${span.start}`)
+    playable(lesson)
+    // Real phrases: the bars vary, and the loop is not one or two bars (or a half) tiled.
+    const shapes = barShapes(lesson, beatsPerBar)
+    assert.ok(new Set(shapes).size >= (lesson.bars === 8 ? 6 : 11), `${where}: ${new Set(shapes).size} different bars of ${lesson.bars}`)
+    assert.ok(new Set(rhythms(lesson, beatsPerBar)).size >= 2, `${where}: more than one rhythm`)
+    for (const period of [1, 2, 4, 8].filter((p) => p < lesson.bars))
+      assert.ok(shapes.some((shape, bar) => shape !== shapes[bar % period]), `${where} is not a ${period}-bar pattern repeated`)
+    // The last bar leads back to the top: a held chord, a fill or a turnaround, never just the first bar again.
+    assert.notEqual(shapes.at(-1), shapes[0], `${where}: the last bar turns the loop round`)
+    // Fills: a run of five notes down the scale (5 4 3 2 1) or chord tones climbing, over a held left-hand root.
+    for (const bar of fills) {
+      const half = bar * beatsPerBar + beatsPerBar / 2
+      const run = lesson.notes.filter((n) => n.hand === 'right' && n.startBeat >= half - 1e-9 && n.startBeat < (bar + 1) * beatsPerBar)
+      const span = chordAt(half)
+      if (run.length === 5) {
+        assert.deepEqual(run.map((n) => n.finger), [5, 4, 3, 2, 1], `${where} fill fingering`)
+        assert.ok(run.every((n, i) => i === 0 || (run[i - 1].midi - n.midi >= 1 && run[i - 1].midi - n.midi <= 2)), `${where} fill steps down the scale`)
+      } else {
+        const { root, intervals } = parseChord(span.symbol)
+        assert.ok(run.length >= 3 && run.every((n, i) => (i === 0 || n.midi > run[i - 1].midi) && intervals.map((x) => pc(root + x)).includes(pc(n.midi))), `${where} bar ${bar + 1}: chord tones climb`)
       }
-      for (const [midi, same] of Map.groupBy(notes, (n) => n.midi))
-        same.forEach((n, i) => assert.ok(i === 0 || same[i - 1].startBeat + same[i - 1].beats <= n.startBeat + 1e-9, `${where} ${hand} ${midi} is released before it is struck again`))
-    }
-    // The fill: five notes stepping down the scale, fingers 5 4 3 2 1, over a held left-hand root.
-    if (fillBar >= 0) {
-      const half = fillBar * beatsPerBar + beatsPerBar / 2
-      const run = lesson.notes.filter((n) => n.hand === 'right' && n.startBeat >= half - 1e-9)
-      assert.deepEqual(run.map((n) => n.finger), [5, 4, 3, 2, 1], `${where} fill fingering`)
-      assert.ok(run.every((n, i) => i === 0 || (run[i - 1].midi - n.midi >= 1 && run[i - 1].midi - n.midi <= 2)), `${where} fill steps down the scale`)
-      const held = lesson.notes.filter((n) => n.hand === 'left' && n.startBeat >= half - 1e-9)
-      assert.ok(held.length === 1 && Math.abs(held[0].startBeat + held[0].beats - (fillBar + 1) * beatsPerBar) < 1e-9 && held[0].finger === 5, `${where} left hand holds the root under the fill`)
+      const held = lesson.notes.filter((n) => n.hand === 'left' && n.startBeat >= half - 1e-9 && n.startBeat < (bar + 1) * beatsPerBar)
+      assert.ok(held.length === 1 && Math.abs(held[0].startBeat + held[0].beats - (bar + 1) * beatsPerBar) < 1e-9 && pc(held[0].midi) === parseChord(span.symbol).root,
+        `${where} left hand holds the root under the fill`)
     }
     if (lesson.pedals) {
       pedalled.add(lesson.style)
-      assert.equal(lesson.pedals.length, lesson.bars, `${where}: one pedal per bar`)
-      lesson.pedals.forEach((pedal, bar) => assert.ok(pedal.controller === 64 && pedal.startBeat > bar * beatsPerBar && pedal.startBeat + pedal.beats < (bar + 1) * beatsPerBar,
-        `${where}: the pedal goes down after the chord and lifts before the next bar`))
+      // One pedal per chord, lifted before the next chord and before a fill (a chord that starts with the fill has none).
+      const fillStart = (span) => fills.includes(span.bar) ? span.bar * beatsPerBar + beatsPerBar / 2 : Infinity
+      const pedalledSpans = spans.filter((span) => span.start < fillStart(span) - 1e-9)
+      assert.equal(lesson.pedals.length, pedalledSpans.length, `${where}: one pedal per chord`)
+      lesson.pedals.forEach((pedal, i) => assert.ok(pedal.controller === 64 && pedal.startBeat > pedalledSpans[i].start &&
+        pedal.startBeat + pedal.beats < Math.min(pedalledSpans[i].end, fillStart(pedalledSpans[i])),
+        `${where}: the pedal goes down after the chord and lifts before the next`))
       assert.match(lesson.hands, /sustain pedal/)
       assert.ok(lesson.steps.some((step) => /sustain pedal/.test(step)), `${where} says how to pedal`)
     } else assert.doesNotMatch(lesson.hands, /pedal/, `${where} mentions no pedal it does not write`)
@@ -93,24 +161,120 @@ try {
     assert.deepEqual(song.tracks.map((track) => `${track.id}:${track.instrument}`), ['piano:piano', 'drums:drums', 'bass:other'], `${where}: piano first, then the drum and bass backing`)
     assert.ok(!song.tracks.some((track) => track.group === 'creative') && song.chords.length === 0 && !song.instrumentNotes.harmony, `${where}: no chord part doubles the piano`)
     assert.equal(song.piano, lesson.notes)
+    assert.equal(song.bars, lesson.bars)
+    assert.equal(songBeats(song), lesson.bars * beatsPerBar, `${where}: the loop clock ends with the last bar`)
     assert.ok(song.drums.length > 0 && song.drums.every((hit) => hit.startBeat >= 0 && hit.startBeat < songBeats(song)), `${where}: drums fill the lesson`)
-    assert.ok(song.instrumentNotes.bass.length >= lesson.bars && song.instrumentNotes.bass.every((n) => n.startBeat + n.beats <= songBeats(song) + 1e-9), `${where}: bass in time`)
-    assert.deepEqual(song.chordLabels.map((label) => label.symbol), lesson.chords)
+    assert.ok(song.drums.some((hit) => hit.startBeat >= (lesson.bars - 1) * beatsPerBar), `${where}: drums play the last bar`)
+    const bass = song.instrumentNotes.bass
+    assert.ok(bass.length >= lesson.bars && bass.every((n) => n.startBeat + n.beats <= songBeats(song) + 1e-9), `${where}: bass in time`)
+    for (const n of bass) {
+      const span = chordAt(n.startBeat)
+      const { root, intervals } = parseChord(span.symbol)
+      const next = spans[(spans.indexOf(span) + 1) % spans.length]
+      assert.ok(n.startBeat + n.beats <= span.end + 1e-9 && ([...intervals, 9].map((x) => pc(root + x)).includes(pc(n.midi)) || pc(n.midi) === pc(parseChord(next.symbol).root - 1)),
+        `${where}: bass ${n.midi} at ${n.startBeat} agrees with ${span.symbol}`)
+    }
+    assert.ok(bass.some((n) => n.startBeat >= (lesson.bars - 1) * beatsPerBar), `${where}: the bass plays the last bar`)
+    for (const bar of fills) assert.ok(!bass.some((n) => n.startBeat >= bar * beatsPerBar + beatsPerBar / 2 - 1e-9 && n.startBeat < (bar + 1) * beatsPerBar), `${where}: the bass rests for the fill`)
+    assert.deepEqual(song.chordLabels.map((label) => label.symbol), spans.map((span) => span.symbol))
     assert.equal(song.pedals, lesson.pedals)
     assert.equal(song.bpm, lesson.tempo.target * lessonMeter(lesson).pulse)
     const xml = pianoXml(song)
     assert.equal((xml.match(/<measure /g) ?? []).length, lesson.bars, `${where} engraves every bar`)
     assert.equal((xml.match(/<fingering>/g) ?? []).length, lesson.notes.length, `${where}: every note shows its finger once`)
-    assert.equal((xml.match(/<harmony /g) ?? []).length, lesson.bars, `${where}: chord names over the score`)
+    assert.equal((xml.match(/<harmony /g) ?? []).length, spans.length, `${where}: every chord name over the score`)
     assert.doesNotMatch(xml, /NaN|undefined/)
     assert.equal(freshPosition(lesson).trackId, 'piano')
     assert.deepEqual(freshPosition(lesson).loop, { startBar: 1, endBar: lesson.bars })
   }
   assert.deepEqual([...pedalled].sort(), ['Latin: bossa nova', 'Pop', 'R&B and soul'], 'pedalling is written where the style needs it')
-  assert.equal(pianoLessonById('piano-rock-rhythm').title, 'Rock piano: eighth-note chords')
   // Flat keys are spelled in flats (Eb major, F minor), sharp keys in sharps.
   for (const id of ['piano-soul-phrase', 'piano-drum-and-bass-phrase']) assert.doesNotMatch(pianoXml(pianoLessonSong(pianoLessonById(id))), /<alter>1<\/alter>/, `${id} is spelled in flats`)
   assert.doesNotMatch(pianoXml(pianoLessonSong(pianoLessonById('piano-rock-phrase'))), /<alter>-1<\/alter>/, 'A major is spelled in sharps')
+  assert.deepEqual(pianoLessonList(PIANO_LESSONS[3]), PIANO_LESSONS, 'Previous and Next move through the genre lessons')
+
+  // ---- Progressions and scales in every key ----
+  assert.equal(KEYS.length, 24, 'twelve major and twelve minor keys')
+  let tonalCount = 0
+  const fingerings = new Set()
+  for (const { tonic, pitch, mode } of KEYS) {
+    const progressions = tonalLessons('progression', pitch, mode)
+    const scales = tonalLessons('scale', pitch, mode)
+    tonalCount += progressions.length + scales.length
+    assert.equal(progressions.length, 4, `${tonic} ${mode}: four progressions`)
+    assert.equal(scales.length, 3, `${tonic} ${mode}: right hand, left hand, hands together`)
+    for (const lesson of [...progressions, ...scales]) {
+      const where = lesson.id
+      assert.equal(pianoLessonById(lesson.id), lesson, `${where} opens by id`)
+      assert.deepEqual(pianoLessonList(lesson), lesson.kind === 'progression' ? progressions : scales, `${where}: Previous and Next stay in the key`)
+      const back = browseTo(lesson.id, DEFAULT_BROWSE)
+      assert.ok(back.instrument === 'piano' && back.pianoShelf === lesson.kind && back.pianoKey.pitch === pitch && back.pianoKey.mode === mode, `${where}: Back returns to its key`)
+      assert.deepEqual(lesson.key, { tonic, mode })
+      playable(lesson)
+      // Every note is spelled from its degree in the key, and the spelling names the pitch played.
+      assert.ok(lesson.notes.every((n) => n.spell && spelledPc(n.spell) === pc(n.midi)), `${where}: notes spelled to their pitches`)
+      const xml = pianoXml(pianoLessonSong(lesson))
+      assert.doesNotMatch(xml, /NaN|undefined/)
+      assert.equal((xml.match(/<measure /g) ?? []).length, lesson.bars)
+    }
+    for (const lesson of progressions) {
+      const where = lesson.id
+      assert.equal(lesson.bars, 8)
+      assert.deepEqual(lesson.chords.slice(0, 4), lesson.chords.slice(4), `${where}: held, then four to the bar`)
+      assert.equal(lesson.numerals.length, 8)
+      assert.deepEqual(lesson.sections.map((s) => s.name), lesson.numerals, `${where}: the numerals over each bar`)
+      // Chord quality follows the numeral's case, built from the key's scale (natural minor unless marked harmonic).
+      lesson.numerals.forEach((numeral, bar) => {
+        const { root, intervals } = parseChord(lesson.chords[bar])
+        const minorThird = intervals.includes(3)
+        assert.equal(minorThird, numeral[0] === numeral[0].toLowerCase(), `${where}: ${numeral} is ${lesson.chords[bar]}`)
+        const scale = (mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10]).map((s) => (pitch + s) % 12)
+        const harmonic = /harmonic/.test(lesson.title) && numeral === 'V'
+        for (const x of intervals) if (!(harmonic && pc(root + x) === (pitch + 11) % 12)) assert.ok(scale.includes(pc(root + x)), `${where}: ${lesson.chords[bar]} is in the key`)
+      })
+      const song = pianoLessonSong(lesson)
+      assert.deepEqual(song.tracks.map((t) => t.id), ['piano', 'drums', 'bass'], `${where}: with drums and bass`)
+      assert.ok(lesson.pedals?.length === 8, `${where}: one pedal per chord`)
+    }
+    if (mode === 'minor') {
+      const harmonic = progressions.find((lesson) => /harmonic/.test(lesson.title))
+      assert.ok(harmonic && !harmonic.chords[2].includes('m') && /harmonic/.test(harmonic.title), `${tonic} minor: the harmonic V is major and says so`)
+      assert.ok(progressions.find((lesson) => lesson.id.includes('-i-iv-v-i-') && !/harmonic/.test(lesson.title)).chords[2].includes('m'), `${tonic} minor: the natural v is minor`)
+    }
+    for (const lesson of scales) {
+      const where = lesson.id
+      assert.equal(lesson.bars, 4)
+      for (const hand of lesson.id.includes('together') ? ['right', 'left'] : [lesson.id.includes('right') ? 'right' : 'left']) {
+        const notes = lesson.notes.filter((n) => n.hand === hand)
+        assert.equal(notes.length, 29, `${where} ${hand}: two octaves up and down`)
+        assert.equal(notes[14].midi - notes[0].midi, 24, `${where} ${hand}: two octaves`)
+        assert.ok(notes.every((n, i) => i === 0 || (i <= 14 ? n.midi > notes[i - 1].midi : n.midi < notes[i - 1].midi)), `${where} ${hand}: up then down`)
+        // Letters step through the alphabet: one letter per degree.
+        assert.ok(notes.slice(1, 15).every((n, i) => 'CDEFGAB'.indexOf(n.spell[0]) === ('CDEFGAB'.indexOf(notes[i].spell[0]) + 1) % 7), `${where} ${hand}: one letter per degree`)
+        assert.ok(notes.every((n) => n.finger !== 1 || !BLACK.includes(pc(n.midi))), `${where} ${hand}: the thumb stays on white keys`)
+      }
+      if (lesson.id.includes('together')) {
+        const right = lesson.notes.filter((n) => n.hand === 'right'), left = lesson.notes.filter((n) => n.hand === 'left')
+        assert.ok(right.every((n, i) => n.midi - left[i].midi === 12 && n.startBeat === left[i].startBeat), `${where}: the hands an octave apart`)
+      }
+    }
+    fingerings.add(JSON.stringify(scaleFingering(pitch, mode)))
+  }
+  assert.equal(tonalCount, 24 * 7, 'progressions and scales in every key')
+  assert.ok(fingerings.size >= 9, `scale fingering follows the key, not the C shape transposed (${fingerings.size} shapes)`)
+  const notes = (id, hand) => pianoLessonById(id).notes.filter((n) => n.hand === hand)
+  assert.equal(notes('piano-scale-right-hand-f-major', 'right')[3].finger, 4, 'F major: the fourth finger on Bb')
+  assert.equal(notes('piano-scale-right-hand-b-flat-major', 'right')[0].finger, 4, 'Bb major starts on the fourth finger')
+  assert.deepEqual([...new Set(notes('piano-scale-right-hand-d-flat-major', 'right').filter((n) => n.finger === 1).map((n) => n.spell))], ['F', 'C'], 'Db major: thumb on F and C')
+  assert.ok(notes('piano-scale-right-hand-f-sharp-major', 'right').some((n) => n.spell === 'E#'), 'F# major is spelled with E#')
+  assert.ok(notes('piano-scale-left-hand-e-flat-minor', 'left').some((n) => n.spell === 'Cb'), 'Eb minor is spelled with Cb')
+  assert.match(pianoXml(pianoLessonSong(pianoLessonById('piano-scale-right-hand-f-sharp-major'))), /<step>E<\/step><alter>1<\/alter>/, 'E# is engraved as E sharp')
+  assert.deepEqual(pianoLessonById('piano-progression-ii-v-i-e-flat-major').chords.slice(0, 4), ['Fm7', 'Bb7', 'Ebmaj7', 'Ebmaj7'])
+  assert.deepEqual(pianoLessonById('piano-progression-i-iv-v-i-harmonic-g-sharp-minor').chords.slice(0, 4), ['G#m', 'C#m', 'D#', 'G#m'])
+
+  // ---- Inspired studies ----
+  for (const lesson of PIANO_INSPIRED) playable(lesson)
+
   // A lesson position for piano is kept under the course's own key and reopens on the piano.
   {
     const store = new Map()
@@ -119,8 +283,9 @@ try {
     assert.deepEqual(lessonPosition(lesson), freshPosition(lesson))
     delete globalThis.localStorage
   }
-  console.log(`Piano course checks passed: ${PIANO_LESSONS.length} lessons in ${groups.length} genres (${LESSONS.length + PIANO_LESSONS.length} with the drums); steps, registers, ` +
-    'chord tones, written fingering, fills, pedalling, drum and bass backing, chord names and fingering in the score.')
+  console.log(`Piano course checks passed: ${PIANO_LESSONS.length} genre lessons in ${groups.length} genres (8 and 16 bars, varied phrases, ` +
+    `backing and chord names in agreement), ${PIANO_INSPIRED.length} inspired studies, ${tonalCount} progressions and scales in 24 keys; ` +
+    'registers, chord tones, playable fingering, fills, pedalling, spelling and key fingering.')
 } finally {
   await vite.close()
 }

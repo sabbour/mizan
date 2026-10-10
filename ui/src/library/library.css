@@ -1912,6 +1912,8 @@
 /* One course list at a time: the instrument, then (for drums) which lessons; both are the app's segmented choices. */
 .course-browse { width: 100%; max-width: 1280px; margin: 0 auto; }
 .course-switches { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 0 0 4px; }
+.course-key { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 4px 0 12px; }
+.lesson-numeral { font-family: var(--font-serif, Georgia, serif); font-weight: 600; }
 .course-segments .dim { margin-left: 4px; font-weight: 400; }
 .course-browse .course { margin-top: 22px; }
 /* Genres: the styles as a list beside the chosen style's five lessons. */

@@ -29,6 +29,8 @@ export type PianoNote = {
   velocity?: number
   /** The finger that plays the note (1 thumb to 5 little finger). Only authored lessons set it; it is never guessed. */
   finger?: 1 | 2 | 3 | 4 | 5
+  /** How an authored lesson spells the note, e.g. `E#` in F# major or `Cb` in Eb minor; otherwise it is spelled from the key. */
+  spell?: string
 }
 /** A written pedal: sustain (64), sostenuto (66) or soft (67), held from `startBeat` for `beats`. Only authored lessons set it. */
 export type Pedal = { controller: 64 | 66 | 67; startBeat: number; beats: number }

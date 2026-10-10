@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { CourseBrowse } from './browse'
 import { COLLECTIONS, genres, LESSONS, LEVELS, lessonBacking, lessonList, lessonStage, type Lesson, type LessonBar } from './curriculum'
-import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonSong, type PianoLesson } from './piano'
+import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonList, pianoLessonSong, pianoStep, type PianoLesson } from './piano'
+import { PIANO_INSPIRED } from './pianoInspired'
+import { KEY_NAMES, PROGRESSION_COUNT, SCALE_COUNT, tonalLessons, type KeyMode } from './pianoTonal'
 import { tempoLabel } from './state'
 
 /** Consecutive identical bars share one count and sticking line. */
@@ -44,6 +46,10 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
     <aside className="lesson-panel" aria-label={`Lesson ${index + 1} instructions`}>
       <div className="lesson-main">
         <p className="lesson-goal">{lesson.goal}</p>
+        <p className="lesson-brief num">{stage ? `${stage.name}, ${stage.index + 1} of ${stage.of}` : `Level ${lesson.level}, ${LEVELS[lesson.level - 1]}`} · {meter} ·
+          {' '}{lesson.bars.length} bars · start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</p>
+        <details className="lesson-steps lesson-details">
+          <summary>Lesson details: {lesson.limbs ? 'limbs, ' : ''}count and sticking{backing ? ', backing' : ''} and how to practise</summary>
         <dl className="lesson-facts">
           {lesson.style && <div><dt>Style</dt><dd>{lesson.style}</dd></div>}
           {lesson.feel && <div><dt>Feel</dt><dd>{lesson.feel}</dd></div>}
@@ -66,8 +72,7 @@ export function LessonPanel({ lesson, onLesson }: { lesson: Lesson; onLesson: (i
             ))}
           </tbody>
         </table>
-        <details className="lesson-steps">
-          <summary>How to practise</summary>
+          <h4 className="lesson-subhead">How to practise</h4>
           <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
           <p className="lesson-note">Speed starts at the lesson&apos;s starting tempo until you choose your own speed, which Mizan then remembers;
             raise it with ] as it gets comfortable. The pattern loops and the 3D kit shows each stroke. Hands are the lesson&apos;s sticking,
@@ -107,14 +112,30 @@ function LessonButton({ lesson, onLesson }: { lesson: Lesson; onLesson: (id: str
 }
 
 function PianoLessonButton({ lesson, onLesson }: { lesson: PianoLesson; onLesson: (id: string) => void }) {
+  const detail = lesson.kind === 'genre' ? `${PIANO_STAGES[lesson.level - 1]} · ${lesson.feel}` : lesson.kind === 'inspired' ? `${lesson.influence} · ${lesson.feel}` : lesson.feel
   return (
     <li>
       <button className="course-lesson course-lesson-two" onClick={() => onLesson(lesson.id)}>
         <span className="course-number num">{lesson.level}</span>
-        <span className="course-title">{lesson.title}<span className="course-style">{PIANO_STAGES[lesson.level - 1]} · {lesson.feel}</span></span>
-        <span className="course-meta num">{meta(lesson)}{lesson.pedals && <span className="course-level-tag">Pedal</span>}</span>
+        <span className="course-title">{lesson.title}<span className="course-style">{detail}</span></span>
+        <span className="course-meta num">{meta(lesson)} · {lesson.bars} bars{lesson.pedals && <span className="course-level-tag">Pedal</span>}</span>
       </button>
     </li>
+  )
+}
+
+/** The key for progressions and scales: a tonic from a menu and major or (natural) minor. Choosing a key shows its lessons. */
+function KeyPicker({ value, onChange }: { value: { pitch: number; mode: KeyMode }; onChange: (key: { pitch: number; mode: KeyMode }) => void }) {
+  return (
+    <div className="course-key">
+      <label className="kit-look"><span>Key</span>
+        <select value={value.pitch} onChange={(event) => onChange({ ...value, pitch: Number(event.target.value) })}>
+          {KEY_NAMES[value.mode].map((name, pitch) => <option key={pitch} value={pitch}>{name}</option>)}
+        </select>
+      </label>
+      <Segments name="mode" label="Mode" value={value.mode} onChange={(mode) => onChange({ ...value, mode })}
+        options={[{ id: 'major', label: 'Major' }, { id: 'minor', label: 'Minor' }]} />
+    </div>
   )
 }
 
@@ -186,11 +207,17 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
   const pianoGenre = pianoGenreList.find(({ style }) => style === browse.pianoGenre) ?? pianoGenreList[0]
   const backing = lessonBacking(drumGenre.lessons[0])!
   const pianoBass = pianoLessonSong(pianoGenre.lessons[0]).tracks.find((track) => track.id === 'bass')!
+  const tonal = browse.pianoShelf === 'progression' || browse.pianoShelf === 'scale' ? tonalLessons(browse.pianoShelf, browse.pianoKey.pitch, browse.pianoKey.mode) : []
   return (
     <div className="course-browse">
       <div className="course-switches">
         <Segments name="instrument" label="Instrument" value={browse.instrument} onChange={(instrument) => set({ instrument })}
-          options={[{ id: 'drums', label: 'Drums', count: LESSONS.length }, { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length }]} />
+          options={[{ id: 'drums', label: 'Drums', count: LESSONS.length }, { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length + PIANO_INSPIRED.length }]} />
+        {browse.instrument === 'piano' && (
+          <Segments name="piano-shelf" label="Lessons" value={browse.pianoShelf} onChange={(pianoShelf) => set({ pianoShelf })}
+            options={[{ id: 'genre', label: 'Genres', count: PIANO_LESSONS.length }, { id: 'inspired', label: 'Inspired', count: PIANO_INSPIRED.length },
+              { id: 'progression', label: 'Progressions', count: PROGRESSION_COUNT }, { id: 'scale', label: 'Scales', count: SCALE_COUNT }]} />
+        )}
         {browse.instrument === 'drums' && (
           <Segments name="shelf" label="Lessons" value={browse.shelf} onChange={(shelf) => set({ shelf })}
             options={[{ id: 'course', label: 'Course', count: course.length }, { id: 'inspired', label: 'Inspired', count: inspired.length },
@@ -198,23 +225,45 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
         )}
       </div>
       {browse.instrument === 'piano' ? (
-        <section className="course" aria-labelledby="course-piano">
-          <h2 id="course-piano" className="lib-h2">Piano by genre <span className="dim num">{PIANO_LESSONS.length}</span></h2>
-          <p className="course-intro">
-            Five lessons per style: two right-hand rhythms over a simple left hand, a left-hand pattern, a fill and a four-bar phrase.
-            Every note has its written finger. Each lesson opens on the piano score and a 3D keyboard, with an original drum and bass backing.
-          </p>
-          <GenreShelf id="course-piano" value={pianoGenre.style} onChange={(pianoGenre) => set({ pianoGenre })}
-            styles={pianoGenreList.map(({ style, lessons }) => ({ style, note: `${lessons[0].meter.numerator}/${lessons[0].meter.denominator}` }))}>
-            <h3>{pianoGenre.style}</h3>
-            <p className="course-genre-facts">
-              <span className="num">{pianoGenre.lessons.length} lessons · {pianoGenre.lessons[0].meter.numerator}/{pianoGenre.lessons[0].meter.denominator} ·
-                aim for {tempoLabel(pianoGenre.lessons[0], pianoGenre.lessons[0].tempo.target)}</span>
-              <span>Backing: drum kit and {pianoBass.name.toLowerCase()}{pianoGenre.lessons.some((lesson) => lesson.pedals) ? ' · sustain pedal written' : ''}</span>
+        browse.pianoShelf === 'genre' ? (
+          <section className="course" aria-labelledby="course-piano">
+            <h2 id="course-piano" className="lib-h2">Piano by genre <span className="dim num">{PIANO_LESSONS.length}</span></h2>
+            <p className="course-intro">
+              Ten lessons per style. Steps 1–5 are eight-bar phrases: two right-hand rhythms, a left-hand pattern, fills and a four-bar phrase
+              with its answer. Steps 6–10 are sixteen-bar pieces in two sections: richer voicings, syncopation, broken chords, a moving bass and a
+              full arrangement. Every note has its written finger, over an original drum and bass backing.
             </p>
-            <ol className="course-steps">{pianoGenre.lessons.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
-          </GenreShelf>
-        </section>
+            <GenreShelf id="course-piano" value={pianoGenre.style} onChange={(pianoGenre) => set({ pianoGenre })}
+              styles={pianoGenreList.map(({ style, lessons }) => ({ style, note: `${lessons[0].meter.numerator}/${lessons[0].meter.denominator}` }))}>
+              <h3>{pianoGenre.style}</h3>
+              <p className="course-genre-facts">
+                <span className="num">{pianoGenre.lessons.length} lessons · {pianoGenre.lessons[0].meter.numerator}/{pianoGenre.lessons[0].meter.denominator} ·
+                  aim for {tempoLabel(pianoGenre.lessons[0], pianoGenre.lessons[0].tempo.target)}</span>
+                <span>Backing: drum kit and {pianoBass.name.toLowerCase()}{pianoGenre.lessons.some((lesson) => lesson.pedals) ? ' · sustain pedal written' : ''}</span>
+              </p>
+              <ol className="course-steps">{pianoGenre.lessons.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+            </GenreShelf>
+          </section>
+        ) : browse.pianoShelf === 'inspired' ? (
+          <section className="course" aria-labelledby="course-piano-inspired">
+            <h2 id="course-piano-inspired" className="lib-h2">Inspired piano <span className="dim num">{PIANO_INSPIRED.length}</span></h2>
+            <p className="course-intro">
+              Original studies in the style of well-known players and recordings: the kind of voicings, left hand and rhythm each is known for.
+              None is a transcription; no melody, lyric or arrangement of the recording is used.
+            </p>
+            <ol className="course-levels course-collection">{PIANO_INSPIRED.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+          </section>
+        ) : (
+          <section className="course" aria-labelledby="course-piano-tonal">
+            <h2 id="course-piano-tonal" className="lib-h2">{browse.pianoShelf === 'progression' ? 'Chord progressions' : 'Scales'}
+              <span className="dim num"> {tonal.length} in {tonal[0].style}</span></h2>
+            <p className="course-intro">{browse.pianoShelf === 'progression'
+              ? 'Common progressions in any key, with roman numerals over the chord names: held chords, then four to the bar, voiced so each chord moves to the nearest notes of the next. Minor keys use the natural minor unless the lesson says harmonic minor.'
+              : 'Each scale two octaves up and down: right hand, left hand, then hands together, with the standard fingering for that key. Minor scales are the natural minor.'}</p>
+            <KeyPicker value={browse.pianoKey} onChange={(pianoKey) => set({ pianoKey })} />
+            <ol className="course-steps">{tonal.map((lesson) => <PianoLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+          </section>
+        )
       ) : browse.shelf === 'inspired' ? (
         <section className="course" aria-labelledby="course-inspired">
           <h2 id="course-inspired" className="lib-h2">{COLLECTIONS.inspired.title} <span className="dim num">{inspired.length}</span></h2>
@@ -261,45 +310,51 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
     </div>
   )
 }
-/** Instructions beside a piano lesson's score, with the lessons before and after it. */
+/** Instructions beside a piano lesson's score, with the lessons before and after it in the same list. */
 export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; onLesson: (id: string) => void }) {
-  const index = PIANO_LESSONS.indexOf(lesson)
-  const previous = PIANO_LESSONS[index - 1]
-  const next = PIANO_LESSONS[index + 1]
+  const list = pianoLessonList(lesson)
+  const index = list.indexOf(lesson)
+  const previous = list[index - 1]
+  const next = list[index + 1]
   const song = pianoLessonSong(lesson)
-  const bass = song.tracks.find((track) => track.id === 'bass')!
+  const bass = song.tracks.find((track) => track.id === 'bass')
+  const sectionOf = (bar: number) => song.sections.find((section) => bar + 1 >= section.startBar && bar + 1 < section.startBar + section.bars)?.name
   return (
     <aside className="lesson-panel" aria-label={`Piano lesson ${lesson.level} instructions`}>
       <div className="lesson-main">
         <p className="lesson-goal">{lesson.goal}</p>
+        <p className="lesson-brief num">{pianoStep(lesson)} · {lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars ·
+          start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}{lesson.pedals ? ' · sustain pedal' : ''}</p>
+        <details className="lesson-steps lesson-details">
+          <summary>Lesson details: hands, {lesson.chords.length ? 'chords bar by bar' : 'bars'}{bass ? ', backing' : ''} and how to practise</summary>
         <dl className="lesson-facts">
-          <div><dt>Style</dt><dd>{lesson.style}</dd></div>
+          <div><dt>{lesson.key ? 'Key' : 'Style'}</dt><dd>{lesson.style}</dd></div>
+          {lesson.influence && <div><dt>Inspired by</dt><dd>{lesson.influence} (an original study, not a transcription)</dd></div>}
           <div><dt>Feel</dt><dd>{lesson.feel}</dd></div>
-          <div><dt>Step</dt><dd>{PIANO_STAGES[lesson.level - 1]}, <span className="num">{lesson.level} of 5</span> in {lesson.style}</dd></div>
-          <div><dt>Meter</dt><dd className="num">{lesson.meter.numerator}/{lesson.meter.denominator}</dd></div>
+          <div><dt>Step</dt><dd className="num">{pianoStep(lesson)}</dd></div>
+          <div><dt>Meter</dt><dd className="num">{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars</dd></div>
           <div><dt>Tempo</dt><dd className="num">start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</dd></div>
           <div><dt>Hands</dt><dd>{lesson.hands}</dd></div>
-          <div><dt>Pedal</dt><dd>{lesson.pedals ? 'Sustain, changed each bar (shown on the 3D keyboard)' : 'None written'}</dd></div>
-          <div><dt>Backing</dt><dd>Drum kit and {bass.name.toLowerCase()}, playing <span className="num">{lesson.chords.join(' – ')}</span>.
-            Original parts made for this lesson; mute or turn them down in the track list.</dd></div>
+          <div><dt>Pedal</dt><dd>{lesson.pedals ? 'Sustain, changed with each chord (shown on the 3D keyboard)' : 'None written'}</dd></div>
+          {bass && <div><dt>Backing</dt><dd>Drum kit and {bass.name.toLowerCase()}, playing <span className="num">{lesson.chords.join(' – ')}</span>.
+            Original parts made for this lesson; mute or turn them down in the track list.</dd></div>}
         </dl>
         <table className="lesson-counts">
           <tbody>
-            {lesson.chords.map((chord, bar) => (
+            {Array.from({ length: lesson.bars }, (_, bar) => (
               <tr key={bar}>
                 <th scope="row" className="num">Bar {bar + 1}</th>
-                <td><span className="lesson-label">Chord</span> {chord}</td>
-                <td>{lesson.sections && bar === lesson.bars - 1 ? 'Groove, then the fill from the middle of the bar' : 'Groove'}</td>
+                {lesson.chords.length > 0 && <td><span className="lesson-label">Chord</span> {lesson.chords[bar]}{lesson.numerals && <> · <span className="lesson-numeral">{lesson.numerals[bar]}</span></>}</td>}
+                <td>{lesson.fills?.includes(bar) ? `${sectionOf(bar)}, then the fill from the middle of the bar` : sectionOf(bar)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <details className="lesson-steps">
-          <summary>How to practise</summary>
+          <h4 className="lesson-subhead">How to practise</h4>
           <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
           <p className="lesson-note">Finger numbers are written over the notes (1 thumb to 5 little finger) and shown on the 3D keyboard as each key plays:
             <b className="hand-left"> left hand in blue</b>, <b className="hand-right">right hand in orange</b>. Speed starts at the lesson&apos;s starting tempo;
-            raise it with ] as it gets comfortable. This is an original exercise in the style, not a transcription of a recording.</p>
+            raise it with ] as it gets comfortable. This is an original exercise, not a transcription of a recording.</p>
         </details>
       </div>
       <nav className="lesson-nav" aria-label="Other lessons">
