@@ -358,7 +358,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       }
     }
   })
-  useEffect(() => { lastSignature.current = ''; lastLabels.current = '' }, [scene, failure, lost, fingering, letters])
+  // A value no label set can have, so the next frame always redraws the labels (even to none).
+  useEffect(() => { lastSignature.current = ''; lastLabels.current = '\u0000' }, [scene, failure, lost, fingering, letters])
 
   // Loading until the scene for the chosen instrument and look has arrived.
   const loading = !failure && !lost && (!scene || scene.variant !== variantId || scene.look !== look)

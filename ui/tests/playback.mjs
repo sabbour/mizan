@@ -1892,7 +1892,7 @@ async function pianoChecks(width) {
   check(zimmerNumbers === '1,2,3,4,5,6,7,8,9', `Numbered in learning order within the artist: ${zimmerNumbers}`)
   // Progressions: a key menu and major or minor; changing the key lists that key's lessons.
   pianoShelves[2].click()
-  await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 9, 'Nine progressions in the key')
+  await wait(() => document.querySelector('#course-piano-tonal') && document.querySelectorAll('.course-steps .course-lesson').length === 10, 'Ten progressions in C major')
   const tonic = document.querySelector('.course-key select')
   tonic.value = '3'
   tonic.dispatchEvent(new Event('change', { bubbles: true }))

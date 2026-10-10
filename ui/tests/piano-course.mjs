@@ -225,7 +225,7 @@ try {
   for (const { tonic, pitch, mode } of KEYS) {
     const progressions = progressionLessons(pitch, mode)
     tonalCount += progressions.length
-    assert.equal(progressions.length, 9, `${tonic} ${mode}: nine progressions`)
+    assert.equal(progressions.length, mode === 'major' ? 10 : 8, `${tonic} ${mode}: ten major or eight minor progressions`)
     for (const lesson of progressions) {
       const where = lesson.id
       families.add(lesson.id.replace(/-[a-g](-sharp|-flat)?-(major|minor)$/, '') + ':' + mode)

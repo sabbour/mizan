@@ -5,9 +5,9 @@
 
 type Inspired = { artist?: string; style?: string; influence?: string; level: number; title: string }
 
-/** The artist a study is grouped under: its `artist`, else the name before the track in its credit. */
+/** The artist a study is grouped under: its `artist`, else the first name credited before the track (co-writers group under it). */
 export const artistOf = (lesson: Inspired) =>
-  lesson.artist ?? (lesson.influence ?? lesson.style ?? '').replace(/^Inspired by /, '').split(' — ')[0]
+  lesson.artist ?? (lesson.influence ?? lesson.style ?? '').replace(/^Inspired by /, '').split(' — ')[0].split(/, | & /)[0].trim()
 
 export function byArtist<T extends Inspired>(lessons: T[]): { artist: string; lessons: T[] }[] {
   const groups = new Map<string, T[]>()
