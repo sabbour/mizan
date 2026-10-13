@@ -196,6 +196,7 @@ export async function instrumentChecks() {
   try {
     root.render(React.createElement(Workspace, {
       song, songId: 'generic-instrument-browser-check',
+      defaults: { guitar: 'score', bass: 'score' },
       stems: [{ id: 'guitar', label: 'Guitar', url: '/samples/piano/A4-v5.ogg', level: 0.2 }],
     }))
     await until(() => container.querySelector('.score[aria-busy="false"]'), 'Guitar score rendered')

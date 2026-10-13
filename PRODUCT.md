@@ -4,57 +4,74 @@
 
 ## Platform
 
-web
+Windows desktop
 
-The React UI runs in a WebView2 desktop window, packaged as an installable Windows app with web-style interactions.
+The Windows ARM64 app uses a WinUI 3 shell and WebView2 to show its React interface.
 
 ## Stack
 
-React + TypeScript + Vite for the UI, shown in WebView2 with a .NET 10 host. Python 3.12 handles YouTube ingestion, source separation, transcription, and chord analysis. ONNX Runtime and PyTorch use measured execution providers per model.
+The interface uses React, TypeScript, and Vite. WebView2 displays it in the
+WinUI 3 shell. .NET 10 runs the shell.
+
+Python 3.12 handles YouTube ingestion, source separation, transcription, and
+chord analysis. ONNX Runtime and PyTorch run the models. Mizan uses measured
+execution providers for each model.
 
 ## Users
 
-A single hobbyist musician, the author, who plays piano and drums. They read notation slowly and are still learning it. They learn songs from full-band recordings found on YouTube.
+Musicians who learn parts from full-band recordings and practice with scores,
+visual guides, and chords. The audience includes people who are new to notation.
 
 ## Product Purpose
 
-Mizan (ميزان, the Arabic word for musical meter and also "balance") turns a YouTube link into a practice kit for detected parts. It also imports MIDI and MusicXML for direct practice. Piano and drums are the author's main instruments:
+Mizan turns a YouTube link into a practice kit for detected parts. It also
+imports MIDI and MusicXML for direct practice.
 
-- draft notes and scores for detected instruments, including piano and drums
-- a synchronized visual guide appropriate to each supported part
-- the song's chord progression
+A practice kit includes:
 
-Success means the user can learn a real song from a real recording: play along with it, memorize the part accurately, work through hard passages, understand why the harmony works, and keep a growing repertoire.
+- Draft notes and scores for detected instruments, including piano and drums.
+- A synchronized visual guide for each supported part.
+- The chord progression for the song.
+
+Success means musicians can learn parts from real recordings. They can repeat
+difficult passages, study harmony, and save a growing repertoire.
 
 ## Positioning
 
-A local, open-source tool that separates a full-band mix, transcribes the parts it can identify, and puts notation, visual note guides, and chords on one shared playhead for practice. It runs on the user's own laptop hardware; a Hugging Face account is needed only to download optional gated model weights.
+Mizan is an open-source desktop app. It separates full-band mixes and
+transcribes detected parts. Notation, visual guides, and chords share one
+playhead. Local processing is the default. Optional cloud processing uses an
+account that the user owns. A Hugging Face account is needed to download gated
+model weights.
 
 ## Operating Context
 
-- The laptop sits on the piano's music stand, at arm's length, while the user plays. The UI is read mid-performance and at a glance.
-- The user's hands are usually on the instrument; controls are reached between phrases.
-- Typical practice loop: paste a link, wait for processing (minutes, sometimes longer), then repeatedly loop and slow down sections while playing along.
-- Sources include full-band mixes; instrument separation and notation are estimates.
-- Target machine: Windows on ARM, Snapdragon X Elite (Hexagon NPU, Adreno GPU).
+- Users read the interface at a glance while playing from a music stand.
+- Users can keep their hands on an instrument. Controls must be easy to reach between phrases.
+- A practice session starts with a recording and an analysis job. Users then repeat and slow difficult sections.
+- Full-band mixes can mask instruments. Separation and notation are estimates.
+- Target machines use Windows ARM64, including Snapdragon X Elite devices.
 
 ## Capabilities and Constraints
 
-- **Input:** YouTube links for audio analysis; MIDI (.mid/.midi) and MusicXML (.musicxml/.xml/.mxl) files import directly into the practice workspace.
-- **Instruments:** Official MuScriptor maps GM MIDI drum tokens to kick, snare, closed/open hat, floor tom, high tom, ride, and crash lanes. Its other detected instrument labels produce individual tentative pitched-note tracks. All transcriptions remain drafts.
-- **Chords:** major/minor triads and common sevenths on a beat-aligned timeline, each shown with its notes on a small keyboard, the song's detected key, and the chord's role in that key (I, IV, V…).
-- **Practice tools:** loop a selection, slow down without changing pitch, a synchronized playback cursor, a count-in before each loop repeat, a metronome click over the recording, and muting the transcribed part so the user plays it.
-- **Navigation:** bar numbers, plus auto-detected song sections (verse, chorus…) when available.
-- **Modes:** Study mode (every view, for reading at a desk) and Play mode (score leads, piano roll/drum grid as a thin guide, for reading from the stand), switched with one key.
+- **Input:** Analyze YouTube links. Import MIDI (.mid/.midi) and MusicXML (.musicxml/.xml/.mxl) files into the practice workspace.
+- **Instruments:** MuScriptor maps GM MIDI drum tokens to kick, snare, closed/open hat, floor tom, high tom, ride, and crash lanes. Other detected labels produce tentative pitched-note tracks. All transcriptions are drafts.
+- **Chords:** Show major/minor triads and common sevenths on a beat-aligned timeline. Show the notes for each chord, the detected key, and its role in that key.
+- **Practice tools:** Loop a selection and slow playback without changing pitch. Show a synchronized cursor. Add a count-in, a metronome click, and controls to mute the transcribed part.
+- **Guitar and bass:** Show single-staff scores, compact tab, and a 3D instrument above the tab. String and fret positions are estimates. Each instrument has a five-level course and studies across 11 genres.
+- **Navigation:** Show bar numbers and auto-detected song sections when available.
+- **Modes:** Study mode shows every view. Play mode prioritizes the score and shows a piano roll or drum grid as a guide. Switch modes with one key.
 - **Exports:** MusicXML, MIDI, chords, separated audio.
-- **Accuracy:** present generated output as study-aid drafts with visible low-confidence passages.
-- **Length:** there is no fixed song-length limit. Long jobs need preflight warnings, progress, and cancellation.
-- **Deferred:** score editing, instrument-specific tabs and fingering beyond the supported views, transposition, saved named loops, tempo ramping, mastery tracking, app accounts, and cloud processing.
-- **Terminology:** "stem" = an isolated instrument track; "piano roll" / "drum grid" = the time-based visual views; "draft" = generated notation.
+- **Accuracy:** Present generated output as study-aid drafts. Show low-confidence passages.
+- **Length:** There is no fixed song-length limit. Long jobs need resource warnings, progress, and cancellation.
+- **Cloud:** This PC is the default. Optional Azure, Google Cloud, and AWS paths use resources in user-owned accounts. Setup uses provider APIs. Resource changes and token transfer require separate approval.
+- **Models:** MuScriptor checkpoints are gated and noncommercial. Model weights are not bundled with the app or cloud worker image.
+- **Deferred:** score editing, tab for other instruments, fingering beyond the supported views, transposition, saved named loops, tempo ramping, mastery tracking, and app accounts.
+- **Terminology:** "Stem" means an isolated instrument track. "Piano roll" and "drum grid" mean time-based visual views. "Draft" means generated notation.
 
 ## Brand Commitments
 
-- Name: **Mizan** (ميزان). Arabic-inspired naming was the user's explicit choice.
+- Name: **Mizan** (ميزان), an Arabic word for musical meter and balance.
 - Open-source project.
 
 ## Evidence on Hand
@@ -64,10 +81,10 @@ CC0 comparison fixtures and local model benchmarks exist, but an assembled fixtu
 ## Product Principles
 
 1. **The playhead is the product.** Every view (score, piano roll/drum grid, chords, audio) follows one shared time position.
-2. **Honest drafts.** Show uncertainty rather than hiding it; never present generated notation as authoritative.
+2. **Honest drafts.** Show uncertainty rather than hiding it. Never present generated notation as authoritative.
 3. **Readable from the music stand.** Anything needed while playing must be legible and reachable at arm's length, mid-performance.
-4. **Scaffold notation, don't assume it.** The user is still learning to read, so the visual piano roll and drum grid support the score instead of the score standing alone.
-5. **Local and private.** Everything runs on the user's machine; nothing depends on a cloud service.
+4. **Scaffold notation, do not assume it.** Visual piano and drum guides support the score for users who are new to notation.
+5. **Local first and private by consent.** Local processing is the default. Cloud jobs use user-owned resources and require approval.
 
 ## Accessibility & Inclusion
 

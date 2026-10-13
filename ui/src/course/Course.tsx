@@ -6,6 +6,7 @@ import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonList, pianoLessonS
 import { PIANO_INSPIRED } from './pianoInspired'
 import { byArtist, inspiredOrder } from './inspired'
 import { KEY_NAMES, PROGRESSION_COUNT, progressionLessons, SCALE_COUNT, SCALE_FAMILIES, scaleLessons, scaleTonic, type KeyMode } from './pianoTonal'
+import { BASS_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, GUITAR_LESSONS, frettedLessonList, frettedGenres, type FrettedInstrument, type FrettedLesson } from './fretted'
 import { tempoLabel } from './state'
 
 /** Consecutive identical bars share one count and sticking line. */
@@ -125,6 +126,19 @@ function PianoLessonButton({ lesson, onLesson, number }: { lesson: PianoLesson; 
   )
 }
 
+function FrettedLessonButton({ lesson, onLesson }: { lesson: FrettedLesson; onLesson: (id: string) => void }) {
+  const detail = lesson.kind === 'genre' ? `${lesson.genre} · Level ${lesson.level}` : FRETTED_LEVELS[lesson.level - 1]
+  return (
+    <li>
+      <button className="course-lesson course-lesson-two" onClick={() => onLesson(lesson.id)}>
+        <span className="course-number num">{lesson.level}</span>
+        <span className="course-title">{lesson.title}<span className="course-style">{detail}</span></span>
+        <span className="course-meta num">{meta(lesson)} · {lesson.bars} bars</span>
+      </button>
+    </li>
+  )
+}
+
 /** A scale: its tonic and which scale, each from a menu; the tonic is spelled as that scale is usually written. */
 function ScalePicker({ pitch, family, onChange }: { pitch: number; family: string; onChange: (pitch: number, family: string) => void }) {
   return (
@@ -233,11 +247,26 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
   const pianoArtist = pianoArtists.find(({ artist }) => artist === browse.pianoArtist) ?? pianoArtists[0]
   const tonal = browse.pianoShelf === 'progression' ? progressionLessons(browse.pianoKey.pitch, browse.pianoKey.mode)
     : browse.pianoShelf === 'scale' ? scaleLessons(browse.pianoKey.pitch, browse.pianoScale) : []
+  const frettedInstrument: FrettedInstrument = browse.instrument === 'bass' ? 'bass' : 'guitar'
+  const frettedLessons = frettedInstrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
+  const frettedShelf = frettedInstrument === 'guitar' ? browse.guitarShelf : browse.bassShelf
+  const frettedGenre = frettedInstrument === 'guitar' ? browse.guitarGenre : browse.bassGenre
+  const frettedGenreList = frettedGenres(frettedInstrument)
+  const selectedFrettedGenre = frettedGenreList.includes(frettedGenre) ? frettedGenre : frettedGenreList[0]
+  const frettedGenreLessons = frettedLessons.filter((lesson) => lesson.kind === 'genre' && lesson.genre === selectedFrettedGenre)
+    .toSorted((a, b) => a.level - b.level)
+  const setFrettedShelf = (shelf: 'course' | 'genre') => set(frettedInstrument === 'guitar' ? { guitarShelf: shelf } : { bassShelf: shelf })
+  const setFrettedGenre = (genre: string) => set(frettedInstrument === 'guitar' ? { guitarGenre: genre } : { bassGenre: genre })
   return (
     <div className="course-browse">
       <div className="course-switches">
         <Segments name="instrument" label="Instrument" value={browse.instrument} onChange={(instrument) => set({ instrument })}
-          options={[{ id: 'drums', label: 'Drums', count: LESSONS.length }, { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length + PIANO_INSPIRED.length }]} />
+          options={[
+            { id: 'drums', label: 'Drums', count: LESSONS.length },
+            { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length + PIANO_INSPIRED.length },
+            { id: 'guitar', label: 'Guitar', count: GUITAR_LESSONS.length },
+            { id: 'bass', label: 'Bass', count: BASS_LESSONS.length },
+          ]} />
         {browse.instrument === 'piano' && (
           <Segments name="piano-shelf" label="Lessons" value={browse.pianoShelf} onChange={(pianoShelf) => set({ pianoShelf })}
             options={[{ id: 'genre', label: 'Genres', count: PIANO_LESSONS.length }, { id: 'inspired', label: 'Inspired', count: PIANO_INSPIRED.length },
@@ -248,8 +277,43 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
             options={[{ id: 'course', label: 'Course', count: course.length }, { id: 'inspired', label: 'Inspired', count: inspired.length },
               { id: 'genre', label: 'Genres', count: lessonList({ collection: 'genre' }).length }]} />
         )}
+        {(browse.instrument === 'guitar' || browse.instrument === 'bass') && (
+          <Segments name="fretted-shelf" label="Lessons" value={frettedShelf} onChange={setFrettedShelf}
+            options={[{ id: 'course', label: 'Course', count: frettedLessons.filter((lesson) => lesson.kind === 'course').length },
+              { id: 'genre', label: 'Genres', count: frettedLessons.filter((lesson) => lesson.kind === 'genre').length }]} />
+        )}
       </div>
-      {browse.instrument === 'piano' ? (
+      {browse.instrument === 'guitar' || browse.instrument === 'bass' ? (
+        <section className="course" aria-labelledby={`course-${frettedInstrument}`}>
+          <h2 id={`course-${frettedInstrument}`} className="lib-h2">
+            {frettedInstrument === 'guitar' ? 'Guitar' : 'Bass'} {frettedShelf === 'course' ? 'course' : 'by genre'}
+            <span className="dim num"> {frettedLessons.filter((lesson) => lesson.kind === (frettedShelf === 'course' ? 'course' : 'genre')).length}</span>
+          </h2>
+          <p className="course-intro">{frettedShelf === 'course'
+            ? `Learn five levels of ${frettedInstrument} basics. Use standard tuning to play open notes, fret patterns, string changes, picking, chord shapes, scales, and original phrases. Tab positions are estimates.`
+            : `${FRETTED_GENRES.length} genres each have five original studies. Each study has a four-bar pattern with note choices and rhythms that fit its genre.`}</p>
+          {frettedShelf === 'course'
+            ? <ol className="course-levels">
+              {FRETTED_LEVELS.map((name, level) => {
+                const lessons = frettedLessons.filter((lesson) => lesson.kind === 'course' && lesson.level === level + 1)
+                return <li key={name} className="course-level">
+                  <h3>Level {level + 1} · {name} <span className="dim num">{lessons.length}</span></h3>
+                  <ol>{lessons.map((lesson) => <FrettedLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+                </li>
+              })}
+            </ol>
+            : <GenreShelf id={`course-${frettedInstrument}-genres`} value={selectedFrettedGenre} onChange={setFrettedGenre}
+              styles={frettedGenreList.map((genre) => ({ style: genre, note: `${frettedLessons.filter((lesson) => lesson.genre === genre).length} studies` }))}>
+              <h3>{selectedFrettedGenre}</h3>
+              <p className="course-genre-facts">
+                <span className="num">{frettedGenreLessons.length} studies · 4/4 · Levels 1–5 · aim for {tempoLabel(frettedGenreLessons[0], frettedGenreLessons[0].tempo.target)}</span>
+                <span>Standard tuning · suggested tab positions</span>
+              </p>
+              <ol className="course-steps">{frettedGenreLessons.map((lesson) =>
+                <FrettedLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
+            </GenreShelf>}
+        </section>
+      ) : browse.instrument === 'piano' ? (
         browse.pianoShelf === 'genre' ? (
           <section className="course" aria-labelledby="course-piano">
             <h2 id="course-piano" className="lib-h2">Piano by genre <span className="dim num">{PIANO_LESSONS.length}</span></h2>
@@ -389,6 +453,59 @@ export function PianoLessonPanel({ lesson, onLesson }: { lesson: PianoLesson; on
           <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
           <p className="lesson-note">With Fingering on, finger numbers (1 thumb to 5 little finger) show on the keys in Hands & keys and on the 3D keyboard as each key plays:
             <b className="hand-left"> left hand in blue</b>, <b className="hand-right">right hand in orange</b>. Speed starts at the lesson&apos;s starting tempo;
+            raise it with ] as it gets comfortable.</p>
+        </details>
+      </div>
+      <nav className="lesson-nav" aria-label="Other lessons">
+        <button className="btn" disabled={!previous} onClick={() => previous && onLesson(previous.id)}
+          aria-label={previous ? `Previous lesson: ${previous.title}` : 'No previous lesson'}>
+          <ChevronLeft size={16} aria-hidden /> Previous
+        </button>
+        <button className="btn" disabled={!next} onClick={() => next && onLesson(next.id)}
+          aria-label={next ? `Next lesson: ${next.title}` : 'No next lesson'}>
+          Next <ChevronRight size={16} aria-hidden />
+        </button>
+      </nav>
+    </aside>
+  )
+}
+
+/** Instructions beside a guitar or bass lesson's score and suggested tab positions. */
+export function FrettedLessonPanel({ lesson, onLesson }: { lesson: FrettedLesson; onLesson: (id: string) => void }) {
+  const list = frettedLessonList(lesson)
+  const index = list.indexOf(lesson)
+  const previous = list[index - 1]
+  const next = list[index + 1]
+  const config = FRETTED_CONFIG[lesson.instrument]
+  const instrument = lesson.instrument === 'guitar' ? 'Guitar' : 'Bass'
+  return (
+    <aside className="lesson-panel" aria-label={`${instrument} lesson ${lesson.level} instructions`}>
+      <div className="lesson-main">
+        <p className="lesson-goal">{lesson.goal}</p>
+        <p className="lesson-brief num">{lesson.kind === 'genre' ? `${lesson.genre} · ` : ''}Level {lesson.level} ·
+          {' '}{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars · start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</p>
+        <details className="lesson-steps lesson-details">
+          <summary>Lesson details: tuning, {lesson.kind === 'genre' ? 'genre and level' : 'skill level'} and how to practise</summary>
+          <dl className="lesson-facts">
+            <div><dt>Instrument</dt><dd>{config.name}</dd></div>
+            {lesson.genre && <div><dt>Genre</dt><dd>{lesson.genre}</dd></div>}
+            <div><dt>Level</dt><dd>{lesson.level} · {FRETTED_LEVELS[lesson.level - 1]}</dd></div>
+            <div><dt>Tuning</dt><dd>{config.strings.map(({ openPitch }) => openPitch).join(' · ')} · standard tuning</dd></div>
+            <div><dt>Meter</dt><dd className="num">{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars</dd></div>
+            <div><dt>Tempo</dt><dd className="num">start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</dd></div>
+          </dl>
+          <table className="lesson-counts">
+            <tbody>{Array.from({ length: lesson.bars }, (_, bar) => (
+              <tr key={bar}>
+                <th scope="row" className="num">Bar {bar + 1}</th>
+                <td><span className="lesson-label">Notes</span> {lesson.notes.filter((note) => Math.floor(note.startBeat / 4) === bar).length}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <h4 className="lesson-subhead">How to practise</h4>
+          <ol>{lesson.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+          <p className="lesson-note">Tab positions are suggested from the note pitch and standard tuning; fingering is not authored.
+            The course does not listen for played notes or report correct-play feedback. Speed starts at the lesson&apos;s starting tempo;
             raise it with ] as it gets comfortable.</p>
         </details>
       </div>

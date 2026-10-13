@@ -8,6 +8,8 @@
 // Add --scroll-follow to check score follow visibility only.
 // Add --meter to check changing-meter engraving and workspace navigation.
 // Add --instrument for instrument scores, saved practice views and continuous part switching.
+// Add --job-preview for live recording controls and removal of generated Creative tracks.
+// Add --fretted for guitar/bass courses, saved views and continuous part switching.
 // MIZAN_TEST_OPENED optionally points to a live Api.open_song JSON response for the Cairokee benchmark.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
@@ -18,6 +20,8 @@ import { analysisChecks, vocalChecks } from './vocal-analysis.mjs'
 import { instrumentChecks } from './instrument-workspace.mjs'
 import { practiceChecks } from './practice-workspace.mjs'
 import { browserMeterChecks } from './meter.mjs'
+import { jobPreviewChecks } from './job-preview.mjs'
+import { frettedChecks, tabChecks } from './fretted-workspace.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const testUrl = process.env.MIZAN_TEST_URL ?? 'http://localhost:5173'
@@ -125,6 +129,35 @@ try {
   const readabilityOnly = process.argv.includes('--cairokee-readability')
   const courseOnly = process.argv.includes('--course')
   const pianoOnly = process.argv.includes('--piano')
+  const jobPreviewOnly = process.argv.includes('--job-preview')
+  const tabOnly = process.argv.includes('--fretted-tab')
+  const frettedOnly = process.argv.includes('--fretted') || tabOnly
+  if (frettedOnly) {
+    const artifacts = process.env.MIZAN_TEST_ARTIFACTS
+    if (artifacts) {
+      await call('Runtime.addBinding', { name: 'mizanFrettedShot' })
+      onBinding = async ({ name, payload }) => {
+        if (name !== 'mizanFrettedShot') return
+        const shot = await call('Page.captureScreenshot', { format: 'png' })
+        await writeFile(join(artifacts, `fretted-${payload}.png`), Buffer.from(shot.data, 'base64'))
+      }
+    }
+    for (const [width, height] of [[1440, 900], [617, 900]]) {
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+      if (artifacts) await evaluate(`window.__mizanFrettedShot = (name) => {
+        window.mizanFrettedShot(name + '-${width}');
+        return new Promise((resolve) => setTimeout(resolve, 500));
+      }`)
+      console.log(await evaluate(`(${(tabOnly ? tabChecks : frettedChecks).toString()})()`))
+      await call('Page.navigate', { url: testUrl })
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
+    }
+    assert.deepEqual(runtimeErrors, [], 'Guitar and bass checks have no uncaught browser errors')
+  }
+  if (jobPreviewOnly) {
+    console.log(await evaluate(`(${jobPreviewChecks.toString()})()`))
+    assert.deepEqual(runtimeErrors, [], 'Job previews have no uncaught browser errors')
+  }
   if (pianoOnly) {
     console.log(await evaluate(`(${pianoAudioChecks.toString()})()`))
     const artifacts = process.env.MIZAN_TEST_ARTIFACTS
@@ -220,7 +253,7 @@ try {
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -234,10 +267,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -268,7 +301,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -1979,7 +2012,11 @@ async function pianoChecks(width) {
   }
   await open('R&B and soul piano: chords on the four beats')
   check(document.querySelector('.track-button')?.textContent.includes('Piano'), `A piano lesson opens on the piano part: ${document.querySelector('.track-button')?.textContent}`)
-  check(document.querySelector('.chordview-option[data-view="keyboard"]')?.getAttribute('aria-checked') === 'true', 'The 3D keyboard is the default guide')
+  check(document.querySelector('.chordview-option[data-view="hands"]')?.getAttribute('aria-checked') === 'true' && document.querySelector('.practice-hands'),
+    'Hands & keys is the default piano guide')
+  document.querySelector('.chordview-option[data-view="keyboard"]').click()
+  await wait(() => document.querySelector('.chordview-option[data-view="keyboard"]')?.getAttribute('aria-checked') === 'true',
+    'The 3D keyboard remains available as an explicit choice')
   check(document.querySelectorAll('.score-bar').length === 8 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed with each chord'), 'An eight-bar score and lesson panel with its pedalling')
   check(document.querySelector('.lesson-panel').getBoundingClientRect().height <= 260 && document.querySelector('.lesson-details') && !document.querySelector('.lesson-details').open,
     `The lesson panel stays compact, details behind a disclosure (${Math.round(document.querySelector('.lesson-panel').getBoundingClientRect().height)}px)`)
@@ -2311,23 +2348,25 @@ async function courseChecks(width, phase) {
   localStorage.removeItem('mizan:practice')
   localStorage.setItem('mizan:mixer:s1', JSON.stringify({ muted: ['piano'], volumes: { drums: 0.6 } }))
   const before = Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
-  // Songs and the drum course are two tabs: Songs first; arrows, Home and End move between them.
+  // Discovery, the local catalog and the course are separate tabs with full keyboard navigation.
   await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
   const tabs = () => [...document.querySelectorAll('.lib-tabs [role="tab"]')]
-  check(document.querySelector('.lib-tabs').getAttribute('role') === 'tablist' && tabs().map((tab) => `${tab.dataset.tab}:${tab.getAttribute('aria-selected')}:${tab.tabIndex}`).join('|') === 'songs:true:0|course:false:-1' &&
-    !document.getElementById('lib-panel-songs').hidden && document.getElementById('lib-panel-course').hidden && !document.querySelector('.course-lesson'),
-    `Songs is the first tab, with the course in its own tab: ${tabs().map((tab) => tab.textContent).join(' | ')}`)
+  check(document.querySelector('.lib-tabs').getAttribute('role') === 'tablist' && tabs().map((tab) => `${tab.dataset.tab}:${tab.getAttribute('aria-selected')}:${tab.tabIndex}`).join('|') === 'discover:false:-1|catalog:true:0|course:false:-1' &&
+    document.getElementById('lib-panel-discover').hidden && !document.getElementById('lib-panel-catalog').hidden &&
+    document.getElementById('lib-panel-course').hidden && !document.querySelector('.course-lesson'),
+    `Discover, Local song catalog, and Course are separate tabs: ${tabs().map((tab) => tab.textContent).join(' | ')}`)
   const key = (name) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }))
   tabs()[0].focus(); key('ArrowRight')
-  await wait(() => document.activeElement?.dataset.tab === 'course' && !document.getElementById('lib-panel-course').hidden && document.getElementById('lib-panel-songs').hidden, 'ArrowRight selects and focuses Drum course')
-  key('Home'); await wait(() => document.activeElement?.dataset.tab === 'songs', 'Home returns to Songs')
-  key('End'); await wait(() => document.activeElement?.dataset.tab === 'course', 'End selects Drum course')
-  key('ArrowRight'); await wait(() => document.activeElement?.dataset.tab === 'songs', 'Arrows wrap around')
-  await showTab('course')
+  await wait(() => document.activeElement?.dataset.tab === 'catalog' && !document.getElementById('lib-panel-catalog').hidden && document.getElementById('lib-panel-discover').hidden, 'ArrowRight selects and focuses the local catalog')
+  key('ArrowRight'); await wait(() => document.activeElement?.dataset.tab === 'course' && !document.getElementById('lib-panel-course').hidden, 'ArrowRight selects the Course tab')
+  key('Home'); await wait(() => document.activeElement?.dataset.tab === 'discover' && !document.getElementById('lib-panel-discover').hidden, 'Home returns to Discover')
+  key('End'); await wait(() => document.activeElement?.dataset.tab === 'course', 'End selects Course')
+  key('ArrowRight'); await wait(() => document.activeElement?.dataset.tab === 'discover', 'Arrows wrap around')
+  await showTab('catalog')
   const search = document.querySelector('.intake-unified input')
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'paper')
   search.dispatchEvent(new Event('input', { bubbles: true }))
-  await wait(() => tabs()[0].getAttribute('aria-selected') === 'true' && document.querySelector('.song-open'), 'Typing a search shows Songs with the matches')
+  await wait(() => tabs()[1].getAttribute('aria-selected') === 'true' && document.querySelector('.song-open'), 'Typing a search shows the local catalog with the matches')
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, '')
   search.dispatchEvent(new Event('input', { bubbles: true }))
   check(!Object.keys(localStorage).some((name) => name.includes('tab')), 'The chosen tab is not stored')
@@ -2542,8 +2581,8 @@ async function courseChecks(width, phase) {
   await wait(() => document.querySelectorAll('.score-ghost').length === 8 && document.querySelectorAll('.score-ghost-paren').length === 16,
     `Each ghost note is parenthesised (${document.querySelectorAll('.score-ghost').length})`)
   await back()
-  check(tabs()[1].getAttribute('aria-selected') === 'true', 'Back from a lesson returns to the Drum course tab')
-  await showTab('songs')
+  check(tabs()[2].getAttribute('aria-selected') === 'true', 'Back from a lesson returns to the Course tab')
+  await showTab('catalog')
   // Song: a suggested sticking, and choosing another track keeps its position.
   const song = [...document.querySelectorAll('.song-open')].find((element) => element.textContent.includes('Paper Rain'))
   check(song, 'Library has a song to open')

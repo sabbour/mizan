@@ -28,8 +28,11 @@ export type PracticePrefs = {
   click?: boolean
   sticking?: boolean
   kitStyle?: KitStyle
-  pianoView?: Exclude<PracticeView, 'kit'>
+  pianoView?: Extract<PracticeView, 'score' | 'hands' | 'keyboard'>
   drumsView?: Extract<PracticeView, 'score' | 'kit'>
+  guitarView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
+  bassView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
+  frettedHandedness?: 'right' | 'left'
 }
 
 const KEY = 'mizan:practice'
@@ -66,6 +69,15 @@ function read(warn: boolean): PracticePrefs {
   if ('drumsView' in saved) {
     if (saved.drumsView === 'score' || saved.drumsView === 'kit') prefs.drumsView = saved.drumsView
     else if (warn) console.warn('Ignoring the saved drum view; it is not one of the offered views.', saved.drumsView)
+  }
+  for (const key of ['guitarView', 'bassView'] as const) {
+    if (!(key in saved)) continue
+    if (saved[key] === 'score' || saved[key] === 'tab' || saved[key] === 'fretboard') prefs[key] = saved[key]
+    else if (warn) console.warn(`Ignoring the saved ${key}; it is not one of the offered views.`, saved[key])
+  }
+  if ('frettedHandedness' in saved) {
+    if (saved.frettedHandedness === 'right' || saved.frettedHandedness === 'left') prefs.frettedHandedness = saved.frettedHandedness
+    else if (warn) console.warn('Ignoring the saved guitar or bass alignment; it is not left-handed or right-handed.', saved.frettedHandedness)
   }
   if ('kitStyle' in saved) {
     if (KIT_STYLES.includes(saved.kitStyle as KitStyle)) prefs.kitStyle = saved.kitStyle as KitStyle

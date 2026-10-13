@@ -37,47 +37,64 @@ def test_playlist_parser_keeps_real_hit_list_metadata_without_inventing_ranks():
     assert all("rank" not in row for row in result["rows"])
 
 
-def test_global_playlist_parser_preserves_order_as_real_chart_rank():
-    payload = fixture_payloads()["globalTop100"]
-    result = popular.parse_playlist_response(
-        payload,
-        playlist_id=popular.GLOBAL_TOP_100_ID,
-        title="Top 100 Songs Global",
-        publisher="YouTube Music Global Charts",
-        ranked=True,
+def test_editorial_playlists_preserve_verified_metadata_order_without_chart_ranks():
+    payloads = fixture_payloads()
+    expected = (
+        ("pops-biggest-hits", "popsBiggestHits", popular.POPS_BIGGEST_HITS_ID,
+         "Pop's Biggest Hits", popular.POPS_BIGGEST_HITS_URL, "ic8j13piAhQ"),
+        ("classic-rock-greatest-hits", "classicRocksGreatestHits",
+         popular.CLASSIC_ROCK_GREATEST_HITS_ID, "Classic Rock's Greatest Hits",
+         popular.CLASSIC_ROCK_GREATEST_HITS_URL, "OMOGaugKpzs"),
+        ("all-time-alt", "allTimeAlt", popular.ALL_TIME_ALT_ID,
+         "All-Time Alt", popular.ALL_TIME_ALT_URL, "hTWKbfoikeg"),
     )
+    assert [section["id"] for section in popular._PLAYLISTS] == [
+        "hit-list", "pops-biggest-hits", "classic-rock-greatest-hits", "all-time-alt",
+    ]
 
-    assert result["description"] == "This week's ranking of the most popular songs on YouTube."
-    assert result["chartDate"] == "20261010"
-    assert [row["rank"] for row in result["rows"]] == [1, 2]
-    assert result["rows"][0]["videoId"] == "fcnDmrtj6Sk"
+    for section, (section_id, fixture_key, playlist_id, title, source_url, first_video_id) in zip(
+        popular._PLAYLISTS[1:], expected
+    ):
+        payload = payloads[fixture_key]
+        result = popular.parse_playlist_response(
+            payload,
+            playlist_id=playlist_id,
+            title=title,
+            publisher="YouTube Music",
+        )
+        assert section["id"] == section_id
+        assert section["sourceUrl"] == source_url
+        assert payload["modified_date"] == "20261013"
+        assert payload["channel"] == section["publisher"] == "YouTube Music"
+        assert result["description"] == payload["description"]
+        assert result["chartDate"] == ""
+        assert [row["videoId"] for row in result["rows"]] == [
+            entry["id"] for entry in payload["entries"]
+        ]
+        assert result["rows"][0]["videoId"] == first_video_id
+        assert all("rank" not in row for row in result["rows"])
 
 
-def test_playlist_parser_rejects_wrong_source_and_keeps_original_chart_positions():
-    payload = deepcopy(fixture_payloads()["globalTop100"])
+def test_editorial_playlist_parser_rejects_wrong_source_and_preserves_order():
+    payload = deepcopy(fixture_payloads()["popsBiggestHits"])
     payload["entries"].insert(1, deepcopy(payload["entries"][0]))
-    payload["entries"].append({
-        "id": "xvT1jH8B9AM",
-        "title": "KALYANI Official Music Video",
-        "channel": "MONEY VERSE RECORDS",
-    })
     result = popular.parse_playlist_response(
         payload,
-        playlist_id=popular.GLOBAL_TOP_100_ID,
-        title="Top 100 Songs Global",
-        publisher="YouTube Music Global Charts",
-        ranked=True,
+        playlist_id=popular.POPS_BIGGEST_HITS_ID,
+        title="Pop's Biggest Hits",
+        publisher="YouTube Music",
     )
 
-    assert [row["rank"] for row in result["rows"]] == [1, 3, 4]
+    assert [row["videoId"] for row in result["rows"]] == [
+        entry["id"] for entry in fixture_payloads()["popsBiggestHits"]["entries"]
+    ]
     payload["channel"] = "Unverified uploader"
     with pytest.raises(PopularChartUnavailable):
         popular.parse_playlist_response(
             payload,
-            playlist_id=popular.GLOBAL_TOP_100_ID,
-            title="Top 100 Songs Global",
-            publisher="YouTube Music Global Charts",
-            ranked=True,
+            playlist_id=popular.POPS_BIGGEST_HITS_ID,
+            title="Pop's Biggest Hits",
+            publisher="YouTube Music",
         )
 
 
@@ -85,21 +102,32 @@ def test_playlist_fetches_are_independent_and_preserve_partial_errors(monkeypatc
     def fetch(section):
         if section["id"] == "hit-list":
             return {**section, "status": "unavailable", "message": "playlist failed", "rows": []}
+        payload = fixture_payloads()[{
+            "pops-biggest-hits": "popsBiggestHits",
+            "classic-rock-greatest-hits": "classicRocksGreatestHits",
+            "all-time-alt": "allTimeAlt",
+        }[section["id"]]]
         parsed = popular.parse_playlist_response(
-            fixture_payloads()["globalTop100"],
+            payload,
             playlist_id=section["playlist_id"],
             title=section["playlist_title"],
             publisher=section["publisher"],
-            ranked=True,
+            ranked=section["kind"] == "chart",
         )
         return {**section, "status": "available", **parsed}
 
     monkeypatch.setattr(popular, "_fetch_playlist", fetch)
     result = popular.fetch_popular_songs()
 
-    assert [section["status"] for section in result["sections"]] == ["unavailable", "available"]
+    assert [section["status"] for section in result["sections"]] == [
+        "unavailable", "available", "available", "available",
+    ]
     assert result["sections"][0]["id"] == "hit-list"
-    assert result["sections"][1]["rows"][0]["rank"] == 1
+    assert [section["id"] for section in result["sections"]] == [
+        "hit-list", "pops-biggest-hits", "classic-rock-greatest-hits", "all-time-alt",
+    ]
+    assert result["sections"][1]["sourceUrl"] == popular.POPS_BIGGEST_HITS_URL
+    assert all("rank" not in row for section in result["sections"][1:] for row in section["rows"])
 
 
 def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
@@ -110,7 +138,9 @@ def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
         "title": "YouTube Music",
         "sections": [
             {"id": "hit-list", "status": "available", "rows": [{"videoId": "78wrful9cVU"}]},
-            {"id": "global-top-100", "status": "available", "rows": [{"videoId": "fcnDmrtj6Sk"}]},
+            {"id": "pops-biggest-hits", "status": "available", "rows": [{"videoId": "ic8j13piAhQ"}]},
+            {"id": "classic-rock-greatest-hits", "status": "available", "rows": [{"videoId": "OMOGaugKpzs"}]},
+            {"id": "all-time-alt", "status": "available", "rows": [{"videoId": "hTWKbfoikeg"}]},
         ],
     }
     fetched = []
@@ -131,7 +161,9 @@ def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
             "title": "YouTube Music",
             "sections": [
                 {"id": "hit-list", "status": "unavailable", "rows": []},
-                {"id": "global-top-100", "status": "unavailable", "rows": []},
+                {"id": "pops-biggest-hits", "status": "unavailable", "rows": []},
+                {"id": "classic-rock-greatest-hits", "status": "unavailable", "rows": []},
+                {"id": "all-time-alt", "status": "unavailable", "rows": []},
             ],
         })
         stale = bridge.popular_songs()
@@ -148,12 +180,14 @@ def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch)
         "title": "YouTube Music",
         "sections": [
             {"id": "hit-list", "status": "unavailable", "rows": []},
-            {"id": "global-top-100", "status": "unavailable", "rows": []},
+            {"id": "pops-biggest-hits", "status": "unavailable", "rows": []},
+            {"id": "classic-rock-greatest-hits", "status": "unavailable", "rows": []},
+            {"id": "all-time-alt", "status": "unavailable", "rows": []},
         ],
     })
     try:
         result = bridge.popular_songs()
         assert result["ok"]
-        assert [section["status"] for section in result["sections"]] == ["unavailable", "unavailable"]
+        assert [section["status"] for section in result["sections"]] == ["unavailable"] * 4
     finally:
         runner.close()

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the ARM64 Mizan shell and packages it with the UI, Python host, and FFmpeg.
+    Builds the ARM64 Mizan shell and packages it with the UI and Python host.
 
 .EXAMPLE
     pwsh -NoProfile -File .\scripts\Build-Msix.ps1 -Version 0.1.0 -SkipSign
@@ -109,12 +109,6 @@ $buildInfo = @{ version = $Version; buildId = $BuildId } | ConvertTo-Json -Compr
     $buildInfo,
     [System.Text.UTF8Encoding]::new($false)
 )
-
-$ffmpeg = & $Python -c "from mizan.engine.media import ffmpeg_path; print(ffmpeg_path())" |
-    Where-Object { $_ -and -not $_.StartsWith("[") } | Select-Object -Last 1
-if (-not $ffmpeg -or -not (Test-Path $ffmpeg -PathType Leaf)) { throw "FFmpeg was not found." }
-New-Item -ItemType Directory -Path (Join-Path $staging "Tools") -Force | Out-Null
-Copy-Item $ffmpeg (Join-Path $staging "Tools\ffmpeg.exe")
 
 Write-Host "Generating package assets..." -ForegroundColor Cyan
 $assets = Join-Path $staging "Assets"

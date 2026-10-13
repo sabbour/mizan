@@ -148,9 +148,33 @@ def test_retry_starts_a_fresh_timed_attempt_without_losing_cloud_mode():
                 "stageMessage", "activeStage", "diagnostics"} & retried["details"].keys()
 
 
+def test_retry_retains_provider_and_queued_resource_target():
+    from mizan import cloud
+
+    target = {"version": 1, "provider": "gcp",
+              "settings": {"projectId": "original-project", "region": "us-central1"}}
+    store = JobStore()
+    job = store.create("aB_12-cD345", URL, "piano", "test",
+                       processing_mode="cloud", cloud_provider="gcp", cloud_target=target)
+    store.update(job["id"], status="failed")
+    cloud._setting("cloud_provider", "aws")
+    observed = []
+    runner = JobRunner(store, lambda current, _report, _cancelled: (
+        observed.append((current["details"]["cloudProvider"],
+                        current["details"]["cloudTarget"])) or {}))
+    try:
+        retried = runner.retry(job["id"])
+        assert queue_job(retried)["cloudProviderName"] == "Google Cloud"
+        assert retried["details"]["cloudTarget"] == target
+        assert wait_for(store, job["id"], "done")["details"]["cloudTarget"] == target
+        assert observed == [("gcp", target)]
+    finally:
+        runner.close()
+
+
 def test_new_redo_and_mode_checks_do_not_reset_active_cloud_job(monkeypatch):
     import json
-    from mizan import cloud
+    from mizan import azure_cloud, cloud
     from mizan.api import Api
 
     entered, release = Event(), Event()
@@ -166,7 +190,7 @@ def test_new_redo_and_mode_checks_do_not_reset_active_cloud_job(monkeypatch):
         "environment": "mizan-env", "identity": "mizan-identity",
     }))
     cloud._setting("cloud_job_created", "synthetic-image")
-    monkeypatch.setattr(cloud, "_job_capabilities", lambda *_args: None)
+    monkeypatch.setattr(azure_cloud, "_job_capabilities", lambda *_args: None)
 
     def pipeline(job, report, cancelled):
         calls.append(job["id"])

@@ -21,8 +21,6 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from mizan.engine.media import ffmpeg_path
-
 ROOT = Path(__file__).resolve().parents[1]
 LICENSES = ROOT / "licenses"
 OUTPUT_LICENSES = LICENSES
@@ -73,37 +71,6 @@ def save_license(name: str, text: str) -> str:
     path = OUTPUT_LICENSES / filename
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
     return (Path("licenses") / filename).as_posix()
-
-
-def ffmpeg_credit() -> dict[str, str]:
-    executable = Path(ffmpeg_path())
-    version = run(str(executable), "-version")
-    terms = run(str(executable), "-L")
-    if "--enable-nonfree" in version:
-        raise RuntimeError("The selected FFmpeg build is non-redistributable.")
-    gpl = "--enable-gpl" in version
-    version3 = "--enable-version3" in version
-    license_id = ("GPL-3.0-or-later" if version3 else "GPL-2.0-or-later") if gpl else (
-        "LGPL-3.0-or-later" if version3 else "LGPL-2.1-or-later")
-    distribution = executable.parent.parent
-    license_file = distribution / "LICENSE"
-    if not license_file.is_file():
-        raise RuntimeError(f"FFmpeg license text is missing: {license_file}")
-    readme = distribution / "README.txt"
-    provenance = readme.read_text(encoding="utf-8") if readme.is_file() else ""
-    save_license("tool-ffmpeg-build", version + "\n" + terms + "\n" + provenance)
-    return {
-        "name": "FFmpeg",
-        "version": version.splitlines()[0].split(" Copyright", 1)[0].removeprefix("ffmpeg version "),
-        "license": license_id,
-        "author": "FFmpeg developers",
-        "url": "https://www.gyan.dev/ffmpeg/builds/",
-        "group": "Tools",
-        "note": "Bundled executable; the Gyan x64 build runs under Windows ARM64 emulation. "
-                "Exact configuration and upstream source reference are in licenses/tool-ffmpeg-build.txt. "
-                "Public redistribution still requires corresponding source for FFmpeg and its linked libraries.",
-        "_license": save_license("tool-ffmpeg", license_file.read_text(encoding="utf-8")),
-    }
 
 
 def production_python_names() -> set[str]:
@@ -368,7 +335,6 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             "note": "Beat/downbeat model and frontend constants; not bundled. Downloaded on first use and checksum verified.",
             "_license": "licenses/model-beat-this.txt",
         },
-        ffmpeg_credit(),
         {
             "name": "Python",
             "version": "3.12",
@@ -520,8 +486,7 @@ def render_notices(credits: list[dict[str, str]]) -> str:
         "- Preserve the OFL-1.1 copyright and license with Archivo and the Noto Kufi outlines.",
         "- NumPy, SciPy, ONNX Runtime, and other packages carry bundled third-party notices;",
         "  their component-specific license files are retained in `licenses/`.",
-        "- Do not redistribute the detected GPL-enabled Gyan FFmpeg build as an LGPL build.",
-        "  Select a compliant build and provide matching source/build information.",
+        "- FFmpeg is a user-installed tool. Its license and linked libraries depend on the selected build.",
         "- Review Windows ML catalog-provider and WebView2 terms before shipping an installer.",
         "",
         "Mizan's own code is released under the MIT License (see `LICENSE`). The components",

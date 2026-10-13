@@ -7,9 +7,10 @@ import logging
 import re
 from pathlib import PurePosixPath
 from html.parser import HTMLParser
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, Request, build_opener
 
 from .errors import InvalidFile, InvalidSearch, MidiSearchFailed
 
@@ -20,10 +21,15 @@ COMMONS_HOSTS = frozenset({"commons.wikimedia.org", "upload.wikimedia.org"})
 MUTOPIA_HOSTS = frozenset({"www.mutopiaproject.org"})
 ARCHIVE_HOSTS = frozenset({"archive.org"})
 ARCHIVE_DOWNLOAD_HOSTS = frozenset({"archive.org", "*.archive.org"})
+BITMIDI_HOSTS = frozenset({"bitmidi.com"})
+FREEMIDI_HOSTS = frozenset({"freemidi.org"})
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 MUTOPIA_SEARCH = "https://www.mutopiaproject.org/cgibin/make-table.cgi"
 ARCHIVE_SEARCH = "https://archive.org/advancedsearch.php"
+BITMIDI_SEARCH = "https://bitmidi.com/search"
+FREEMIDI_SEARCH = "https://freemidi.org/search"
 ARCHIVE_CC0_URL = "http://creativecommons.org/publicdomain/zero/1.0/"
+UNKNOWN_LICENSE = "Not listed by source"
 
 
 def validate_query(query: str) -> str:
@@ -108,10 +114,15 @@ class _ApprovedRedirects(HTTPRedirectHandler):
         return super().redirect_request(request, fp, code, message, headers, url)
 
 
-def _request_bytes(url: str, allowed_hosts: frozenset[str], limit: int = MAX_MIDI_BYTES) -> bytes:
+def _request_bytes(url: str, allowed_hosts: frozenset[str], limit: int = MAX_MIDI_BYTES,
+                   headers: dict[str, str] | None = None, cookie_jar: CookieJar | None = None) -> bytes:
     _validate_url(url, allowed_hosts)
-    opener = build_opener(_ApprovedRedirects(allowed_hosts))
-    request = Request(url, headers={"User-Agent": "Mizan/0.1 (MIDI search)"})
+    handlers = [_ApprovedRedirects(allowed_hosts)]
+    if cookie_jar is not None:
+        handlers.append(HTTPCookieProcessor(cookie_jar))
+    opener = build_opener(*handlers)
+    request_headers = {"User-Agent": "Mizan/0.1 (MIDI search)", **(headers or {})}
+    request = Request(url, headers=request_headers)
     try:
         with opener.open(request, timeout=8) as response:
             _validate_url(response.geturl(), allowed_hosts)
@@ -527,6 +538,265 @@ def search_archive(query: str) -> list[dict]:
     return results[:10]
 
 
+class _BitMidiScripts(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_script = False
+        self.scripts: list[str] = []
+        self.current: list[str] = []
+
+    def handle_starttag(self, tag: str, _attrs) -> None:
+        if tag == "script":
+            self.in_script = True
+            self.current = []
+
+    def handle_data(self, data: str) -> None:
+        if self.in_script:
+            self.current.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self.in_script:
+            self.scripts.append("".join(self.current))
+            self.current = []
+            self.in_script = False
+
+
+def parse_bitmidi_response(document: str, query: str) -> list[dict]:
+    parser = _BitMidiScripts()
+    parser.feed(document)
+    store = None
+    decoder = json.JSONDecoder()
+    for script in parser.scripts:
+        assignment = re.search(r"\bwindow\.initStore\s*=\s*", script)
+        if not assignment:
+            continue
+        payload = script[assignment.end():].lstrip()
+        try:
+            store, _end = decoder.raw_decode(payload)
+        except json.JSONDecodeError as exc:
+            raise MidiSearchFailed() from exc
+        break
+    if not isinstance(store, dict):
+        raise MidiSearchFailed()
+    data, views = store.get("data"), store.get("views")
+    location = store.get("location")
+    midis = data.get("midis") if isinstance(data, dict) else None
+    searches = views.get("search") if isinstance(views, dict) else None
+    if (not isinstance(midis, dict) or not isinstance(searches, dict)
+            or not isinstance(location, dict) or location.get("name") != "search"):
+        raise MidiSearchFailed()
+    search = searches.get(query)
+    if search is None:
+        search = next((value for key, value in searches.items()
+                       if isinstance(key, str) and key.casefold() == query.casefold()), None)
+    if not isinstance(search, dict):
+        raise MidiSearchFailed()
+    ordered = search.get("0", search.get(0))
+    if not isinstance(ordered, list):
+        raise MidiSearchFailed()
+    results = []
+    for slug in ordered[:10]:
+        item = midis.get(slug) if isinstance(slug, str) else None
+        if not isinstance(item, dict):
+            continue
+        item_slug = item.get("slug")
+        title = _clean_html(item.get("name"))
+        raw_path = item.get("downloadUrl")
+        identifier = item.get("id")
+        if (not isinstance(item_slug, str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,200}", item_slug, re.ASCII)
+                or item_slug != slug
+                or type(identifier) is not int or identifier <= 0
+                or not title
+                or not isinstance(raw_path, str)
+                or not re.fullmatch(r"/uploads/[A-Za-z0-9_.-]{1,255}\.(?:mid|midi)", raw_path, re.IGNORECASE | re.ASCII)):
+            continue
+        file_url = f"https://bitmidi.com{raw_path}"
+        source_url = f"https://bitmidi.com/{item_slug}"
+        results.append({
+            "id": f"bitmidi:{identifier}",
+            "dedupeKey": _file_url_key(file_url),
+            "provider": "bitmidi",
+            "source": "BitMidi",
+            "title": title[:300],
+            "artist": None,
+            "license": UNKNOWN_LICENSE,
+            "licenseUrl": None,
+            "attribution": "Not listed by source",
+            "url": file_url,
+            "sourceUrl": source_url,
+            "_downloadPath": raw_path,
+        })
+    if ordered and not results:
+        raise MidiSearchFailed()
+    return results
+
+
+class _FreeMidiCards(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.cards = 0
+        self.current: dict | None = None
+        self.div_depth = 0
+        self.link: dict | None = None
+        self.results: list[dict] = []
+        self.has_search_form = False
+        self.has_main_content = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs = dict(attrs)
+        if tag == "form" and attrs.get("action") == "/search":
+            self.has_search_form = True
+        if tag == "div":
+            classes = (attrs.get("class") or "").split()
+            if attrs.get("id") == "mainContent" and "container" in classes:
+                self.has_main_content = True
+            if self.current is None and "card" in classes:
+                self.cards += 1
+                self.current = {"links": []}
+                self.div_depth = 1
+            elif self.current is not None:
+                self.div_depth += 1
+        if self.current is not None and tag == "a":
+            self.link = {"href": attrs.get("href"), "title": attrs.get("title"), "text": []}
+
+    def handle_data(self, data: str) -> None:
+        if self.link is not None:
+            self.link["text"].append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.current is None:
+            return
+        if tag == "a" and self.link is not None:
+            self.link["text"] = re.sub(r"\s+", " ", " ".join(self.link["text"])).strip()
+            self.current["links"].append(self.link)
+            self.link = None
+        if tag == "div":
+            self.div_depth -= 1
+            if self.div_depth == 0:
+                self.results.append(self.current)
+                self.current = None
+
+
+def parse_freemidi_response(document: str) -> list[dict]:
+    parser = _FreeMidiCards()
+    parser.feed(document)
+    if not parser.cards:
+        if parser.has_search_form and parser.has_main_content:
+            return []
+        raise MidiSearchFailed()
+    results = []
+    seen: set[str] = set()
+    for card in parser.results:
+        download = None
+        artist = None
+        for link in card["links"]:
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            try:
+                href = urljoin(FREEMIDI_SEARCH, href)
+                _validate_url(href, FREEMIDI_HOSTS)
+                parsed = urlsplit(href)
+            except ValueError:
+                continue
+            if parsed.query or parsed.fragment:
+                continue
+            path = parsed.path
+            if re.fullmatch(r"/download3-(\d+)-[A-Za-z0-9-]+/?", path, re.ASCII):
+                match = re.fullmatch(r"/download3-(\d+)-[A-Za-z0-9-]+/?", path, re.ASCII)
+                if match:
+                    title = _clean_html(link.get("title") or link.get("text"))
+                    candidate = (int(match.group(1)), path.rstrip("/"), title, bool(link.get("title")))
+                    if title and (download is None or candidate[3] and not download[3]):
+                        download = candidate
+            elif re.fullmatch(r"/artist-\d+-[A-Za-z0-9-]+/?", path, re.ASCII):
+                artist = _clean_html(link.get("title") or link.get("text"))[:300] or artist
+        if not download:
+            continue
+        identifier, path, title, _title_attribute = download
+        if str(identifier) in seen:
+            continue
+        seen.add(str(identifier))
+        results.append({
+            "id": f"freemidi:{identifier}",
+            "dedupeKey": f"freemidi:{identifier}",
+            "provider": "freemidi",
+            "source": "FreeMIDI",
+            "title": title[:300],
+            "artist": artist,
+            "license": UNKNOWN_LICENSE,
+            "licenseUrl": None,
+            "attribution": f"Artist listed: {artist}" if artist else "Not listed by source",
+            "sourceUrl": f"https://freemidi.org{path}",
+        })
+        if len(results) == 10:
+            break
+    if parser.cards and not results:
+        raise MidiSearchFailed()
+    return results
+
+
+def search_bitmidi(query: str) -> list[dict]:
+    text = validate_query(query)
+    if not text:
+        return []
+    params = urlencode({"q": text})
+    try:
+        document = _request_bytes(f"{BITMIDI_SEARCH}?{params}", BITMIDI_HOSTS).decode("utf-8", errors="replace")
+    except MidiSearchFailed:
+        raise
+    return parse_bitmidi_response(document, text)
+
+
+def search_freemidi(query: str) -> list[dict]:
+    text = validate_query(query)
+    if not text:
+        return []
+    params = urlencode({"q": text})
+    try:
+        document = _request_bytes(f"{FREEMIDI_SEARCH}?{params}", FREEMIDI_HOSTS).decode("utf-8", errors="replace")
+    except MidiSearchFailed:
+        raise
+    return parse_freemidi_response(document)
+
+
+class _FreeMidiDownload(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.paths: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs = dict(attrs)
+        if tag == "a" and attrs.get("id") == "downloadmidi" and isinstance(attrs.get("href"), str):
+            self.paths.append(attrs["href"])
+
+
+def _freemidi_download_url(source_url: str, result_id: str) -> tuple[str, CookieJar]:
+    parsed_source = urlsplit(source_url)
+    match = re.fullmatch(r"/download3-(\d+)-[A-Za-z0-9-]+", parsed_source.path, re.ASCII)
+    if not match or result_id != f"freemidi:{match.group(1)}":
+        raise InvalidFile("This FreeMIDI result does not match its source page.")
+    if parsed_source.query or parsed_source.fragment:
+        raise InvalidFile("This FreeMIDI source page is not an approved result page.")
+    cookie_jar = CookieJar()
+    page = _request_bytes(source_url, FREEMIDI_HOSTS, cookie_jar=cookie_jar).decode("utf-8", errors="replace")
+    parser = _FreeMidiDownload()
+    parser.feed(page)
+    if len(parser.paths) != 1:
+        raise MidiSearchFailed()
+    target = urljoin(source_url, parser.paths[0])
+    try:
+        _validate_url(target, FREEMIDI_HOSTS)
+    except ValueError as exc:
+        raise InvalidFile("This FreeMIDI download link is not approved.") from exc
+    parsed = urlsplit(target)
+    if (parsed.query or parsed.fragment
+            or parsed.path != f"/getter-{match.group(1)}"):
+        raise InvalidFile("This FreeMIDI download link does not match the searched file.")
+    return target, cookie_jar
+
+
 def download_midi(result: dict) -> bytes:
     provider = result.get("provider")
     if provider == "commons":
@@ -538,18 +808,47 @@ def download_midi(result: dict) -> bytes:
     elif provider == "archive":
         hosts = ARCHIVE_DOWNLOAD_HOSTS
         source_hosts = ARCHIVE_HOSTS
+    elif provider == "bitmidi":
+        hosts = BITMIDI_HOSTS
+        source_hosts = BITMIDI_HOSTS
+    elif provider == "freemidi":
+        hosts = FREEMIDI_HOSTS
+        source_hosts = FREEMIDI_HOSTS
     else:
         raise InvalidFile("This MIDI result has an unknown provider.")
     url, source_url = result.get("url"), result.get("sourceUrl")
     try:
-        _validate_url(url, hosts)
         _validate_url(source_url, source_hosts)
     except ValueError as exc:
         raise InvalidFile("This MIDI result does not use an approved HTTPS URL.") from exc
-    if not urlsplit(url).path.lower().endswith((".mid", ".midi")):
-        raise InvalidFile("The approved provider URL is not a MIDI file.")
-    if not _license_name(str(result.get("license") or "")):
-        raise InvalidFile("The per-file license is not an approved license.")
+    if provider in ("bitmidi", "freemidi"):
+        if result.get("license") != UNKNOWN_LICENSE:
+            raise InvalidFile("The source did not confirm the file license.")
+        if provider == "bitmidi":
+            raw_path = result.get("_downloadPath")
+            parsed_source = urlsplit(source_url)
+            if (not isinstance(raw_path, str)
+                    or not re.fullmatch(r"/uploads/[A-Za-z0-9_.-]{1,255}\.(?:mid|midi)", raw_path, re.IGNORECASE | re.ASCII)
+                    or parsed_source.query or parsed_source.fragment
+                    or not re.fullmatch(r"/[a-z0-9][a-z0-9-]{0,200}", parsed_source.path, re.ASCII)
+                    or source_url != f"https://bitmidi.com{parsed_source.path}"
+                    or url != f"https://bitmidi.com{raw_path}"):
+                raise InvalidFile("This BitMidi result does not match its approved download path.")
+            try:
+                _validate_url(url, BITMIDI_HOSTS)
+            except ValueError as exc:
+                raise InvalidFile("This BitMidi download URL is not approved.") from exc
+        else:
+            url, cookie_jar = _freemidi_download_url(source_url, result.get("id"))
+    else:
+        try:
+            _validate_url(url, hosts)
+        except ValueError as exc:
+            raise InvalidFile("This MIDI result does not use an approved HTTPS URL.") from exc
+        if not urlsplit(url).path.lower().endswith((".mid", ".midi")):
+            raise InvalidFile("The approved provider URL is not a MIDI file.")
+        if not _license_name(str(result.get("license") or "")):
+            raise InvalidFile("The per-file license is not an approved license.")
     if provider == "archive":
         if (result.get("_licenseUrl") != ARCHIVE_CC0_URL
                 or url != _archive_download_url(result.get("identifier"), result.get("fileName"))):
@@ -557,7 +856,8 @@ def download_midi(result: dict) -> bytes:
         expected_size = result.get("size")
         if type(expected_size) is not int or expected_size <= 0 or expected_size > MAX_MIDI_BYTES:
             raise InvalidFile("The Archive file size is not valid.")
-    data = _request_bytes(url, hosts)
+    data = (_request_bytes(url, hosts, headers={"Referer": source_url}, cookie_jar=cookie_jar)
+            if provider == "freemidi" else _request_bytes(url, hosts))
     if provider == "archive":
         if len(data) != expected_size:
             raise InvalidFile("The downloaded file size does not match Archive metadata.")

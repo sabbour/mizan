@@ -1,12 +1,16 @@
 import type { Position } from '../library/bridge'
 import { lessonMeter, type Lesson } from './curriculum'
 import type { PianoLesson } from './piano'
+import type { FrettedLesson } from './fretted'
 
-/** A drum or piano lesson. */
-export type CourseLesson = Lesson | PianoLesson
+/** A lesson that opens in the practice workspace. */
+export type CourseLesson = Lesson | PianoLesson | FrettedLesson
 const barCount = (lesson: CourseLesson) => typeof lesson.bars === 'number' ? lesson.bars : lesson.bars.length
 /** The track a lesson opens on: the piano part for a piano lesson, otherwise the drums. */
-export const lessonTrack = (lesson: CourseLesson) => 'instrument' in lesson ? 'piano' : 'drums'
+export const lessonTrack = (lesson: CourseLesson) => {
+  if ('instrument' in lesson) return lesson.instrument === 'piano' ? 'piano' : lesson.instrument
+  return 'drums'
+}
 
 /** Course practice state lives under its own keys, apart from library songs and their saved positions. */
 const key = (id: string) => `mizan:course:position:${id}`

@@ -51,6 +51,19 @@ def _reported_model_seconds(details: dict) -> float | None:
     return None
 
 
+def _hidden_stems(levels: dict[str, float], peak_levels: dict[str, float]) -> dict[str, str]:
+    thresholds = {"piano": 0.01, "drums": 0.18, "vocals": 0.01,
+                  "guitar": 0.05, "bass": 0.05, "other": 0.05}
+    return {
+        name: (f"{name.capitalize()} recording hidden: its loudest 100 ms "
+               f"is only {peak_levels[name]:.1%} of the full mix peak; "
+               "the isolated signal is too weak to offer as a listening part. "
+               "This does not prove the instrument is absent.")
+        for name, threshold in thresholds.items()
+        if peak_levels[name] < threshold or name == "vocals" and levels[name] < 0.01
+    }
+
+
 def _available_physical_ram() -> int | None:
     if os.name != "nt":
         return None
@@ -283,11 +296,17 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
     if cached_stems is None and cloud_result is None:
         for name, stem in stems.items():
             write_audio(directory / f"{name}.wav", stem)
+    hidden = _hidden_stems(levels, peak_levels)
+    live["previewArtifacts"] = {
+        "mix": str(source),
+        **{name: str(directory / f"{name}.wav")
+           for name in ("piano", "drums") if name not in hidden},
+    }
     diagnostics["separate"] = {
         **separation,
         "seconds": (_reported_model_seconds(separation) if cloud_result is not None
                     else time.perf_counter() - started),
-        **({"timingNote": "HT-Demucs ran on Azure GPU; compute time was not reported."}
+        **({"timingNote": "HT-Demucs ran on the Cloud GPU; compute time was not reported."}
            if cloud_result is not None and _reported_model_seconds(separation) is None else {}),
         **({"inferenceSeconds": separation_seconds} if cloud_result is None else {}),
     }
@@ -389,7 +408,7 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
         "instruments": {name: details for name, details in transcriptions},
         "seconds": (None if cloud_result is not None else
                     time.perf_counter() - started + (mix_result["seconds"] if parallel else 0)),
-        **({"timingNote": "MuScriptor ran on Azure GPU; compute time was not reported."}
+        **({"timingNote": "MuScriptor ran on the Cloud GPU; compute time was not reported."}
            if cloud_result is not None else {}),
     }
     decoding_errors = (cloud_result.get("decodingErrors") if cloud_result is not None
@@ -436,6 +455,11 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
         "model": beat_details.get("model"),
         "provider": beat_details["provider"],
         "seconds": time.perf_counter() - started,
+    }
+    key = harmony["key"]
+    live["found"] = {
+        **({"key": f"{key['tonic']} {key['mode']}"} if key else {}),
+        "tempo": harmony["bpm"],
     }
     report("chords", 1)
     started = time.perf_counter()
@@ -501,16 +525,6 @@ def analyze_decoded(source: Path, directory: Path, *, title: str, url: str, inst
     song["detected"] = detected
     song["stemLevels"] = {"mix": 1.0, **levels}
     song["stemPeakLevels"] = peak_levels
-    hidden = {}
-    thresholds = {"piano": 0.01, "drums": 0.18, "vocals": 0.01,
-                  "guitar": 0.05, "bass": 0.05, "other": 0.05}
-    for name in stems:
-        if name in thresholds and (peak_levels[name] < thresholds[name]
-                                   or name == "vocals" and levels[name] < 0.01):
-            hidden[name] = (f"{name.capitalize()} recording hidden: its loudest 100 ms "
-                            f"is only {peak_levels[name]:.1%} of the full mix peak; "
-                            "the isolated signal is too weak to offer as a listening part. "
-                            "This does not prove the instrument is absent.")
     song["hiddenStems"] = hidden
     diagnostics["separate"]["hiddenStems"] = hidden
     song["warnings"].extend(hidden.values())
@@ -602,25 +616,35 @@ def run_pipeline(job: dict, report, cancelled: Event) -> dict:
             "provider": {"effectiveProviders": ["CPU"]},
             "method": "reused-decoded-wav" if reused else "ffmpeg",
         }
+        job["details"]["previewArtifacts"] = {"mix": str(decoded)}
         report("decode", 1)
         cloud_result = None
         if cloud:
-            from ..cloud import FULL_PIPELINE_ISSUE, CloudError, offload, status
-            report("detect", 0, message="Connecting to Azure GPU processing")
-            cloud_status = status()
+            from ..cloud import CloudError, offload, provider_for_job, status, PROVIDER_NAMES
+            provider = provider_for_job(job.get("details", {}).get("cloudProvider"))
+            target = job.get("details", {}).get("cloudTarget")
+            report("detect", 0, message=f"Connecting to {PROVIDER_NAMES[provider]} processing")
+            cloud_status = (status(provider=provider) if target is None
+                            else status(provider=provider, target=target))
             if not cloud_status["available"] or not cloud_status["configured"]:
-                raise CloudError(FULL_PIPELINE_ISSUE)
+                raise CloudError(cloud_status.get("issue") or "Cloud processing is not ready.")
             cloud_started = time.perf_counter()
             try:
-                cloud_result, names = offload(decoded, work, model, cancelled, report)
+                if target is None:
+                    cloud_result, names = offload(decoded, work, model, cancelled, report,
+                                                  provider=provider)
+                else:
+                    cloud_result, names = offload(decoded, work, model, cancelled, report,
+                                                  provider=provider, target=target)
             finally:
                 cloud_elapsed = time.perf_counter() - cloud_started
                 job["details"]["cloudElapsedSeconds"] = round(cloud_elapsed, 3)
                 diagnostics["cloudRoundTrip"] = {
-                    "method": "azure-job-and-local-materialization",
+                    "method": "cloud-job-and-local-materialization",
+                    "provider": provider,
                     "seconds": cloud_elapsed,
                     "timingNote": (
-                        "Includes Azure execution, result transfer, and host-side "
+                        "Includes remote execution, result transfer, and host-side "
                         "materialization; it is not GPU model compute time."),
                 }
             job["details"]["cloudFiles"] = names
@@ -652,6 +676,7 @@ def run_pipeline(job: dict, report, cancelled: Event) -> dict:
                    "selectedInstruments": song["selectedInstruments"],
                    "transcribedInstruments": song["transcribedInstruments"],
                    "transcriptionQuality": song["transcriptionQuality"],
+                   "found": job["details"].get("found", {}),
                    "cacheable": (os.environ.get("MIZAN_BEATS", "auto") != "auto"
                                  or "beat-this" in song["diagnostics"]["chords"]["method"])}
         if cloud and "cloudElapsedSeconds" in job["details"]:

@@ -63,8 +63,6 @@ internal sealed class WorkerProcess : IAsyncDisposable
         if (Directory.Exists(packagedRoot))
         {
             start.Environment["PYTHONHOME"] = packagedRoot;
-            var ffmpeg = Path.Combine(AppContext.BaseDirectory, "Tools", "ffmpeg.exe");
-            if (File.Exists(ffmpeg)) start.Environment["MIZAN_FFMPEG"] = ffmpeg;
         }
         else
         {

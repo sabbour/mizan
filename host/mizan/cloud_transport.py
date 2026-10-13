@@ -13,10 +13,14 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from threading import Event
+from typing import Protocol
 from uuid import uuid4
 
 from .errors import Cancelled
 from .cloud_auth import AzureSignInError, token
+from .cloud_result import (
+    MAX_AUDIO_BYTES, MAX_WORKER_ERROR_BYTES, STEMS, validate_worker_error,
+)
 from .cloud_network import (ARM_GET_MAX_ATTEMPTS, ARM_GET_MAX_BACKOFF,
                             ARM_GET_RETRY_BACKOFF, ARM_REQUEST_TIMEOUT,
                             ARM_SOCKET_TIMEOUT, _safe_azure_text,
@@ -24,15 +28,8 @@ from .cloud_network import (ARM_GET_MAX_ATTEMPTS, ARM_GET_MAX_BACKOFF,
                             _transient_transport_error)
 
 API_VERSION = "2024-03-01"
-MAX_AUDIO_BYTES = 250 * 1024 * 1024
-MAX_WORKER_ERROR_BYTES = 64 * 1024
 MAX_ARM_ERROR_BYTES = 16 * 1024
-STEMS = ("drums", "bass", "other", "vocals", "guitar", "piano")
 START_CONTAINER_FIELDS = ("args", "command", "env", "image", "name", "resources")
-WORKER_ERROR_STAGES = {
-    "startup", "credentials", "storage", "download", "separate",
-    "transcribe", "upload_stems", "upload_result",
-}
 MODEL_EXECUTION_BUDGETS = {
     "muscriptor-small": (2, 8),
     "muscriptor-medium": (4, 16),
@@ -43,6 +40,14 @@ logger = logging.getLogger(__name__)
 
 class CloudTransportError(Exception):
     pass
+
+
+class CloudFileStore(Protocol):
+    def upload(self, name: str, path: Path, *, limit: int = MAX_AUDIO_BYTES,
+               cancelled: Event | None = None) -> None: ...
+    def download(self, name: str, path: Path, *, limit: int,
+                 cancelled: Event | None = None) -> tuple[int, str]: ...
+    def delete(self, names: list[str]) -> None: ...
 
 
 def _model_execution_budget(model: str) -> tuple[int, int]:
@@ -413,11 +418,11 @@ class CloudTransport:
             raise Cancelled()
         raise CloudTransportError("Azure did not return a GPU Job execution name within five minutes.")
 
-    def _put(self, name: str, path: Path, *, cancelled: Event | None = None,
-             deadline: float | None = None) -> None:
+    def upload(self, name: str, path: Path, *, limit: int = MAX_AUDIO_BYTES,
+               cancelled: Event | None = None, deadline: float | None = None) -> None:
         if cancelled and cancelled.is_set():
             raise Cancelled()
-        if path.stat().st_size > MAX_AUDIO_BYTES:
+        if path.stat().st_size > limit:
             raise CloudTransportError("The recording exceeds the 250 MiB Cloud Job limit.")
         with self._open(self._blob_url(name), scope="https://storage.azure.com/.default",
                         method="PUT", data=path.read_bytes(), headers={
@@ -432,8 +437,12 @@ class CloudTransport:
                     attempt=1, max_attempts=1, started=time.monotonic(),
                     partial=True) from None
 
-    def _get(self, name: str, path: Path, *, limit: int,
-             cancelled: Event | None = None, deadline: float | None = None) -> tuple[int, str]:
+    def _put(self, name: str, path: Path, *, cancelled: Event | None = None,
+             deadline: float | None = None) -> None:
+        self.upload(name, path, cancelled=cancelled, deadline=deadline)
+
+    def download(self, name: str, path: Path, *, limit: int,
+                 cancelled: Event | None = None, deadline: float | None = None) -> tuple[int, str]:
         import hashlib
         digest = hashlib.sha256()
         received = 0
@@ -459,62 +468,13 @@ class CloudTransport:
                 output.write(data)
         return received, digest.hexdigest()
 
+    def _get(self, name: str, path: Path, *, limit: int,
+             cancelled: Event | None = None, deadline: float | None = None) -> tuple[int, str]:
+        return self.download(name, path, limit=limit, cancelled=cancelled, deadline=deadline)
+
     @staticmethod
     def _validated_worker_error(payload: object, run_id: str) -> dict | None:
-        if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 \
-                or payload.get("kind") != "mizan-worker-error" \
-                or payload.get("status") != "failed" or payload.get("runId") != run_id \
-                or payload.get("stage") not in WORKER_ERROR_STAGES:
-            return None
-        error = payload.get("error")
-        if not isinstance(error, dict):
-            return None
-        category = error.get("category")
-        message = error.get("message")
-        frames = error.get("frames")
-        if not isinstance(category, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", category) \
-                or not isinstance(message, str) or not message or len(message) > 512 \
-                or not isinstance(frames, list) or len(frames) > 4:
-            return None
-        diagnostics = error.get("diagnostics")
-        if category == "TranscriptionLimitError":
-            if (not isinstance(diagnostics, dict)
-                    or set(diagnostics) != {"chunk", "seekSeconds", "tokenLimit"}
-                    or not isinstance(diagnostics.get("chunk"), int)
-                    or isinstance(diagnostics.get("chunk"), bool)
-                    or not 0 <= diagnostics["chunk"] <= 999_999
-                    or not isinstance(diagnostics.get("seekSeconds"), (int, float))
-                    or isinstance(diagnostics.get("seekSeconds"), bool)
-                    or not math.isfinite(diagnostics["seekSeconds"])
-                    or not 0 <= diagnostics["seekSeconds"] <= 99_999_999.999
-                    or not isinstance(diagnostics.get("tokenLimit"), int)
-                    or isinstance(diagnostics.get("tokenLimit"), bool)
-                    or not 1 <= diagnostics["tokenLimit"] <= 999_999):
-                return None
-        elif diagnostics is not None:
-            return None
-        safe_frames = []
-        for frame in frames:
-            if not isinstance(frame, dict):
-                return None
-            filename, function, line = frame.get("file"), frame.get("function"), frame.get("line")
-            if not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", filename) \
-                    or not isinstance(function, str) or not re.fullmatch(r"[A-Za-z0-9_.<>-]{1,100}", function) \
-                    or not isinstance(line, int) or isinstance(line, bool) or not 1 <= line <= 1_000_000:
-                return None
-            safe_frames.append({"file": filename, "function": function, "line": line})
-        message = re.sub(r"https?://\S+", "[redacted URL]", message)
-        message = re.sub(
-            r"(?i)\b(?:bearer|hf[_-]?token|token|sig|sas|authorization|accountkey|sharedkey)\b"
-            r"\s*[=:]?\s*\S+", "[redacted secret]", message)
-        message = re.sub(
-            r"(?:[A-Za-z]:\\|\.aca-job[\\/]|/)(?:[^\s:\\/]+[\\/])*[^\s:\\/]+",
-            "[redacted path]", message)
-        result = {"stage": payload["stage"], "category": category,
-                  "message": message, "frames": safe_frames}
-        if diagnostics is not None:
-            result["diagnostics"] = diagnostics
-        return result
+        return validate_worker_error(payload, run_id)
 
     def _read_worker_error(self, blob: str, run_id: str, directory: Path,
                            cancelled: Event | None = None) -> tuple[dict | None, str | None]:
@@ -593,7 +553,8 @@ class CloudTransport:
             if not isinstance(execution, str) or not re.fullmatch(r"[-\w.()]+", execution, re.ASCII):
                 raise CloudTransportError("Azure did not return a usable GPU Job execution name.")
             logger.info("Cloud GPU execution started run_id=%s execution=%s", run_id, execution)
-            report("detect", 0, message="Waiting for Azure GPU Job")
+            report("detect", 0, message="Waiting for Azure GPU Job",
+                   cloud_job={"provider": "azure", "id": execution, "prefix": prefix})
             stage = "waiting for execution"
             deadline = time.monotonic() + 7200
             while time.monotonic() < deadline:

@@ -51,6 +51,11 @@ class UnsupportedMedia(MizanError):
     message = "This video's media format is not supported."
 
 
+class FFmpegUnavailable(MizanError):
+    code = "ffmpeg_unavailable"
+    message = "FFmpeg is not available. Install it or choose its executable in Song analysis settings."
+
+
 class ModelFailed(MizanError):
     code = "model_failed"
     message = "The music processing model could not finish."

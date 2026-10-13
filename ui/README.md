@@ -1,32 +1,116 @@
-# React + TypeScript + Vite
+# Mizan interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The interface uses React, TypeScript, and Vite. The Windows app shows it in
+WebView2. The native shell sends requests to the Python host through a JSON
+bridge. The host owns jobs, the song library, and local file access.
 
-Currently, two official plugins are available:
+## Develop
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run these commands from the `ui` directory.
 
-## React Compiler
+Install Node.js, then install the locked dependencies:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm ci
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Start the Vite development server:
+
+```powershell
+npm run dev
+```
+
+To build the interface, run:
+
+```powershell
+npm run build
+```
+
+To lint the interface, run:
+
+```powershell
+npm run lint
+```
+
+The browser preview uses sample data. It does not connect to the Python host.
+Run the native Windows shell to test the host bridge and real library data.
+See the [repository README](../README.md) for host setup and test commands.
+
+## Job audio and practice tracks
+
+Job details use real local audio in the Windows app. **Full mix** becomes
+available after audio preparation. **Piano** and **Drums** become available
+after separation, unless the isolated recording is too weak. Cloud jobs
+show isolated recordings after their files return to this PC.
+Key and tempo appear after analysis. Completed jobs use their saved files.
+
+Practice shows the saved score parts and recording parts. It does not add
+the generated **Creative** group. This change does not delete saved scores
+or recordings. Course backing parts remain available.
+
+With Vite running, check job audio and the removed Creative group:
+
+```powershell
+node tests\playback.mjs --job-preview
+```
+
+## Guitar and bass practice
+
+Course includes 80 exercises each for guitar and four-string bass.
+Each instrument has 25 course exercises across five levels and 55 studies
+across 11 genres. Guitar uses E2–A2–D3–G3–B3–E4 tuning.
+Bass uses E1–A1–D2–G2 tuning.
+Lessons use their own saved practice positions, apart from the song catalog.
+
+Guitar and bass parts offer a score, tab, and a 3D fretboard with tab.
+The model sits above a compact tab strip with several bars and rhythm marks.
+The view offers fretboard and whole-instrument framing.
+Tab and 3D positions are estimated from pitch and standard
+tuning; they are not a record of the original player's fingering.
+Changing views does not restart playback or change the mixer.
+Guitar and bass view choices are saved separately.
+The 3D view supports left-handed and right-handed alignment from the player's side.
+For a right-handed player, the neck points left and the body sits on the right.
+Mizan remembers the chosen hand. Tab keeps its usual
+highest-string-first order.
+
+With Vite running, check guitar and bass practice:
+
+```powershell
+node tests\playback.mjs --fretted
+```
+
+## MIDI search and import
+
+MIDI search checks Commons, Mutopia, Internet Archive, BitMidi, and FreeMIDI
+separately. A failed source does not stop the other searches. Commons, Mutopia,
+and Internet Archive results need a confirmed per-file license. BitMidi and
+FreeMIDI may not list a license. The import dialog requires the user to confirm
+permission for each such file before the host downloads it. The app keeps the
+source, title, artist, license status, and attribution with the imported score.
+
+## Song analysis settings
+
+Song analysis settings show one topic at a time: audio support, models and
+account access, or **Analysis processing**. Use **Getting started guide** to replay
+the optional first-use flow. The flow can be skipped; it does not save a path
+or token, accept model terms, or download a model without an explicit action.
+An empty library can show the guide automatically. Existing libraries and
+Course practice are not interrupted. In Audio support, use **Browse…** to pick
+`ffmpeg.exe`, or enter its full path. The field shows the configured path or
+the FFmpeg path found on this PC. Browsing does not save the path until you
+select **Save path**.
+
+Models and account settings show Hugging Face access before model choices.
+The access section opens by default when no token is saved.
+Save a read-access token and accept the model terms before downloading
+MuScriptor models.
+
+## Cloud setup
+
+The interface lets a user select **This PC** or one configured cloud
+provider. It displays setup, readiness, job progress, and errors from the host.
+Provider settings appear only after Cloud is selected. This PC hides them.
+If Cloud needs setup, new analysis stays on This PC until setup finishes
+and Cloud is enabled.
+Read [cloud setup](../docs/cloud-setup.md) before changing this flow.

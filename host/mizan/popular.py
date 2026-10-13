@@ -7,8 +7,13 @@ from .errors import PopularChartUnavailable
 
 HIT_LIST_ID = "RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs"
 HIT_LIST_URL = f"https://music.youtube.com/playlist?list={HIT_LIST_ID}"
-GLOBAL_TOP_100_ID = "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"
-GLOBAL_TOP_100_URL = f"https://music.youtube.com/playlist?list={GLOBAL_TOP_100_ID}"
+POPS_BIGGEST_HITS_ID = "RDCLAK5uy_nmS3YoxSwVVQk9lEQJ0UX4ZCjXsW_psU8"
+POPS_BIGGEST_HITS_URL = f"https://music.youtube.com/playlist?list={POPS_BIGGEST_HITS_ID}"
+CLASSIC_ROCK_GREATEST_HITS_ID = "RDCLAK5uy_nZiG9ehz_MQoWQxY5yElsLHCcG0tv9PRg"
+CLASSIC_ROCK_GREATEST_HITS_URL = \
+    f"https://music.youtube.com/playlist?list={CLASSIC_ROCK_GREATEST_HITS_ID}"
+ALL_TIME_ALT_ID = "RDCLAK5uy_mgHrXs_5F6wPwPFA47S8yrzCfjCi4AXDE"
+ALL_TIME_ALT_URL = f"https://music.youtube.com/playlist?list={ALL_TIME_ALT_ID}"
 POPULAR_PLAYLIST_LIMIT = 12
 
 _PLAYLISTS = (
@@ -18,17 +23,35 @@ _PLAYLISTS = (
         "playlist_id": HIT_LIST_ID,
         "playlist_title": "The Hit List",
         "publisher": "YouTube Music",
-        "url": HIT_LIST_URL,
+        "sourceUrl": HIT_LIST_URL,
         "kind": "editorial",
     },
     {
-        "id": "global-top-100",
-        "title": "Top 100 Songs Global",
-        "playlist_id": GLOBAL_TOP_100_ID,
-        "playlist_title": "Top 100 Songs Global",
-        "publisher": "YouTube Music Global Charts",
-        "url": GLOBAL_TOP_100_URL,
-        "kind": "chart",
+        "id": "pops-biggest-hits",
+        "title": "Pop's Biggest Hits",
+        "playlist_id": POPS_BIGGEST_HITS_ID,
+        "playlist_title": "Pop's Biggest Hits",
+        "publisher": "YouTube Music",
+        "sourceUrl": POPS_BIGGEST_HITS_URL,
+        "kind": "editorial",
+    },
+    {
+        "id": "classic-rock-greatest-hits",
+        "title": "Classic Rock's Greatest Hits",
+        "playlist_id": CLASSIC_ROCK_GREATEST_HITS_ID,
+        "playlist_title": "Classic Rock's Greatest Hits",
+        "publisher": "YouTube Music",
+        "sourceUrl": CLASSIC_ROCK_GREATEST_HITS_URL,
+        "kind": "editorial",
+    },
+    {
+        "id": "all-time-alt",
+        "title": "All-Time Alt",
+        "playlist_id": ALL_TIME_ALT_ID,
+        "playlist_title": "All-Time Alt",
+        "publisher": "YouTube Music",
+        "sourceUrl": ALL_TIME_ALT_URL,
+        "kind": "editorial",
     },
 )
 
@@ -104,7 +127,7 @@ def _fetch_playlist(section: dict) -> dict:
             "cookiefile": None,
             "usenetrc": False,
         }) as youtube:
-            payload = youtube.extract_info(section["url"], download=False)
+            payload = youtube.extract_info(section["sourceUrl"], download=False)
         parsed = parse_playlist_response(
             payload,
             playlist_id=section["playlist_id"],

@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mizan import cloud
+from mizan import azure_cloud, cloud
 from mizan.api import Api
 from mizan.cloud_transport import CloudTransport
 from mizan.engine import pipeline
@@ -20,12 +20,16 @@ from mizan.jobs import JobRunner, JobStore
 
 @pytest.mark.skipif(not os.environ.get("MIZAN_LIVE_AZURE_CONFIG"), reason="requires an authorized Azure pilot")
 def test_live_gpu_job_imports_and_saves_song_then_removes_blobs(monkeypatch, tmp_path):
-    config = cloud._validate(json.loads(os.environ["MIZAN_LIVE_AZURE_CONFIG"]))
+    config = azure_cloud._validate(json.loads(os.environ["MIZAN_LIVE_AZURE_CONFIG"]))
     monkeypatch.setenv("MIZAN_HOME", str(tmp_path / "library"))
-    monkeypatch.setattr(cloud, "selected", lambda: True)
-    monkeypatch.setattr(cloud, "status", lambda: {"available": True, "configured": True})
-    monkeypatch.setattr(cloud, "_setting", lambda key: json.dumps(config) if key == "cloud_config" else None)
-    monkeypatch.setattr(cloud, "get_credential", lambda target: "Azure CLI token test, not stored")
+    monkeypatch.setattr(cloud, "_setting", lambda key: {
+        "cloud_config": json.dumps(config), "cloud_provider": "azure",
+        "processing_mode": "cloud",
+    }.get(key))
+    monkeypatch.setattr(azure_cloud, "status",
+                        lambda **_kwargs: {"available": True, "configured": True})
+    monkeypatch.setattr(azure_cloud, "_setting",
+                        lambda key: json.dumps(config) if key == "cloud_config" else None)
 
     def cli_token(self, scope):
         resource = scope.removesuffix(".default")

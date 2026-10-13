@@ -1,5 +1,5 @@
 import { buildSong } from '../workspace/song'
-import type { Entry, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
+import type { CloudProvider, Entry, FfmpegStatus, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
 import { foldSearchText } from './searchText'
 
 // A stand-in host for the browser dev server: same calls and shapes as the Python bridge.
@@ -204,6 +204,21 @@ const score = (entry: Entry) => {
 
 let mockHfConfigured = false
 let mockModel: TranscriptionModel = 'muscriptor-small'
+let mockCloudProvider: CloudProvider = 'azure'
+let mockFfmpegPath: string | null = null
+const mockFfmpegStatus = (): FfmpegStatus => ({
+  configuredPath: mockFfmpegPath,
+  effectivePath: mockFfmpegPath ?? 'ffmpeg',
+  available: true,
+  issue: null,
+})
+const mockCloudProviders = [
+  { id: 'azure', name: 'Azure' },
+  { id: 'gcp', name: 'Google Cloud' },
+  { id: 'aws', name: 'AWS' },
+] as const
+const mockCloudProviderName = (provider: CloudProvider) =>
+  mockCloudProviders.find((item) => item.id === provider)?.name ?? provider
 const mockDownloads: ModelDownloads = {
   'muscriptor-small': { downloaded: false, active: false, bytesReceived: 0, totalBytes: 411888600, bytesPerSecond: null, error: null },
   'muscriptor-medium': { downloaded: false, active: false, bytesReceived: 0, totalBytes: 1228144472, bytesPerSecond: null, error: null },
@@ -211,20 +226,39 @@ const mockDownloads: ModelDownloads = {
 }
 export const mockHost = {
   model_download_status: () => ok({ models: structuredClone(mockDownloads) }),
-  cloud_status: () => ok({ available: false, configured: false, mode: 'local' as const,
+  cloud_providers: () => ok({ providers: mockCloudProviders, activeProvider: mockCloudProvider }),
+  cloud_settings: (provider: CloudProvider) => ok({ provider, settings: { provider } }),
+  select_cloud_provider: (provider: CloudProvider) => {
+    mockCloudProvider = provider
+    return ok({ provider, providerName: mockCloudProviderName(provider) })
+  },
+  cloud_status: (_requestId?: string, provider: CloudProvider = mockCloudProvider) => ok({
+    provider, providerName: mockCloudProviderName(provider),
+    available: false, configured: false, mode: 'local' as const,
     issue: 'Cloud setup needs the installed Mizan app.' }),
+  cloud_readiness_progress: () => ok({
+    stage: 'idle', detail: null, elapsedSeconds: 0, timeoutSeconds: 120,
+  }),
+  cancel_cloud_status: () => ok({ cancelRequested: false }),
   cloud_setup_progress: () => ok({ operation: null, stage: '', completed: 0, total: 0, detail: null }),
   cancel_cloud_setup: () => ok({ cancelRequested: false }),
+  list_cloud_subscriptions: () => fail('host_required', 'Cloud account discovery needs the installed Mizan app.'),
   azure_subscriptions: () => fail('host_required', 'Azure subscription discovery needs the installed Mizan app.'),
-  configure_cloud: () => fail('host_required', 'Cloud setup needs the installed Mizan app.'),
-  prepare_cloud: () => fail('host_required', 'Azure provisioning needs the installed Mizan app.'),
+  configure_cloud: (_config: unknown, provider: CloudProvider = mockCloudProvider) =>
+    fail('host_required', `${mockCloudProviderName(provider)} setup needs the installed Mizan app.`),
+  prepare_cloud: (_config: unknown, _consent: boolean, provider: CloudProvider = mockCloudProvider) =>
+    fail('host_required', `${mockCloudProviderName(provider)} resource setup needs the installed Mizan app.`),
   enable_cloud_logging: () => fail('host_required', 'Azure log configuration needs the installed Mizan app.'),
   build_cloud_worker: () => fail('host_required', 'Azure image build needs the installed Mizan app.'),
-  finish_cloud: () => fail('host_required', 'Azure Job creation needs the installed Mizan app.'),
-  set_processing_mode: (mode: string) => mode === 'local'
+  import_cloud_image: (_sourceImage: string, provider: CloudProvider = mockCloudProvider) =>
+    fail('host_required', `${mockCloudProviderName(provider)} worker-image verification needs the installed Mizan app.`),
+  finish_cloud: (_image: string, _useSavedToken: boolean, provider: CloudProvider = mockCloudProvider) =>
+    fail('host_required', `${mockCloudProviderName(provider)} GPU job setup needs the installed Mizan app.`),
+  set_processing_mode: (mode: string, _provider: CloudProvider = mockCloudProvider) => mode === 'local'
     ? ok({ mode: 'local' as const })
-    : fail('cloud_not_ready', 'Cloud processing needs the installed Mizan app and a working Azure Job.'),
-  clear_cloud: () => ok({ configured: false, mode: 'local' as const }),
+    : fail('cloud_not_ready', 'Cloud processing is not available in this browser preview. Use the installed Mizan app to set up Azure, Google Cloud, or AWS.'),
+  clear_cloud: (provider: CloudProvider = mockCloudProvider) =>
+    ok({ provider, providerName: mockCloudProviderName(provider), configured: false, mode: 'local' as const }),
   start_model_download(model: TranscriptionModel) {
     if (!Object.hasOwn(mockDownloads, model))
       return fail('invalid_transcription_model', 'Choose a MuScriptor size to download.')
@@ -259,6 +293,15 @@ export const mockHost = {
     mockModel = model
     return ok({ model })
   },
+  ffmpeg_status: () => ok(mockFfmpegStatus()),
+  set_ffmpeg_path(path: string) {
+    mockFfmpegPath = path || null
+    return ok(mockFfmpegStatus())
+  },
+  browse_ffmpeg_path: () => fail(
+    'file_picker_unavailable',
+    'File browsing is available in the Windows app. Enter the full path to ffmpeg.exe here.',
+  ),
   hf_token_status: () => ok({ configured: mockHfConfigured }),
   set_hf_token(token: string) {
     if (!token.trim()) return fail('invalid_token', 'Enter a Hugging Face token.')
@@ -309,22 +352,41 @@ export const mockHost = {
       videoId, title, artist,
       thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     }))
-    const globalChart = [
-      ['fcnDmrtj6Sk', 'Shakira, Burna Boy - Dai Dai (Official Video)', 'Shakira'],
-      ['fRIhCiUVaKs', 'KAROL G, Judeline, rusowsky - BbY WOW (Visualizer)', 'KAROL G'],
-      ['xvT1jH8B9AM', 'KALYANI (with Shreya Ghoshal) OFFICIAL MUSIC VIDEO | ARJN | KDS | FIFTY4 | RONN | SHREYA GHOSHAL |', 'MONEY VERSE RECORDS'],
-      ['s2HYl12gmOY', 'Parvati - Full Song | Hanuman Ansh | Sadhu Tiwari | Shobhinaw Satyaa | In Cinemas Now', 'Times Music Spiritual'],
-      ['vRjaGgDsWSo', 'Casa Tupka Anthemo | @YoYoHoneySingh feat. Priyanshi | Full Video', 'Yo Yo Honey Singh'],
-      ['is8UDe2PhKQ', "KATSEYE (캣츠아이) 'Hootie Frutti' Official MV", 'HYBE LABELS'],
-      ['JqFzhcWo3EU', 'Yeshanagula | The Paradise | Nani | Keerthy Suresh | Anirudh Ravichander | Srikanth Odela', 'Saregama Telugu'],
-      ['vSA7yMrTETg', 'Xamdam Sobirov - Peshta / Хамдам Собиров - Пешта / Video Klip', 'Xamdam Sobirov'],
-    ].map(([videoId, title, artist], index) => ({
-      videoId, title, artist, rank: index + 1,
+    const playlistRows = (songs: [string, string, string][]) => songs.map(([videoId, title, artist]) => ({
+      videoId, title, artist,
       thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     }))
+    const popsBiggestHits = playlistRows([
+      ['ic8j13piAhQ', 'Taylor Swift - Cruel Summer (Official Audio)', 'Taylor Swift'],
+      ['ekr2nIex040', 'ROSÉ & Bruno Mars - APT. (Official Music Video)', 'ROSÉ'],
+      ['yebNIHKAC4A', '“Golden” Official Lyric Video | KPop Demon Hunters | Sony Animation',
+        'Sony Pictures Animation'],
+      ['kPa7bsKwL-c', 'Lady Gaga, Bruno Mars - Die With A Smile (Official Music Video)', 'Lady Gaga'],
+      ['RgKAFK5djSk', 'Wiz Khalifa - See You Again ft. Charlie Puth [Official Video] Furious 7 Soundtrack',
+        'Wiz Khalifa'],
+      ['ko70cExuzZM', 'Taylor Swift - The Fate of Ophelia (Official Music Video)', 'Taylor Swift'],
+    ])
+    const classicRocksGreatestHits = playlistRows([
+      ['OMOGaugKpzs', 'The Police - Every Breath You Take (Official Music Video)', 'The Police'],
+      ['eWiHX_xWa6Y', 'Dream On', 'Aerosmith'],
+      ['v2AC41dglnM', 'AC/DC - Thunderstruck (Official Video)', 'AC/DC'],
+      ['ZWijx_AgPiA', 'Creedence Clearwater Revival - Fortunate Son',
+        'Creedence Clearwater Revival'],
+      ['P5ZJui3aPoQ', 'Kansas - Carry on Wayward Son (Official Video)', 'KANSAS'],
+      ['VsNtkuJEgRQ', 'Stevie Nicks - Edge of Seventeen (2019 Remaster) (Official Audio)', 'Stevie Nicks'],
+    ])
+    const allTimeAlt = playlistRows([
+      ['hTWKbfoikeg', 'Nirvana - Smells Like Teen Spirit (Official Music Video)', 'Nirvana'],
+      ['6hzrDeceEKc', 'Oasis - Wonderwall (Official Video)', 'Oasis'],
+      ['gGdGFtwCNBE', 'The Killers - Mr. Brightside (Official Music Video)', 'TheKillersMusic'],
+      ['Soa3gO7tL-c', 'Green Day - Boulevard Of Broken Dreams [Official Music Video] [4K Upgrade]', 'Green Day'],
+      ['mzJj5-lubeM', 'Red Hot Chili Peppers - Scar Tissue [Official Music Video] [HD UPGRADE]',
+        'Red Hot Chili Peppers'],
+      ['UprcpdwuwCg', 'twenty one pilots: Heathens (from Suicide Squad: The Album) [OFFICIAL VIDEO]', 'Fueled By Ramen'],
+    ])
     const snapshot: PopularChart = {
       title: 'YouTube Music',
-      fetchedAt: '2026-10-10T08:49:51.327717+00:00',
+      fetchedAt: '2026-10-13T00:00:00.000Z',
       sample: true,
       sections: [
         {
@@ -339,15 +401,37 @@ export const mockHost = {
           rows: hitList,
         },
         {
-          id: 'global-top-100',
-          title: 'Top 100 Songs Global',
-          publisher: 'YouTube Music Global Charts',
-          sourceUrl: 'https://music.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i',
-          kind: 'chart',
+          id: 'pops-biggest-hits',
+          title: "Pop's Biggest Hits",
+          publisher: 'YouTube Music',
+          sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_nmS3YoxSwVVQk9lEQJ0UX4ZCjXsW_psU8',
+          kind: 'editorial',
           status: 'available',
-          description: "This week's ranking of the most popular songs on YouTube.",
-          chartDate: '20261010',
-          rows: globalChart,
+          description: 'The biggest pop songs from the last two decades, all in one place.',
+          chartDate: '',
+          rows: popsBiggestHits,
+        },
+        {
+          id: 'classic-rock-greatest-hits',
+          title: "Classic Rock's Greatest Hits",
+          publisher: 'YouTube Music',
+          sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_nZiG9ehz_MQoWQxY5yElsLHCcG0tv9PRg',
+          kind: 'editorial',
+          status: 'available',
+          description: 'Essential hits from the classic rock era, featuring long hair, big solos and singers who graduated from frontman school with honors! ',
+          chartDate: '',
+          rows: classicRocksGreatestHits,
+        },
+        {
+          id: 'all-time-alt',
+          title: 'All-Time Alt',
+          publisher: 'YouTube Music',
+          sourceUrl: 'https://music.youtube.com/playlist?list=RDCLAK5uy_mgHrXs_5F6wPwPFA47S8yrzCfjCi4AXDE',
+          kind: 'editorial',
+          status: 'available',
+          description: "Alternative hits from the '90s through today.",
+          chartDate: '',
+          rows: allTimeAlt,
         },
       ],
     }
@@ -402,6 +486,38 @@ export const mockHost = {
     const needle = foldSearchText(query.trim())
     return ok({ results: results.filter((item) => foldSearchText(`${item.title} ${item.artist}`).includes(needle)) })
   },
+  search_midi_bitmidi(query: string) {
+    const results: MidiSearchResult[] = [{
+      id: 'bitmidi:mock-1',
+      provider: 'bitmidi',
+      dedupeKey: 'mock-file:bitmidi-lunar-waltz',
+      source: 'BitMidi',
+      title: 'Lunar Waltz',
+      artist: null,
+      license: 'Not listed by source',
+      licenseUrl: null,
+      attribution: 'Not listed by source',
+      sourceUrl: 'https://bitmidi.com/lunar-waltz',
+    }]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: results.filter((item) => foldSearchText(item.title).includes(needle)) })
+  },
+  search_midi_freemidi(query: string) {
+    const results: MidiSearchResult[] = [{
+      id: 'freemidi:1034',
+      provider: 'freemidi',
+      dedupeKey: 'mock-file:freemidi-mr-moonlight',
+      source: 'FreeMIDI',
+      title: 'Mr. Moonlight',
+      artist: 'The Beatles',
+      license: 'Not listed by source',
+      licenseUrl: null,
+      attribution: 'Artist listed: The Beatles',
+      sourceUrl: 'https://freemidi.org/download3-1034-mr-moonlight-beatles',
+    }]
+    const needle = foldSearchText(query.trim())
+    return ok({ results: results.filter((item) => foldSearchText(`${item.title} ${item.artist}`).includes(needle)) })
+  },
   async add_link(url: string) {
     const id = /(?:youtu\.be\/|v=|shorts\/)([\w-]{11})/.exec(url)?.[1]
     if (!id) return fail('invalid_url', "That isn't a YouTube video link.", 'Copy the link from the video page, like youtube.com/watch?v=…')
@@ -429,7 +545,7 @@ export const mockHost = {
     entries.unshift(entry)
     return ok({ entry })
   },
-  import_midi_result(resultId: string) {
+  import_midi_result(resultId: string, allowUnknownLicense = false) {
     const results: MidiSearchResult[] = [
       {
         id: 'commons:mock-fur-elise', provider: 'commons', source: 'Wikimedia Commons', title: 'Für Elise, WoO 59',
@@ -453,14 +569,29 @@ export const mockHost = {
         attribution: 'Creator: Guido von Arezzo',
         sourceUrl: 'https://archive.org/details/guido-von-arezzo-ut-queant-laxis',
       },
+      {
+        id: 'bitmidi:mock-1', provider: 'bitmidi', source: 'BitMidi',
+        dedupeKey: 'mock-file:bitmidi-lunar-waltz', title: 'Lunar Waltz', artist: null,
+        license: 'Not listed by source', licenseUrl: null, attribution: 'Not listed by source',
+        sourceUrl: 'https://bitmidi.com/lunar-waltz',
+      },
+      {
+        id: 'freemidi:1034', provider: 'freemidi', source: 'FreeMIDI',
+        dedupeKey: 'mock-file:freemidi-mr-moonlight', title: 'Mr. Moonlight', artist: 'The Beatles',
+        license: 'Not listed by source', licenseUrl: null, attribution: 'Artist listed: The Beatles',
+        sourceUrl: 'https://freemidi.org/download3-1034-mr-moonlight-beatles',
+      },
     ]
     const result = results.find((item) => item.id === resultId)
     if (!result) return fail('invalid_file', 'Search for this MIDI again before importing it.')
+    if ((result.provider === 'bitmidi' || result.provider === 'freemidi') && allowUnknownLicense !== true)
+      return fail('invalid_file', 'Confirm that you have permission to use this file before importing it.')
     const entry: Entry = {
       id: `s${seq++}`, title: result.title, artist: result.artist, thumbnail: null, source: 'midi',
       parts: ['Piano'], recording: false, duration: 180, createdAt: ago(0), practicedAt: null,
       outdated: false, transcriptionModel: null, separationMethod: null, position: null, folders: [],
       sourceUrl: result.sourceUrl, license: result.license, attribution: result.attribution,
+      provider: result.source,
     }
     entries.unshift(entry)
     return ok({ entry })

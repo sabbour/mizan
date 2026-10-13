@@ -1,6 +1,7 @@
-export type PracticeView = 'score' | 'hands' | 'kit' | 'keyboard'
+export type PracticeView = 'score' | 'hands' | 'kit' | 'keyboard' | 'tab' | 'fretboard'
+export type PracticeInstrument = 'piano' | 'drums' | 'guitar' | 'bass'
 
-type Props = { instrument: 'piano' | 'drums'; value: PracticeView; onChange: (view: PracticeView) => void }
+type Props = { instrument: PracticeInstrument; value: PracticeView; onChange: (view: PracticeView) => void }
 
 /** Adds a practice guide under the score for the instrument shown: a keyboard or a 3D kit. */
 export function PracticeViewPicker({ instrument, value, onChange }: Props) {
@@ -9,7 +10,12 @@ export function PracticeViewPicker({ instrument, value, onChange }: Props) {
     ...(instrument === 'piano' ? [
       { id: 'hands' as const, label: 'Hands & keys', hint: 'A keyboard under the score: keys sounding now, by hand, with suggested fingers' },
       { id: 'keyboard' as const, label: '3D keyboard', hint: 'A 3D piano beside the score: keys press as they play, in their hand\'s colour, with written fingers' },
-    ] : [{ id: 'kit' as const, label: 'Drum kit', hint: 'A 3D kit under the score that lights each drum as it is hit' }]),
+    ] : instrument === 'drums' ? [
+      { id: 'kit' as const, label: 'Drum kit', hint: 'A 3D kit under the score that lights each drum as it is hit' },
+    ] : [
+      { id: 'tab' as const, label: 'Tab', hint: 'Suggested strings and frets, with the highest string at the top' },
+      { id: 'fretboard' as const, label: '3D fretboard & tab', hint: 'A steady fretboard close-up with current notes, next notes and tab' },
+    ]),
   ]
   return (
     <div className="chordview-bar">

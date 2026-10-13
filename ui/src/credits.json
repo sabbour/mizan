@@ -202,10 +202,26 @@
   },
   {
     "name": "azure-identity",
-    "version": "1.25.3",
+    "version": "1.26.0",
     "license": "MIT",
     "author": "Copyright (c) Microsoft Corporation.",
     "url": "https://github.com/Azure/azure-sdk-for-python",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "boto3",
+    "version": "1.40.27",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/boto/boto3",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "botocore",
+    "version": "1.40.76",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/boto/botocore",
     "group": "Host/engine libraries"
   },
   {
@@ -214,6 +230,14 @@
     "license": "MIT",
     "author": "Copyright (c) 2009-2024, Marcel Hellkamp.",
     "url": "http://bottlepy.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "cachetools",
+    "version": "6.2.6",
+    "license": "MIT",
+    "author": "Copyright (c) 2014-2026 Thomas Kemmer",
+    "url": "https://github.com/tkem/cachetools/",
     "group": "Host/engine libraries"
   },
   {
@@ -234,7 +258,7 @@
   },
   {
     "name": "charset-normalizer",
-    "version": "3.5.1",
+    "version": "3.5.2",
     "license": "MIT",
     "author": "Copyright (c) 2025 TAHRI Ahmed R.",
     "url": "https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
@@ -282,7 +306,7 @@
   },
   {
     "name": "filelock",
-    "version": "4.0.1",
+    "version": "4.0.12",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
     "url": "https://github.com/tox-dev/py-filelock",
@@ -302,6 +326,14 @@
     "license": "BSD-3-Clause",
     "author": "Copyright (c) 2018, Martin Durant",
     "url": "https://github.com/fsspec/filesystem_spec",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "google-auth",
+    "version": "2.41.1",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/googleapis/google-auth-library-python",
     "group": "Host/engine libraries"
   },
   {
@@ -361,8 +393,16 @@
     "group": "Host/engine libraries"
   },
   {
+    "name": "jmespath",
+    "version": "1.1.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2013 Amazon.com, Inc. or its affiliates.  All Rights Reserved",
+    "url": "https://github.com/jmespath/jmespath.py",
+    "group": "Host/engine libraries"
+  },
+  {
     "name": "MarkupSafe",
-    "version": "3.0.3",
+    "version": "3.0.4",
     "license": "BSD-3-Clause",
     "author": "Copyright 2010 Pallets",
     "url": "https://github.com/pallets/markupsafe/",
@@ -410,9 +450,9 @@
   },
   {
     "name": "networkx",
-    "version": "3.6.1",
+    "version": "3.7",
     "license": "BSD-3-Clause",
-    "author": "Copyright (c) 2004-2025, NetworkX Developers",
+    "author": "Copyright (c) 2004-2026, NetworkX Developers",
     "url": "https://networkx.org/",
     "group": "Host/engine libraries"
   },
@@ -457,6 +497,22 @@
     "group": "Host/engine libraries"
   },
   {
+    "name": "pyasn1",
+    "version": "0.6.4",
+    "license": "BSD-2-Clause",
+    "author": "Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com>",
+    "url": "https://github.com/pyasn1/pyasn1",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "pyasn1_modules",
+    "version": "0.4.2",
+    "license": "BSD-3-Clause",
+    "author": "Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com>",
+    "url": "https://github.com/pyasn1/pyasn1-modules",
+    "group": "Host/engine libraries"
+  },
+  {
     "name": "pycparser",
     "version": "3.0",
     "license": "BSD-3-Clause",
@@ -466,15 +522,23 @@
   },
   {
     "name": "PyJWT",
-    "version": "2.14.0",
+    "version": "2.15.1",
     "license": "MIT",
     "author": "Copyright (c) 2015-2022 Jos\u00e9 Padilla",
     "url": "https://github.com/jpadilla/pyjwt",
     "group": "Host/engine libraries"
   },
   {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0",
+    "license": "Apache Software License; BSD License",
+    "author": "Copyright 2017- Paul Ganssle <paul@ganssle.io>",
+    "url": "https://github.com/dateutil/dateutil",
+    "group": "Host/engine libraries"
+  },
+  {
     "name": "pythonnet",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "license": "MIT",
     "author": "Copyright (c) 2006-2021 the contributors of the Python.NET project",
     "url": "https://pythonnet.github.io/",
@@ -505,6 +569,22 @@
     "group": "Host/engine libraries"
   },
   {
+    "name": "rsa",
+    "version": "4.9.1",
+    "license": "Apache-2.0",
+    "author": "Copyright 2011 Sybren A. St\u00fcvel <sybren@stuvel.eu>",
+    "url": "https://stuvel.eu/rsa",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "s3transfer",
+    "version": "0.14.0",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/boto/s3transfer",
+    "group": "Host/engine libraries"
+  },
+  {
     "name": "safetensors",
     "version": "0.8.0",
     "license": "Apache-2.0",
@@ -518,6 +598,14 @@
     "license": "BSD-3-Clause",
     "author": "Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.",
     "url": "https://scipy.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "six",
+    "version": "1.17.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2010-2024 Benjamin Peterson",
+    "url": "https://github.com/benjaminp/six",
     "group": "Host/engine libraries"
   },
   {
@@ -1243,15 +1331,6 @@
     "url": "https://github.com/dotnet/runtime",
     "group": "Tools",
     "note": "The ARM64 runtime is bundled in the MSIX."
-  },
-  {
-    "name": "FFmpeg",
-    "version": "9.0.2-full_build-www.gyan.dev",
-    "license": "GPL-3.0-or-later",
-    "author": "FFmpeg developers",
-    "url": "https://www.gyan.dev/ffmpeg/builds/",
-    "group": "Tools",
-    "note": "Bundled executable; the Gyan x64 build runs under Windows ARM64 emulation. Exact configuration and upstream source reference are in licenses/tool-ffmpeg-build.txt. Public redistribution still requires corresponding source for FFmpeg and its linked libraries."
   },
   {
     "name": "Microsoft Edge WebView2 Runtime",

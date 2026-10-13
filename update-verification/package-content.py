@@ -85,10 +85,16 @@ manifest_name = "ui/dist/models/KeyboardInstruments.json"
 expected_variants = {
     "stage_piano_88": (21, 108, 88, 52, 36),
 }
-expected_models = {"ui/dist/models/" + name for name in ("AcousticKit.glb", "ElectronicKit.glb", "StagePiano88.glb")}
+expected_models = {"ui/dist/models/" + name for name in (
+    "AcousticKit.glb", "ElectronicKit.glb", "StagePiano88.glb", "ElectricGuitar.glb", "ElectricBass.glb"
+)}
 actual_models = {name for name in new if name.startswith("ui/") and name.lower().endswith(".glb")}
 if actual_models != expected_models:
-    raise RuntimeError("The package must contain only the stage piano and preserved drum models: " + str(sorted(actual_models)))
+    raise RuntimeError("The package must contain only the stage piano, guitar, bass and preserved drum models: " + str(sorted(actual_models)))
+for name in ("ElectricGuitar.glb", "ElectricBass.glb"):
+    source = Path(__file__).resolve().parents[1] / "ui" / "public" / "models" / name
+    if new["ui/dist/models/" + name] != digest(source.open("rb")):
+        raise RuntimeError("The packaged string-instrument model differs from the verified source: " + name)
 with zipfile.ZipFile(args.after) as package:
     new_identity, new_version, new_associations, new_capabilities = appx_contract(package)
     manifest = json.loads(package.read(manifest_name))
@@ -128,6 +134,6 @@ if args.installed_ui:
 args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
 if unexpected or missing or report.get("changed_installed_ui"):
     raise RuntimeError("Update preservation or installed bundle verification failed: " + str(report))
-print(f"Preserved app identity, permissions, unrelated backend files and both drum GLBs; {len(changed)} exact expected backend changes; only the 88-key stage piano ships, with four looks and .mid/.midi associations")
+print(f"Preserved app identity, permissions, unrelated backend files and both drum GLBs; {len(changed)} exact expected backend changes; verified guitar, bass and 88-key stage piano ship, with .mid/.midi associations")
 if args.installed_ui:
     print(f"Every installed UI file matches the signed package: {len(installed)} files")

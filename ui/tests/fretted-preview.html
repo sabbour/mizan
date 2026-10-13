@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fretted instrument visual check</title>
+    <style>
+      html, body, #root { min-width: 0; min-height: 100%; margin: 0; }
+      body { background: #ede9df; font: 16px "Segoe UI", sans-serif; }
+      main { max-width: 1480px; margin: 0 auto; padding: 16px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { GuitarView } from '/src/workspace/GuitarView.tsx'
+      import { BassView } from '/src/workspace/BassView.tsx'
+      import { buildSong } from '/src/workspace/song.ts'
+
+      const query = new URLSearchParams(location.search)
+      const instrument = query.get('instrument') === 'bass' ? 'bass' : 'guitar'
+      const id = `preview-${instrument}`
+      const track = { id, instrument: 'other', name: instrument === 'bass' ? 'Electric bass' : 'Electric guitar' }
+      const notes = instrument === 'bass'
+        ? [{ midi: 28, startBeat: 0, beats: 1 }, { midi: 33, startBeat: 0.5, beats: 1 }, { midi: 38, startBeat: 1, beats: 2 }]
+        : [{ midi: 40, startBeat: 0, beats: 1 }, { midi: 45, startBeat: 0.5, beats: 1 }, { midi: 50, startBeat: 1, beats: 2 }]
+      const song = { ...buildSong(), title: 'Visual check', bars: 4, bpm: 84, beatsPerBar: 4,
+        piano: [], instrumentNotes: { [id]: notes } }
+      const props = {
+        song, track, trackId: id, beat: 0, playing: false, onPick() {},
+        handedness: query.get('handedness') === 'left' ? 'left' : 'right',
+        viewMode: query.get('mode') === 'whole' ? 'whole' : 'fretboard',
+      }
+      const View = instrument === 'bass' ? BassView : GuitarView
+      createRoot(document.getElementById('root')).render(React.createElement('main', null,
+        React.createElement(View, props)))
+    </script>
+  </body>
+</html>

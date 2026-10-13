@@ -297,8 +297,14 @@
 
 .jp-listen {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+
+.jp-listen .jp-error {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .jp-play {

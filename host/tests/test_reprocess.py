@@ -338,6 +338,7 @@ def test_cache_trust_boundary(saved_recording, monkeypatch, tmp_path, mismatch):
 def test_job_details_cannot_supply_audio_paths(saved_recording, monkeypatch):
     entry, original = saved_recording
     fake_ingestion(monkeypatch)
+    monkeypatch.setattr(media, "ffmpeg_path", lambda: "test-ffmpeg")
     job = reprocess_job(entry)
     job.pop("song_id")
     job["details"] = {"sourcePath": str(original), "artifacts": entry["artifacts"]}

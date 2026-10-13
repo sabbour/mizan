@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, AudioLines, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
-import { host, HostError, IMPORTABLE, onMidiFileOpened, toBase64, type CloudReadinessProgress, type CloudStatus, type Entry, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { ArrowUp, AudioLines, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Play, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
+import { host, HostError, IMPORTABLE, onMidiFileOpened, toBase64, type CloudProvider, type CloudProviderInfo, type CloudReadinessProgress, type CloudStatus, type Entry, type FfmpegStatus, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
 import { foldSearchText } from './searchText'
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
@@ -9,14 +9,17 @@ import { CourseSection } from '../course/Course'
 import type { CourseBrowse } from '../course/browse'
 import { LESSONS } from '../course/curriculum'
 import { PIANO_LESSONS } from '../course/piano'
+import { FRETTED_LESSONS } from '../course/fretted'
 import { PIANO_INSPIRED } from '../course/pianoInspired'
 import './library.css'
 
 type Problem = { message: string; fix: string | null }
+type SettingsSection = 'audio' | 'models' | 'cloud'
+type GettingStartedStep = 'welcome' | 'audio' | 'access' | 'model'
 type MidiOffer =
-  | { name: string; file: File; result?: never; dataBase64?: never }
-  | { name: string; dataBase64: string; result?: never; file?: never }
-  | { name: string; result: MidiSearchResult; file?: never; dataBase64?: never }
+  | { name: string; file: File; result?: never; dataBase64?: never; permissionConfirmed?: boolean }
+  | { name: string; dataBase64: string; result?: never; file?: never; permissionConfirmed?: boolean }
+  | { name: string; result: MidiSearchResult; file?: never; dataBase64?: never; permissionConfirmed?: boolean }
 const problem = (e: unknown): Problem =>
   e instanceof HostError ? { message: e.message, fix: e.fix } : { message: 'Something went wrong talking to Mizan.', fix: 'Try again.' }
 
@@ -40,11 +43,35 @@ type Props = {
 
 type LibraryFolder = { id: string; name: string; count: number; user?: boolean }
 const DAY = 86_400_000
+const DEFAULT_CLOUD_PROVIDERS: CloudProviderInfo[] = [
+  { id: 'azure', name: 'Azure' },
+  { id: 'gcp', name: 'Google Cloud' },
+  { id: 'aws', name: 'AWS' },
+]
+const CLOUD_PROVIDER_NAMES: Record<CloudProvider, string> = {
+  azure: 'Azure',
+  gcp: 'Google Cloud',
+  aws: 'AWS',
+}
+const isCloudProvider = (value: string): value is CloudProvider =>
+  DEFAULT_CLOUD_PROVIDERS.some(({ id }) => id === value)
 const modelChoices: { id: TranscriptionModel; label: string; detail: string; info: string }[] = [
   { id: 'muscriptor-small', label: 'MuScriptor Small', detail: 'The smallest multi-instrument model, with the lowest memory needs.', info: '103M parameters · 412 MB download' },
   { id: 'muscriptor-medium', label: 'MuScriptor Medium', detail: 'A middle-sized multi-instrument model. Processing time depends on your hardware and the song.', info: '307M parameters · 1.23 GB download' },
   { id: 'muscriptor-large', label: 'MuScriptor Large', detail: 'The largest multi-instrument model; requires the most memory and disk space.', info: '1.4B parameters · 5.47 GB download' },
 ]
+const GETTING_STARTED_KEY = 'mizan:getting-started:seen'
+const hasSeenGettingStarted = () => {
+  try { return window.localStorage?.getItem(GETTING_STARTED_KEY) === 'true' } catch (error) {
+    console.warn('The getting-started preference could not be read.', error)
+    return false
+  }
+}
+const markGettingStartedSeen = () => {
+  try { window.localStorage?.setItem(GETTING_STARTED_KEY, 'true') } catch (error) {
+    console.warn('The getting-started preference could not be saved.', error)
+  }
+}
 const formatBytes = (value: number) => value >= 1e9 ? `${(value / 1e9).toFixed(2)} GB` : `${Math.round(value / 1e6)} MB`
 const smartFolders = (entries: Entry[]): LibraryFolder[] => [
   { id: 'all', name: 'All songs', count: entries.length },
@@ -67,18 +94,22 @@ function inFolder(entry: Entry, id: string) {
   return entry.folders.includes(id)
 }
 
-export type LibraryTab = 'songs' | 'course'
-const TABS: { id: LibraryTab; label: string }[] = [{ id: 'songs', label: 'Songs' }, { id: 'course', label: 'Course' }]
+export type LibraryTab = 'discover' | 'catalog' | 'course'
+const TABS: { id: LibraryTab; label: string }[] = [
+  { id: 'discover', label: 'Discover' },
+  { id: 'catalog', label: 'Local song catalog' },
+  { id: 'course', label: 'Course' },
+]
 
 export function Library({ jobs, version, onQueueChange, onOpen, onLesson, courseBrowse, onCourseBrowse, onDetails, selectedJob, onCredits, tab, onTab: setTab }: Props) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedFolder, setSelectedFolder] = useState('all')
   const [query, setQueryValue] = useState('')
-  // Searching and adding songs belong to Songs: typing a search shows it.
+  // Search results and imported songs belong to the local catalog.
   const setQuery = (next: string) => {
     setQueryValue(next)
-    if (next.trim() && tab !== 'songs') setTab('songs')
+    if (next.trim() && tab !== 'catalog') setTab('catalog')
   }
   const [error, setError] = useState<Problem | null>(null)
   const [folderFeedback, setFolderFeedback] = useState<{ message: string; error: boolean } | null>(null)
@@ -90,7 +121,15 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const [pendingLinks, setPendingLinks] = useState<string[]>([])
   const pendingLinkRequests = useRef(new Set<string>())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('audio')
+  const [gettingStartedStep, setGettingStartedStep] = useState<GettingStartedStep | null>(null)
   const [cloud, setCloud] = useState<CloudStatus | null>(null)
+  const [processingChoice, setProcessingChoice] = useState<ProcessingMode | null>(null)
+  const [cloudProviderSelection, setCloudProviderSelection] = useState<{
+    providers: CloudProviderInfo[]
+    activeProvider: CloudProvider | null
+  } | null>(null)
+  const [cloudProvidersLoading, setCloudProvidersLoading] = useState(false)
   const [cloudStatusChecking, setCloudStatusChecking] = useState(false)
   const [cloudReadinessProgress, setCloudReadinessProgress] = useState<CloudReadinessProgress | null>(null)
   const [cloudOperationBusy, setCloudOperationBusy] = useState(false)
@@ -102,13 +141,20 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const [model, setModel] = useState<TranscriptionModel | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
+  const [ffmpeg, setFfmpeg] = useState<FfmpegStatus | null>(null)
+  const [ffmpegPathDraft, setFfmpegPathDraft] = useState('')
+  const [ffmpegLoading, setFfmpegLoading] = useState(true)
+  const [ffmpegBusy, setFfmpegBusy] = useState(false)
+  const [ffmpegBrowsing, setFfmpegBrowsing] = useState(false)
+  const [ffmpegError, setFfmpegError] = useState<string | null>(null)
+  const [ffmpegLoadError, setFfmpegLoadError] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<ModelDownloads | null>(null)
   const [preflight, setPreflight] = useState<ModelPreflight | null>(null)
   const [preflightError, setPreflightError] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<{ model: TranscriptionModel; message: string } | null>(null)
   const [downloadStatusError, setDownloadStatusError] = useState<string | null>(null)
   const [downloadBusy, setDownloadBusy] = useState(false)
-  const [accessOpen, setAccessOpen] = useState(false)
+  const [accessOpen, setAccessOpen] = useState<boolean | null>(null)
   const [hfConfigured, setHfConfigured] = useState<boolean | null>(null)
   const [tokenDraft, setTokenDraft] = useState('')
   const [hfError, setHfError] = useState<string | null>(null)
@@ -122,6 +168,10 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const intake = useRef<HTMLElement>(null)
   const field = useRef<HTMLInputElement>(null)
   const settingsButton = useRef<HTMLButtonElement>(null)
+  const settingsDialog = useRef<HTMLDialogElement>(null)
+  const settingsHeading = useRef<HTMLHeadingElement>(null)
+  const cloudSetupButton = useRef<HTMLButtonElement>(null)
+  const guideDismissed = useRef(false)
   const cloudWizardOpenRef = useRef(false)
   const cloudStatusCheckRef = useRef<symbol | null>(null)
   const cloudStatusLastCheckRef = useRef<symbol | null>(null)
@@ -133,23 +183,31 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const midiOffer = midiOffers[0] ?? null
   const isLink = /^https?:\/\//i.test(query.trim())
   const searchQuery = isLink ? '' : query
-  const cloudStatusText = cloudStatusChecking
+  const selectedCloudProvider = cloudProviderSelection?.activeProvider ?? 'azure'
+  const cloudProviderOptions = cloudProviderSelection?.providers ?? DEFAULT_CLOUD_PROVIDERS
+  const cloudModelSupportKnown = Array.isArray(cloud?.supportedModels)
+  const cloudProviderName = cloud?.providerName
+    ?? cloudProviderOptions.find(({ id }) => id === selectedCloudProvider)?.name
+    ?? CLOUD_PROVIDER_NAMES[selectedCloudProvider]
+  const cloudStatusText = cloudProvidersLoading
+    ? 'Loading cloud providers…'
+    : cloudStatusChecking
     ? cloudReadinessProgress?.detail
       ? `${cloudReadinessProgress.detail} (${cloudReadinessProgress.elapsedSeconds}s)`
-      : 'Checking Azure setup…'
+      : `Checking ${cloudProviderName} setup…`
     : cloudOperationBusy ? cloudOperationLabel ?? 'Updating settings…'
-      : cloudError ? 'Azure access check failed'
+      : cloudError ? `${cloudProviderName} access check failed`
         : cloud === null ? 'Cloud status unavailable'
           : cloud.configured
-            ? cloud.mode === 'cloud' ? 'Cloud is on for new and redone analyses' : 'Azure is ready · Processing is Local'
+            ? cloud.mode === 'cloud' ? 'Cloud is on for new and redone analyses' : `${cloudProviderName} is ready · Processing is Local`
             : cloud.mode === 'cloud' ? cloud.jobCreated
               ? cloud.issue && !cloud.issue.includes('readiness has not been checked')
-                ? 'Cloud selected · Azure access check failed; no Local fallback'
-                : 'Cloud selected · Azure readiness is not verified; no Local fallback'
-              : 'Cloud selected · Azure setup is not complete; no Local fallback'
-              : cloud.jobCreated ? 'GPU Job created · Azure access needs checking'
-              : cloud.prepared ? 'Azure infrastructure prepared · setup not complete'
-                : cloud.config ? 'Azure settings saved · setup not complete' : 'Cloud is not set up'
+                ? `Cloud selected · ${cloudProviderName} access check failed; no Local fallback`
+                : `Cloud selected · ${cloudProviderName} readiness is not verified; no Local fallback`
+              : `Cloud selected · ${cloudProviderName} setup is not complete; no Local fallback`
+              : cloud.jobCreated ? `GPU Job created · ${cloudProviderName} access needs checking`
+              : cloud.prepared ? `${cloudProviderName} infrastructure prepared · setup not complete`
+                : cloud.config ? `${cloudProviderName} settings saved · setup not complete` : 'Cloud is not set up'
   const cloudSetupConfirmedAbsent = cloud !== null
     && typeof cloud.available === 'boolean'
     && cloud.prepared === false
@@ -161,9 +219,9 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     && (cloud.config !== undefined || cloud.prepared === true || cloud.workerImage != null)
   const cloudActionText = cloudOperationBusy ? 'Working…'
     : cloudError || cloud === null ? 'Retry check'
-      : cloud.configured ? 'Review Azure setup'
-        : cloudSetupConfirmedAbsent ? 'Set up Azure'
-          : cloudSetupCanContinue ? 'Continue Azure setup' : 'Check Azure access'
+      : cloud.configured ? `Review ${cloudProviderName} setup`
+        : cloudSetupConfirmedAbsent ? `Set up ${cloudProviderName}`
+          : cloudSetupCanContinue ? `Continue ${cloudProviderName} setup` : `Check ${cloudProviderName} access`
 
   const reload = useCallback(
     () => Promise.all([host.library(), host.folders()]).then(
@@ -180,7 +238,21 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   useEffect(() => {
     if (aboutOpen) aboutDialog.current?.showModal()
   }, [aboutOpen])
-  const acquireCloudOperation = useCallback((label = 'Updating Azure setup…') => {
+  useEffect(() => {
+    if (!settingsOpen) return
+    const button = settingsButton.current
+    settingsDialog.current?.showModal()
+    return () => button?.focus()
+  }, [settingsOpen])
+  useEffect(() => {
+    if (settingsOpen) settingsHeading.current?.focus()
+  }, [settingsOpen, gettingStartedStep])
+  useEffect(() => {
+    if (!cloudWizardOpen) return
+    const button = cloudSetupButton.current
+    return () => button?.focus()
+  }, [cloudWizardOpen])
+  const acquireCloudOperation = useCallback((label = 'Updating Cloud setup…') => {
     const release = cloudOperationGate.acquire()
     if (!release) return null
     setCloudOperationBusy(true)
@@ -193,8 +265,9 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
       }
     }
   }, [cloudOperationGate])
-  const checkCloudStatus = useCallback(() => {
-    const release = acquireCloudOperation('Checking Azure setup…')
+  const checkCloudStatus = useCallback((provider: CloudProvider) => {
+    const providerName = CLOUD_PROVIDER_NAMES[provider]
+    const release = acquireCloudOperation(`Checking ${providerName} setup…`)
     if (!release) return null
     const token = Symbol()
     const requestId = crypto.randomUUID()
@@ -208,12 +281,13 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     const progressTimer = window.setInterval(() => {
       if (progressPending) return
       progressPending = true
-      void host.cloudReadinessProgress(requestId).then(
+      void host.cloudReadinessProgress(requestId, provider).then(
         (progress) => {
           if (active && cloudStatusCheckRef.current === token) setCloudReadinessProgress(progress)
         },
         (reason) => {
-          if (active && cloudStatusCheckRef.current === token) setCloudError(problem(reason).message)
+          if (active && cloudStatusCheckRef.current === token)
+            setCloudError(`${providerName}: ${problem(reason).message}`)
         },
       ).finally(() => { progressPending = false })
     }, 500)
@@ -225,14 +299,15 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         cloudStatusCancelRef.current = null
         setCloudStatusChecking(false)
         setCloudReadinessProgress(null)
-        void host.cancelCloudStatus(requestId).catch((reason) => {
-          if (cloudStatusLastCheckRef.current === token) setCloudError(problem(reason).message)
+        void host.cancelCloudStatus(requestId, provider).catch((reason) => {
+          if (cloudStatusLastCheckRef.current === token)
+            setCloudError(`${providerName}: ${problem(reason).message}`)
         })
       }
       release()
     }
     cloudStatusCancelRef.current = cancel
-    void host.cloudStatus(requestId).then(
+    void host.cloudStatus(requestId, provider).then(
       (status) => {
         if (active && cloudStatusCheckRef.current === token) {
           setCloud(status)
@@ -240,7 +315,8 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         }
       },
       (reason) => {
-        if (active && cloudStatusCheckRef.current === token) setCloudError(problem(reason).message)
+        if (active && cloudStatusCheckRef.current === token)
+          setCloudError(`${providerName}: ${problem(reason).message}`)
       },
     ).finally(() => {
       window.clearInterval(progressTimer)
@@ -256,13 +332,50 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   }, [acquireCloudOperation])
   useEffect(() => {
     if (!settingsOpen) return
-    return checkCloudStatus() ?? undefined
+    let active = true
+    let cancel: (() => void) | null = null
+    setCloud(null)
+    setCloudError(null)
+    setCloudProvidersLoading(true)
+    void host.cloudProviders().then(
+      (selection) => {
+        if (!active) return
+        setCloudProviderSelection(selection)
+        setCloudProvidersLoading(false)
+        if (selection.activeProvider) cancel = checkCloudStatus(selection.activeProvider)
+        else setCloudError(selection.issue ?? 'Choose a supported cloud provider.')
+      },
+      (reason) => {
+        if (!active) return
+        setCloudProvidersLoading(false)
+        setCloudError(problem(reason).message)
+      },
+    )
+    return () => {
+      active = false
+      cancel?.()
+    }
   }, [settingsOpen, checkCloudStatus])
   useEffect(() => {
     if (!settingsOpen) return
     let active = true
+    void host.ffmpegStatus().then(
+      (status) => {
+        if (!active) return
+        setFfmpeg(status)
+        setFfmpegPathDraft(status.configuredPath ?? status.effectivePath ?? '')
+        setFfmpegError(null)
+        setFfmpegLoadError(null)
+        setFfmpegLoading(false)
+      },
+      (reason) => {
+        if (!active) return
+        setFfmpegLoadError(problem(reason).message)
+        setFfmpegLoading(false)
+      },
+    )
     void host.getTranscriptionModel().then(
-      (selected) => { if (active) { setModel(selected); setModelError(null); setAccessOpen(true) } },
+      (selected) => { if (active) { setModel(selected); setModelError(null) } },
       (reason) => { if (active) { setModel(null); setModelError(problem(reason).message) } },
     )
     void host.hfTokenStatus().then(
@@ -317,12 +430,13 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
 
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
-      if (aboutOpen) return
+      if (aboutOpen || cloudWizardOpen) return
       if (event.key === 'Escape' && settingsOpen) {
         event.preventDefault()
+        if (gettingStartedStep) { markGettingStartedSeen(); guideDismissed.current = true }
+        setGettingStartedStep(null)
         setSettingsOpen(false)
         setTokenDraft('')
-        settingsButton.current?.focus()
         return
       }
       if (event.key === 'Escape' && songPointer.current) {
@@ -342,7 +456,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     }
     window.addEventListener('keydown', keys)
     return () => window.removeEventListener('keydown', keys)
-  }, [query, selectedJob, cancelSongDrag, settingsOpen, aboutOpen])
+  }, [query, selectedJob, cancelSongDrag, settingsOpen, aboutOpen, cloudWizardOpen, gettingStartedStep])
 
   const chooseModel = async (selected: TranscriptionModel) => {
     const release = acquireCloudOperation('Saving analysis settings…')
@@ -352,7 +466,6 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     setDownloadError(null)
     try {
       setModel(await host.setTranscriptionModel(selected))
-      setAccessOpen(true)
     } catch (reason) {
       setModelError(problem(reason).message)
     } finally {
@@ -362,30 +475,143 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         void host.modelPreflight().then(setPreflight, (reason) => setPreflightError(problem(reason).message))
     }
   }
+  const ffmpegActionBusy = ffmpegBusy || ffmpegBrowsing
+  const saveFfmpegPath = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (ffmpegLoading || ffmpegActionBusy) return
+    setFfmpegBusy(true)
+    setFfmpegError(null)
+    setFfmpegLoadError(null)
+    try {
+      const status = await host.setFfmpegPath(ffmpegPathDraft)
+      setFfmpeg(status)
+      setFfmpegPathDraft(status.configuredPath ?? status.effectivePath ?? '')
+    } catch (reason) {
+      setFfmpegError(problem(reason).message)
+    } finally {
+      setFfmpegBusy(false)
+    }
+  }
+  const browseFfmpegPath = async () => {
+    if (ffmpegLoading || ffmpegActionBusy) return
+    setFfmpegBrowsing(true)
+    setFfmpegError(null)
+    try {
+      const result = await host.browseFfmpegPath()
+      if (result.path !== null) setFfmpegPathDraft(result.path)
+    } catch (reason) {
+      setFfmpegError(problem(reason).message)
+    } finally {
+      setFfmpegBrowsing(false)
+    }
+  }
+  const retryFfmpegStatus = async () => {
+    setFfmpegLoading(true)
+    setFfmpegLoadError(null)
+    try {
+      const status = await host.ffmpegStatus()
+      setFfmpeg(status)
+      setFfmpegPathDraft(status.configuredPath ?? status.effectivePath ?? '')
+      setFfmpegError(null)
+    } catch (reason) {
+      setFfmpegLoadError(problem(reason).message)
+    } finally {
+      setFfmpegLoading(false)
+    }
+  }
+  const openGettingStarted = () => {
+    if (!settingsOpen) setFfmpegLoading(true)
+    setSettingsSection('audio')
+    setGettingStartedStep('welcome')
+    setSettingsOpen(true)
+  }
+  const dismissGettingStarted = () => {
+    markGettingStartedSeen()
+    guideDismissed.current = true
+    setGettingStartedStep(null)
+    setSettingsOpen(false)
+    setTokenDraft('')
+  }
+  const practiceNow = () => {
+    markGettingStartedSeen()
+    guideDismissed.current = true
+    setGettingStartedStep(null)
+    setSettingsOpen(false)
+    setTokenDraft('')
+    setTab('course')
+  }
+  const importMusicFile = () => {
+    markGettingStartedSeen()
+    guideDismissed.current = true
+    setGettingStartedStep(null)
+    setSettingsOpen(false)
+    setTokenDraft('')
+    picker.current?.click()
+  }
+  const continueWithAudio = () => {
+    setGettingStartedStep('access')
+    setSettingsSection('models')
+  }
+  const continueWithAccount = () => setGettingStartedStep('model')
+  const modelReady = model !== null && !modelBusy && cloud !== null && !cloudStatusChecking && !cloudError
+    && (cloud.mode === 'cloud'
+      ? cloud.configured === true && cloudModelSupportKnown && cloud.supportedModels?.includes(model) === true
+      : !downloadStatusError && !preflightError && downloads?.[model]?.downloaded === true && preflight?.[model]?.eligible === true)
+  const audioReady = !ffmpegLoading && !ffmpegBusy && !ffmpegLoadError && ffmpeg?.available === true
+  const accountReady = !hfBusy && (hfConfigured === true || cloud?.jobCreated === true
+    || model !== null && downloads?.[model]?.downloaded === true)
+  const setupReady = audioReady && modelReady
+  const findSong = () => {
+    markGettingStartedSeen()
+    guideDismissed.current = true
+    setGettingStartedStep(null)
+    setSettingsOpen(false)
+    setTokenDraft('')
+    setTab('catalog')
+    window.setTimeout(() => field.current?.focus(), 0)
+  }
+  const resetFfmpegPath = async () => {
+    if (ffmpegLoading || ffmpegActionBusy) return
+    setFfmpegBusy(true)
+    setFfmpegError(null)
+    setFfmpegLoadError(null)
+    try {
+      const status = await host.setFfmpegPath('')
+      setFfmpeg(status)
+      setFfmpegPathDraft(status.configuredPath ?? status.effectivePath ?? '')
+    } catch (reason) {
+      setFfmpegError(problem(reason).message)
+    } finally {
+      setFfmpegBusy(false)
+    }
+  }
   const openCloudWizard = () => {
     if (cloudOperationGate.isLocked() || cloudWizardOpenRef.current) return
+    if (gettingStartedStep) {
+      markGettingStartedSeen()
+      setGettingStartedStep(null)
+    }
     cloudWizardOpenRef.current = true
     setCloudWizardOpen(true)
   }
   const closeCloudWizard = () => {
     cloudWizardOpenRef.current = false
     setCloudWizardOpen(false)
-    settingsButton.current?.focus()
   }
-  const cloudModelSupportKnown = Array.isArray(cloud?.supportedModels)
   const chooseMode = async (mode: ProcessingMode) => {
     const readinessCancelled = cloudStatusChecking
     if (readinessCancelled) cloudStatusCancelRef.current?.()
     if (cloudOperationGate.isLocked()) return
-    if (mode === 'cloud' && (cloudSetupConfirmedAbsent || cloudSetupCanContinue)) {
-      openCloudWizard()
+    setProcessingChoice(mode)
+    if (mode === 'cloud' && (cloud?.available === false || cloudSetupConfirmedAbsent || cloudSetupCanContinue)) {
+      setCloudError(null)
       return
     }
     const release = acquireCloudOperation('Changing processing mode…')
     if (!release) return
     setCloudError(null)
     try {
-      const selected = await host.setProcessingModeWithStatus(mode)
+      const selected = await host.setProcessingModeWithStatus(mode, selectedCloudProvider)
       setCloud((current) => ({
         ...(current ?? { configured: false }),
         ...selected,
@@ -393,20 +619,43 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         mode: selected.mode,
       }))
     } catch (reason) {
+      setProcessingChoice(null)
       setCloudError(problem(reason).message)
     } finally {
       release()
     }
   }
+  const chooseCloudProvider = async (provider: CloudProvider) => {
+    if (provider === cloudProviderSelection?.activeProvider) return
+    if (cloudStatusChecking) cloudStatusCancelRef.current?.()
+    if (cloudOperationGate.isLocked()) return
+    const release = acquireCloudOperation(`Selecting ${CLOUD_PROVIDER_NAMES[provider]}…`)
+    if (!release) return
+    setCloudError(null)
+    let selected: CloudProvider | null = null
+    try {
+      const result = await host.selectCloudProvider(provider)
+      selected = result.provider
+      setCloudProviderSelection((current) => current
+        ? { ...current, activeProvider: result.provider } : current)
+      setCloud(null)
+    } catch (reason) {
+      setCloudError(`${CLOUD_PROVIDER_NAMES[provider]}: ${problem(reason).message}`)
+    } finally {
+      release()
+    }
+    if (selected) void checkCloudStatus(selected)
+  }
   const disconnectCloud = async () => {
     if (cloudOperationGate.isLocked() || !window.confirm(
-      'Disconnect Azure from Mizan?\n\nMizan will forget its saved Azure setup and use Local processing for new songs. Azure resources and running Jobs will not be deleted or stopped, so charges may continue. Your saved Hugging Face token will remain in Windows Credential Manager.',
+      `Disconnect ${cloudProviderName} from Mizan?\n\nMizan will forget its saved ${cloudProviderName} setup and use Local processing for new songs. ${cloudProviderName} resources and running jobs will not be deleted or stopped, so charges may continue. Your saved Hugging Face token will remain in Windows Credential Manager.`,
     )) return
-    const release = acquireCloudOperation('Disconnecting Azure from Mizan…')
+    const release = acquireCloudOperation(`Disconnecting ${cloudProviderName} from Mizan…`)
     if (!release) return
     setCloudError(null)
     try {
-      setCloud(await host.clearCloud())
+      setCloud(await host.clearCloud(selectedCloudProvider))
+      setProcessingChoice('local')
     } catch (reason) {
       setCloudError(problem(reason).message)
     } finally {
@@ -498,13 +747,23 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     [reload, onOpen],
   )
 
+  const restoreMidiImportFocus = () => {
+    const previous = midiOfferReturnFocus.current
+    const target = previous?.isConnected && !(previous instanceof HTMLInputElement && previous.type === 'file')
+      ? previous
+      : field.current
+    target?.focus()
+  }
+
   const confirmMidiImport = async () => {
     if (!midiOffer) return
+    const needsPermission = midiOffer.result?.provider === 'bitmidi' || midiOffer.result?.provider === 'freemidi'
+    if (needsPermission && midiOffer.permissionConfirmed !== true) return
     setBusy(true)
     setMidiOfferError(null)
     try {
       const entry = midiOffer.result
-        ? await host.importMidiResult(midiOffer.result.id)
+        ? await host.importMidiResult(midiOffer.result.id, midiOffer.permissionConfirmed === true)
         : await host.importFile(midiOffer.name, midiOffer.dataBase64 ?? await toBase64(midiOffer.file!))
       setMidiOffers((current) => current.slice(1))
       await reload()
@@ -525,16 +784,38 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
       dialog.showModal()
     }
     else if (!midiOffer && dialog?.open) dialog.close()
-    return () => { if (dialog?.open) dialog.close() }
+    return () => { if (dialog && !dialog.isConnected) restoreMidiImportFocus() }
   }, [midiOffer])
 
   useEffect(() => onMidiFileOpened((file) => {
     if (!file || typeof file.name !== 'string' || !/\.(mid|midi)$/i.test(file.name)
         || typeof file.dataBase64 !== 'string') return
-    setTab('songs')
+    setTab('catalog')
     setMidiOfferError(null)
     setMidiOffers((current) => [...current, { name: file.name, dataBase64: file.dataBase64 }])
   }), [setTab])
+  useEffect(() => {
+    if (entries === null || entries.length || jobs.length || folders.length || tab !== 'catalog'
+      || midiOffer || selectedJob || aboutOpen || cloudWizardOpen || settingsOpen || busy
+      || error || query.trim() || pendingLinks.length || guideDismissed.current || hasSeenGettingStarted()) return
+    const timer = window.setTimeout(() => {
+      if (document.hasFocus?.() === false) return
+      setGettingStartedStep('welcome')
+      setSettingsOpen(true)
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [entries, jobs.length, folders.length, tab, midiOffer, selectedJob, aboutOpen, cloudWizardOpen,
+    settingsOpen, busy, error, query, pendingLinks.length])
+  useEffect(() => {
+    if (!gettingStartedStep) return
+    if (midiOffer || tab !== 'catalog' || aboutOpen || cloudWizardOpen) {
+      markGettingStartedSeen()
+      guideDismissed.current = true
+      setGettingStartedStep(null)
+      setSettingsOpen(false)
+      setTokenDraft('')
+    }
+  }, [gettingStartedStep, midiOffer, tab, aboutOpen, cloudWizardOpen])
 
   // The whole window takes drops and pasted links.
   useEffect(() => {
@@ -596,7 +877,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
     })
   }, [folderEntries, folders, searchQuery])
 
-  const empty = entries !== null && entries.length === 0 && jobs.length === 0 && folders.length === 0 && !searchQuery
+  const empty = tab === 'catalog' && entries !== null && entries.length === 0 && jobs.length === 0 && folders.length === 0 && !searchQuery
   const queueJobs = jobs.filter((job) => job.status !== 'done' || !entries?.some((entry) => entry.id === job.songId))
   const currentFolder = allFolders.find((folder) => folder.id === selectedFolder) ?? allFolders[0]
   const draggedEntry = entries?.find((entry) => entry.id === songDrag?.songId)
@@ -667,126 +948,200 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         <div className="lib-head-actions">
           <button ref={settingsButton} type="button" className="lib-credits" aria-label="Song analysis settings"
             aria-expanded={settingsOpen} aria-controls="model-settings"
-            onClick={() => { setTokenDraft(''); setHfError(null); setSettingsOpen((open) => !open) }}>
+            onClick={() => {
+              setFfmpegLoading(true)
+              setTokenDraft('')
+              setHfError(null)
+              if (settingsOpen && gettingStartedStep) {
+                markGettingStartedSeen()
+                setGettingStartedStep(null)
+              } else if (!settingsOpen) {
+                setProcessingChoice(null)
+                setSettingsSection('audio')
+                setGettingStartedStep(null)
+              }
+              setSettingsOpen((open) => !open)
+            }}>
             <Settings2 size={16} aria-hidden /> Song analysis
           </button>
           <button ref={aboutButton} type="button" className="lib-credits lib-about" aria-label="About Mizan"
-            onClick={() => { setSettingsOpen(false); setTokenDraft(''); setAboutOpen(true) }}>
+            onClick={() => {
+              if (gettingStartedStep) markGettingStartedSeen()
+              setGettingStartedStep(null)
+              setSettingsOpen(false)
+              setTokenDraft('')
+              setAboutOpen(true)
+            }}>
             <Info size={16} aria-hidden /> <span>About</span>
           </button>
         </div>
         {settingsOpen && (
-          <section id="model-settings" className="model-settings" aria-labelledby="model-settings-title">
+          <dialog ref={settingsDialog} id="model-settings" className="model-settings" aria-labelledby="model-settings-title"
+            onClose={dismissGettingStarted}
+            onClick={(event) => { if (event.target === event.currentTarget) dismissGettingStarted() }}>
             <div className="model-settings-head">
-              <h2 id="model-settings-title">How Mizan finds notes</h2>
+              <h2 ref={settingsHeading} tabIndex={-1} id="model-settings-title">{gettingStartedStep ? 'Getting started' : 'Song analysis settings'}</h2>
+              {!gettingStartedStep && <button type="button" className="model-settings-guide" onClick={openGettingStarted}>
+                Getting started guide
+              </button>}
               <button type="button" className="model-settings-close" aria-label="Close song analysis settings"
-                onClick={() => { setSettingsOpen(false); setTokenDraft(''); settingsButton.current?.focus() }}>
+                onClick={() => {
+                  if (gettingStartedStep) markGettingStartedSeen()
+                  if (gettingStartedStep) guideDismissed.current = true
+                  setGettingStartedStep(null)
+                  setSettingsOpen(false)
+                  setTokenDraft('')
+                }}>
                 <X size={18} aria-hidden />
               </button>
             </div>
-            <p className="model-settings-intro">Choose how Mizan processes new songs. Your saved songs won't change.</p>
-            <fieldset className="cloud-mode" disabled={cloudOperationBusy && !cloudStatusChecking}>
-              <legend>Processing</legend>
-              <label><input type="radio" name="processing-mode" checked={cloud?.mode === 'local'}
-                onChange={() => void chooseMode('local')} /> Local <small>Process on this PC</small></label>
-              <label><input type="radio" name="processing-mode" checked={cloud?.mode === 'cloud'}
-                onChange={() => void chooseMode('cloud')} /> Cloud <small>Use your own Azure GPU</small></label>
+            {!gettingStartedStep && <p className="model-settings-intro">These choices apply to new analysis. Saved songs and running jobs stay unchanged.</p>}
+            {gettingStartedStep === 'welcome' ? (
+              <div className="getting-started-welcome">
+                <p>Try a lesson or import a score now. Set up song analysis only when you need it.</p>
+                <button type="button" className="btn btn-primary" onClick={practiceNow}>Practice with the Course</button>
+                <button type="button" className="btn" onClick={importMusicFile}>Import a MIDI or MusicXML file</button>
+                <button type="button" className="btn" onClick={() => {
+                  setGettingStartedStep('audio')
+                  setSettingsSection('audio')
+                }}>Set up song analysis</button>
+                <button type="button" className="model-settings-skip" onClick={dismissGettingStarted}>Not now</button>
+              </div>
+            ) : gettingStartedStep ? (
+              <div className="getting-started-progress" aria-live="polite">
+                <span>Step {gettingStartedStep === 'audio' ? 1 : gettingStartedStep === 'access' ? 2 : 3} of 3</span>
+                <strong>{gettingStartedStep === 'audio' ? 'Audio support' : gettingStartedStep === 'access' ? 'Account and model terms' : 'Choose and prepare a model'}</strong>
+                <progress max={3} value={gettingStartedStep === 'audio' ? 1 : gettingStartedStep === 'access' ? 2 : 3} />
+              </div>
+            ) : (
+              <nav className="model-settings-sections" aria-label="Song analysis settings sections">
+                <button type="button" aria-current={settingsSection === 'audio' ? 'page' : undefined}
+                  onClick={() => setSettingsSection('audio')}>
+                  <strong>Audio support</strong>
+                  <small>{ffmpegLoading ? 'Checking…' : ffmpeg?.available ? 'Ready' : 'Needs attention'}</small>
+                </button>
+                <button type="button" aria-current={settingsSection === 'models' ? 'page' : undefined}
+                  onClick={() => setSettingsSection('models')}>
+                  <strong>Models and account</strong>
+                  <small>{model ? modelChoices.find((choice) => choice.id === model)?.label : 'Checking model…'}</small>
+                </button>
+                <button type="button" aria-current={settingsSection === 'cloud' ? 'page' : undefined}
+                  onClick={() => setSettingsSection('cloud')}>
+                  <strong>Analysis processing</strong>
+                  <small>{cloudProvidersLoading || cloudStatusChecking ? 'Checking…'
+                    : cloud?.mode === 'cloud' ? `${cloudProviderName} · Cloud`
+                      : cloud?.mode === 'local' ? 'This PC' : 'Status unknown'}</small>
+                </button>
+              </nav>
+            )}
+            {(gettingStartedStep === 'audio' || !gettingStartedStep && settingsSection === 'audio') && <section id="ffmpeg-settings" className="model-settings-ffmpeg" aria-labelledby="ffmpeg-settings-title">
+              <h3 id="ffmpeg-settings-title">Audio support</h3>
+              <p>Choose the FFmpeg file used on this PC. Cloud workers use their own copy.</p>
+              <form onSubmit={(event) => void saveFfmpegPath(event)}>
+                <label htmlFor="ffmpeg-path">FFmpeg executable path</label>
+                <div className="ffmpeg-path-row">
+                  <input id="ffmpeg-path" type="text" value={ffmpegPathDraft} autoComplete="off" spellCheck={false}
+                    disabled={ffmpegLoading || ffmpegActionBusy}
+                    aria-describedby="ffmpeg-path-help ffmpeg-status"
+                    onChange={(event) => setFfmpegPathDraft(event.target.value)} />
+                  <button type="button" className="btn" aria-label="Browse for FFmpeg executable"
+                    disabled={ffmpegLoading || ffmpegActionBusy} aria-busy={ffmpegBrowsing || undefined}
+                    onClick={() => void browseFfmpegPath()}>{ffmpegBrowsing ? 'Opening…' : 'Browse…'}</button>
+                </div>
+                <p id="ffmpeg-path-help">Get a Windows build from <a
+                  href="https://ffmpeg.org/download.html#build-windows" target="_blank" rel="noopener noreferrer">FFmpeg's Windows build links</a>.
+                  Choose a build linked there, such as Gyan or BtbN. Extract the ZIP, then browse for or enter the full path to <code>bin\ffmpeg.exe</code>.</p>
+                <p id="ffmpeg-status" className="ffmpeg-settings-status" role="status" aria-live="polite">
+                  {ffmpegLoading ? 'Checking FFmpeg status…'
+                    : ffmpegBrowsing ? 'Opening the Windows file picker…'
+                    : ffmpegLoadError ? `FFmpeg status could not load: ${ffmpegLoadError}`
+                    : ffmpeg?.available ? `FFmpeg is ready: ${ffmpeg.effectivePath}`
+                      : ffmpeg?.issue ?? 'FFmpeg status is unavailable.'}
+                </p>
+                <div className="model-settings-actions">
+                  <button type="submit" className="btn btn-primary" disabled={ffmpegLoading || ffmpegActionBusy}>
+                    {ffmpegBusy ? 'Saving…' : 'Save path'}
+                  </button>
+                  <button type="button" className="btn" disabled={ffmpegLoading || ffmpegActionBusy || !ffmpeg?.configuredPath}
+                    onClick={() => void resetFfmpegPath()}>Use automatic detection</button>
+                  {ffmpegLoadError && <button type="button" className="btn" disabled={ffmpegLoading}
+                    onClick={() => void retryFfmpegStatus()}>Retry status check</button>}
+                </div>
+                {ffmpegError && <p className="model-settings-error" role="alert">{ffmpegError}</p>}
+              </form>
+            </section>}
+            {!gettingStartedStep && settingsSection === 'cloud' && <section className="model-settings-cloud" aria-labelledby="cloud-settings-title">
+            <h3 id="cloud-settings-title">Analysis processing</h3>
+            <fieldset className="cloud-mode" disabled={cloudProvidersLoading || !cloudProviderSelection?.activeProvider || cloudOperationBusy && !cloudStatusChecking}>
+              <legend>Send new analysis to</legend>
+              <label><input type="radio" name="processing-mode" checked={(processingChoice ?? cloud?.mode) === 'local'}
+                onChange={() => void chooseMode('local')} /> This PC</label>
+              <label><input type="radio" name="processing-mode" checked={(processingChoice ?? cloud?.mode) === 'cloud'}
+                onChange={() => void chooseMode('cloud')} /> Cloud</label>
             </fieldset>
-            <p className="model-settings-source">Processing selection applies to new analysis and Redo analysis. Queued and running jobs keep their chosen model and processing mode.</p>
-            <p className="model-settings-source">Cloud model sizes use different execution budgets in the selected Azure environment; a larger size does not require a new environment.</p>
+            {(processingChoice ?? cloud?.mode) === 'local' && <p>This PC keeps analysis on this computer.</p>}
+            <p className="model-settings-source">Queued and running jobs keep their selected model and processing mode.</p>
+            {(processingChoice ?? cloud?.mode) !== 'local' && <>
+            <label className="cloud-provider-choice">Cloud provider
+              <select aria-label="Cloud provider" value={cloudProviderSelection?.activeProvider ?? ''}
+                disabled={cloudProvidersLoading || cloudOperationBusy && !cloudStatusChecking || !cloudProviderSelection}
+                onChange={(event) => {
+                  if (isCloudProvider(event.target.value)) void chooseCloudProvider(event.target.value)
+                }}>
+                {!cloudProviderSelection?.activeProvider && <option value="">{cloudProvidersLoading ? 'Loading providers…'
+                  : cloudProviderSelection ? 'Choose a provider' : 'Provider unavailable'}</option>}
+                {cloudProviderOptions.map(({ id, name }) =>
+                  <option key={id} value={id}>{name}</option>)}
+              </select>
+            </label>
+            <p>Cloud sends recordings to your own provider resources. This PC keeps analysis on this computer.</p>
+            {processingChoice === 'cloud' && cloud?.mode === 'local' && <p className="model-settings-source" role="status">
+              Finish cloud setup before using Cloud. New analysis still uses This PC.
+            </p>}
             <div className="cloud-status" aria-busy={cloudOperationBusy}>
               <span role="status" aria-live="polite">
                 {cloudOperationBusy && <span className="cloud-inline-spinner" aria-hidden="true" />}
                 {cloudStatusText}
               </span>
-              <button type="button" className="btn" disabled={cloudOperationBusy || (!cloud && !cloudError)}
+              <button ref={cloudSetupButton} type="button" className="btn" disabled={cloudOperationBusy || !cloudProviderSelection?.activeProvider || (!cloud && !cloudError)}
                 onClick={() => cloudError || !cloud || (!cloud.configured
                   && !cloudSetupConfirmedAbsent && !cloudSetupCanContinue)
-                  ? void checkCloudStatus() : openCloudWizard()}>
+                  ? void checkCloudStatus(selectedCloudProvider) : openCloudWizard()}>
                 {cloudActionText}
               </button>
               {cloud?.mode === 'cloud' && !cloudModelSupportKnown
                 && <p className="model-settings-source" role="status">Cloud worker model support has not been checked; model choices remain available.</p>}
               {cloudStatusChecking && <button type="button" className="btn btn-quiet" onClick={() => {
                 cloudStatusCancelRef.current?.()
-                setCloudError('Azure readiness check cancelled. Processing selection is unchanged.')
+                setCloudError(`${cloudProviderName} readiness check cancelled. Processing selection is unchanged.`)
               }}>Cancel check</button>}
             </div>
             {cloud?.issue && <p className="model-settings-source" role={!cloud.configured ? 'alert' : undefined}>{cloud.issue}</p>}
-            {cloudError && <p className="model-settings-error" role="alert">{cloudError}</p>}
             {cloud?.config && <details className="cloud-connection-details">
-              <summary>Azure connection options</summary>
-              <p>Disconnecting makes Mizan forget its saved Azure setup and selects Local processing for new songs. It does not delete Azure resources or stop running Jobs, and charges may continue. Your saved Hugging Face token remains in Windows Credential Manager.</p>
+              <summary>{cloudProviderName} connection options</summary>
+              <p>Disconnecting makes Mizan forget its saved {cloudProviderName} setup and selects Local processing for new songs. It does not delete {cloudProviderName} resources or stop running jobs, and charges may continue. Your saved Hugging Face token remains in Windows Credential Manager.</p>
               <button type="button" className="btn cloud-remove" disabled={cloudOperationBusy}
-                onClick={() => void disconnectCloud()}>Disconnect Azure from Mizan</button>
+                onClick={() => void disconnectCloud()}>Disconnect {cloudProviderName} from Mizan</button>
             </details>}
-            <fieldset className="model-settings-choices" disabled={cloudOperationBusy || modelBusy || model === null}>
-              <legend className="visually-hidden">Choose how to find notes</legend>
-              {modelChoices.map((choice) => {
-                const status = downloads?.[choice.id]
-                const capacity = preflight?.[choice.id]
-                return (
-                  <div className="model-settings-item" key={choice.id}>
-                    <label className="model-settings-choice">
-                      <input type="radio" name="transcription-model" value={choice.id} checked={model === choice.id}
-                        disabled={cloud?.mode === 'cloud'
-                        ? cloudModelSupportKnown && cloud.supportedModels?.includes(choice.id) === false
-                          : !capacity?.eligible}
-                        onChange={() => void chooseModel(choice.id)} />
-                      <span><strong>{choice.label}</strong>
-                        <small>{choice.detail}</small>
-                        <small className="model-settings-metadata">{choice.info} · {cloud?.mode === 'cloud' ? 'Azure GPU' : 'CPU'}</small>
-                        {cloud?.mode === 'cloud' && cloudModelSupportKnown
-                          && cloud.supportedModels?.includes(choice.id) === false
-                          && <small className="model-settings-incompatible">Not supported by this Cloud worker</small>}
-                        {cloud?.mode !== 'cloud' && <small className={capacity?.reason ? 'model-settings-incompatible' : ''}>
-                          {capacity?.reason ?? (capacity
-                            ? `${capacity.requiredRamGiB} GiB free RAM needed · ${capacity.freeRamGiB} GiB available`
-                            : preflightError ?? 'Checking this PC…')}
-                        </small>}</span>
-                    </label>
-                      {cloud?.mode !== 'cloud' && <div className="model-settings-download" aria-live="polite">
-                        <span>{status?.downloaded ? 'Downloaded' : status?.active ? 'Downloading' : status ? 'Not downloaded' : 'Checking download…'}</span>
-                        {status?.active && (
-                          <>
-                            <progress max={status.totalBytes} value={status.bytesReceived} aria-label={`${choice.label} download`} />
-                            <span>{formatBytes(status.bytesReceived)} of {formatBytes(status.totalBytes)}
-                              {' · '}{status.bytesPerSecond === null ? 'Calculating speed…' : `${(status.bytesPerSecond / 1e6).toFixed(1)} MB/s`}</span>
-                          </>
-                        )}
-                        {status && !status.downloaded && !status.active && (
-                          <button type="button" className="btn" disabled={hfConfigured !== true || downloadBusy || !capacity?.eligible || !!downloads && Object.values(downloads).some((item) => item.active)}
-                            aria-label={`Download ${choice.label}`}
-                            onClick={() => void downloadModel(choice.id)}>Download</button>
-                        )}
-                        <a href={`https://huggingface.co/MuScriptor/${choice.id}`} target="_blank" rel="noopener noreferrer"
-                          aria-label={`Accept ${choice.label} model terms`}>Accept terms</a>
-                        {status?.error && <p className="model-settings-error" role="alert">{status.error}</p>}
-                        {downloadError?.model === choice.id && <p className="model-settings-error" role="alert">{downloadError.message}</p>}
-                      </div>}
-                  </div>
-                )
-              })}
-            </fieldset>
-            {cloud?.mode !== 'cloud' && hfConfigured === false && <p className="model-settings-source">Save a Hugging Face token below to enable model downloads.</p>}
-            <p className="model-settings-source">MuScriptor reads the original recording. Official models by Kyutai and Mirelo; noncommercial license.</p>
-            {model === null && !modelError && <p role="status">Loading model choice…</p>}
-            {modelError && <p className="model-settings-error" role="alert">{modelError}</p>}
-            {cloud?.mode !== 'cloud' && downloadStatusError && <p className="model-settings-error" role="alert">{downloadStatusError}</p>}
-            <section className="model-settings-stems" aria-labelledby="stem-settings-title">
-              <h3 id="stem-settings-title">Listen to instruments separately</h3>
-              <div><strong>HT-Demucs</strong><span>Always on · {cloud?.mode === 'cloud' ? 'Azure GPU' : 'CPU'}</span></div>
-              <p>Separates vocals, drums, bass, guitar, piano, and an Other stem for remaining sounds. Other is a mix of instruments, not a separate recording for every detected score. This stays on whichever note-finding option you choose.</p>
-            </section>
-            {cloud?.mode !== 'cloud' && <details className="model-settings-access" open={accessOpen}
+            </>}
+            {cloudError && <p className="model-settings-error" role="alert">{cloudError}</p>}
+            </section>}
+            {(gettingStartedStep === 'model' || gettingStartedStep === 'access'
+              || !gettingStartedStep && settingsSection === 'models') && <section className="model-settings-models" aria-label="Models and account">
+            <p className="model-settings-source">A Hugging Face read-access token is needed to download MuScriptor models. Save it here and accept the model terms before downloading.</p>
+            <details className="model-settings-access" open={gettingStartedStep === 'access' || (accessOpen ?? (hfConfigured === false))}
               onToggle={(event) => setAccessOpen(event.currentTarget.open)}>
               <summary>
-                <span>Hugging Face account & access</span>
+                <span>Hugging Face account and access</span>
                 <span role="status">{hfConfigured === null ? 'Checking token…' : hfConfigured ? 'Token saved' : 'No token saved'}</span>
                 <ChevronDown size={16} aria-hidden />
               </summary>
               <div className="model-settings-access-body">
-              <p><a href="https://huggingface.co/join" target="_blank" rel="noopener noreferrer">Create a Hugging Face account</a> and sign in. Open each model you want above and accept its terms. Then <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">create a read-access token</a> and save it here. Mizan stores it on this PC in Windows Credential Manager.</p>
+              <p><a href="https://huggingface.co/join" target="_blank" rel="noopener noreferrer">Create a Hugging Face account</a>, sign in, and accept the terms for the model you choose. Then <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">create a read-access token</a> and save it here. Mizan stores it on this PC in Windows Credential Manager.</p>
+              {gettingStartedStep === 'access' && <ul className="model-settings-terms">
+                {modelChoices.map((choice) => <li key={choice.id}><a href={`https://huggingface.co/MuScriptor/${choice.id}`}
+                  target="_blank" rel="noopener noreferrer">Accept {choice.label} terms</a></li>)}
+              </ul>}
             <form onSubmit={async (event) => {
               event.preventDefault()
               setHfBusy(true)
@@ -814,6 +1169,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                   setTokenDraft('')
                   try {
                     setHfConfigured(await host.clearHfToken())
+                    setAccessOpen(true)
                   } catch (reason) {
                     setHfError(problem(reason).message)
                   } finally {
@@ -822,13 +1178,128 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                 }}>Remove token</button>}
               </div>
             </form>
-              {hfError && <p className="model-settings-error" role="alert">{hfError}</p>}
               </div>
-            </details>}
-          </section>
+            </details>
+            {hfError && <p className="model-settings-error" role="alert">{hfError}</p>}
+            {gettingStartedStep === 'access' && cloud?.mode === 'cloud'
+              && <p className="model-settings-source">Cloud setup asks separately before sending this saved token to your provider.</p>}
+            {gettingStartedStep === 'access' && cloud === null
+              && <p className="model-settings-source" role="status">Checking the saved processing mode. This token is stored only after you save it.</p>}
+            {gettingStartedStep !== 'access' && <>
+            <h3 id="model-choice-title">Choose how Mizan finds notes</h3>
+            <p>Choose a size that fits this computer, or your selected cloud worker.</p>
+            {cloud?.mode === 'cloud' && !cloudModelSupportKnown
+              && <p className="model-settings-source" role="status">Cloud worker model support has not been checked; model choices remain available.</p>}
+            <fieldset className="model-settings-choices" disabled={cloudOperationBusy || modelBusy || model === null}>
+              <legend className="visually-hidden">Choose how to find notes</legend>
+              {modelChoices.map((choice) => {
+                const status = downloads?.[choice.id]
+                const capacity = preflight?.[choice.id]
+                return (
+                  <div className="model-settings-item" key={choice.id}>
+                    <label className="model-settings-choice">
+                      <input type="radio" name="transcription-model" value={choice.id} checked={model === choice.id}
+                        disabled={!cloud || (cloud.mode === 'cloud'
+                          ? cloudModelSupportKnown && cloud.supportedModels?.includes(choice.id) === false
+                          : !capacity?.eligible)}
+                        onChange={() => void chooseModel(choice.id)} />
+                      <span><strong>{choice.label}</strong>
+                        <small>{choice.detail}</small>
+                        {cloud?.mode === 'cloud' && cloudModelSupportKnown
+                          && cloud.supportedModels?.includes(choice.id) === false
+                          && <small className="model-settings-incompatible">Not supported by this Cloud worker</small>}
+                        {cloud?.mode === 'local' && <small className={capacity?.reason ? 'model-settings-incompatible' : ''}>
+                          {capacity?.reason ?? (capacity
+                            ? `${capacity.requiredRamGiB} GiB free RAM needed · ${capacity.freeRamGiB} GiB available`
+                            : preflightError ?? 'Checking this PC…')}
+                        </small>}
+                        {cloud === null && <small>Checking processing mode…</small>}</span>
+                    </label>
+                    <details className="model-settings-meta">
+                      <summary>Model size and requirements</summary>
+                      <p className="model-settings-metadata">{choice.info}. {cloud?.mode === 'cloud'
+                        ? `${cloudProviderName} reports model support separately.`
+                        : 'MuScriptor reads the original recording; these models have noncommercial terms.'}</p>
+                    </details>
+                      {cloud?.mode === 'local' && <div className="model-settings-download" aria-live="polite">
+                        <span>{status?.downloaded ? 'Downloaded' : status?.active ? 'Downloading' : status ? 'Not downloaded' : 'Checking download…'}</span>
+                        {status?.active && (
+                          <>
+                            <progress max={status.totalBytes} value={status.bytesReceived} aria-label={`${choice.label} download`} />
+                            <span>{formatBytes(status.bytesReceived)} of {formatBytes(status.totalBytes)}
+                              {' · '}{status.bytesPerSecond === null ? 'Calculating speed…' : `${(status.bytesPerSecond / 1e6).toFixed(1)} MB/s`}</span>
+                          </>
+                        )}
+                        {status && !status.downloaded && !status.active && (
+                          <button type="button" className="btn" disabled={hfConfigured !== true || downloadBusy || !capacity?.eligible || !!downloads && Object.values(downloads).some((item) => item.active)}
+                            aria-label={`Download ${choice.label}`}
+                            onClick={() => void downloadModel(choice.id)}>Download</button>
+                        )}
+                        <a href={`https://huggingface.co/MuScriptor/${choice.id}`} target="_blank" rel="noopener noreferrer"
+                          aria-label={`Accept ${choice.label} model terms`}>Accept terms</a>
+                        {status?.error && <p className="model-settings-error" role="alert">{status.error}</p>}
+                        {downloadError?.model === choice.id && <p className="model-settings-error" role="alert">{downloadError.message}</p>}
+                      </div>}
+                  </div>
+                )
+              })}
+            </fieldset>
+            {model === null && !modelError && <p role="status">Loading model choice…</p>}
+            {modelError && <p className="model-settings-error" role="alert">{modelError}</p>}
+            {cloud?.mode === 'local' && downloadStatusError && <p className="model-settings-error" role="alert">{downloadStatusError}</p>}
+            <details className="model-settings-stems">
+              <summary>Separate instrument tracks</summary>
+              <p>HT-Demucs separates vocals, drums, bass, guitar, piano, and an Other mix. Other contains the remaining sounds, not one recording per detected instrument. This stays on for every model.</p>
+            </details>
+            </>}
+            </section>}
+            {gettingStartedStep && gettingStartedStep !== 'welcome' && (
+              <div className="getting-started-actions">
+                <button type="button" className="model-settings-skip" onClick={dismissGettingStarted}>Not now</button>
+                {gettingStartedStep === 'audio' ? (
+                  <>
+                    <button type="button" className="btn" onClick={() => setGettingStartedStep('welcome')}>Back</button>
+                    <button type="button" className="btn btn-primary" disabled={!audioReady} onClick={continueWithAudio}>Continue</button>
+                  </>
+                ) : gettingStartedStep === 'access' ? (
+                  <>
+                    <button type="button" className="btn" onClick={() => { setGettingStartedStep('audio'); setSettingsSection('audio') }}>Back</button>
+                    <button type="button" className="btn btn-primary" disabled={!accountReady} onClick={continueWithAccount}>Continue</button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="btn" onClick={() => setGettingStartedStep('access')}>Back</button>
+                    {!setupReady && <div className="getting-started-blockers" role="status">
+                      {!ffmpeg?.available && <p>{ffmpegLoading ? 'Checking FFmpeg…'
+                        : ffmpegLoadError ?? ffmpeg?.issue ?? 'FFmpeg must be ready before song analysis can start.'}</p>}
+                      {(cloud === null || cloudError || cloudStatusChecking) && <p>{cloudError ?? cloudStatusText}</p>}
+                      {cloud?.mode === 'cloud' && !modelReady
+                        && <p>{!cloud.configured ? cloud.issue ?? 'Cloud access is not ready.'
+                          : !cloudModelSupportKnown ? 'Cloud worker model support has not been checked.'
+                            : model ? `${modelChoices.find((choice) => choice.id === model)?.label} is not supported by this worker.`
+                              : 'Choose a model supported by this cloud worker.'}</p>}
+                      {cloud?.mode === 'local' && !modelReady && <p>{model === null ? 'Choose a note-finding model.'
+                        : preflight?.[model]?.eligible !== true
+                          ? preflight?.[model]?.reason ?? preflightError ?? 'Checking this PC can run the selected model.'
+                          : hfConfigured !== true && !downloads?.[model]?.downloaded
+                            ? 'Save a Hugging Face token, accept the model terms, and download the selected model.'
+                            : 'Download the selected model on this PC.'}</p>}
+                    </div>}
+                    <button type="button" className="btn btn-quiet" onClick={() => {
+                      markGettingStartedSeen()
+                      guideDismissed.current = true
+                      setGettingStartedStep(null)
+                      setSettingsSection('cloud')
+                    }}>Analysis processing options</button>
+                    <button type="button" className="btn btn-primary" disabled={!setupReady} onClick={findSong}>Find a song</button>
+                  </>
+                )}
+              </div>
+            )}
+          </dialog>
         )}
       </header>
-      {cloudWizardOpen && <CloudSetup status={cloud} onStatus={setCloud} acquireOperation={acquireCloudOperation}
+      {cloudWizardOpen && <CloudSetup provider={selectedCloudProvider} status={cloud} onStatus={setCloud} acquireOperation={acquireCloudOperation}
         onClose={closeCloudWizard} />}
 
       <dialog ref={aboutDialog} className="about-dialog" aria-labelledby="about-title"
@@ -875,7 +1346,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               e.preventDefault()
               if (isLink) void addLink(query)
               else {
-                setTab('songs')
+                setTab('catalog')
                 songs.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
             }}
@@ -946,15 +1417,19 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                 ;(event.currentTarget.parentElement?.querySelector(`[data-tab="${TABS[to].id}"]`) as HTMLElement | null)?.focus()
               }}>
               {item.label}
-              <span className="lib-tab-count num">{item.id === 'songs' ? (entries?.length ?? '') : LESSONS.length + PIANO_LESSONS.length + PIANO_INSPIRED.length}</span>
-              {item.id === 'songs' && queueJobs.length > 0 && tab !== 'songs' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
+              {item.id === 'catalog' && <span className="lib-tab-count num">{entries?.length ?? ''}</span>}
+              {item.id === 'course' && <span className="lib-tab-count num">{LESSONS.length + PIANO_LESSONS.length + PIANO_INSPIRED.length + FRETTED_LESSONS.length}</span>}
+              {item.id === 'catalog' && queueJobs.length > 0 && tab !== 'catalog' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
             </button>
           ))}
         </div>
 
-        <div role="tabpanel" id="lib-panel-songs" aria-labelledby="lib-tab-songs" hidden={tab !== 'songs'}>
-        {tab === 'songs' && !query.trim() && !selectedJob && <PopularMusic jobs={jobs} busy={busy}
-          pendingLinks={pendingLinks} onTranscribe={addLink} />}
+        <div role="tabpanel" id="lib-panel-discover" aria-labelledby="lib-tab-discover" hidden={tab !== 'discover'}>
+          {tab === 'discover' && !query.trim() && !selectedJob && <PopularMusic jobs={jobs} busy={busy}
+            pendingLinks={pendingLinks} onTranscribe={addLink} />}
+        </div>
+
+        <div role="tabpanel" id="lib-panel-catalog" aria-labelledby="lib-tab-catalog" hidden={tab !== 'catalog'}>
         {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails} onOpen={(id) => entries && onOpenId(id, entries, onOpen)} />}
         {empty && (
           <p className="library-first-note">
@@ -1055,11 +1530,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
           aria-labelledby="midi-import-title"
           onClose={() => {
             if (midiOffers.length > 1) return
-            const previous = midiOfferReturnFocus.current
-            const target = previous?.isConnected && !(previous instanceof HTMLInputElement && previous.type === 'file')
-              ? previous
-              : field.current
-            target?.focus()
+            restoreMidiImportFocus()
           }}
           onCancel={(event) => {
             if (busy) {
@@ -1085,6 +1556,22 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               {midiOffer.result.attribution && <p>Attribution: {midiOffer.result.attribution}</p>}
             </div>
           )}
+          {midiOffer.result
+            && (midiOffer.result.provider === 'bitmidi' || midiOffer.result.provider === 'freemidi') && (
+            <label className="midi-import-permission">
+              <input
+                type="checkbox"
+                checked={midiOffer.permissionConfirmed === true}
+                disabled={busy}
+                onChange={(event) => {
+                  const checked = event.target.checked
+                  setMidiOffers((current) => current.map((offer, index) =>
+                    index === 0 ? { ...offer, permissionConfirmed: checked } : offer))
+                }}
+              />
+              <span>The source does not list a per-file license. I confirm that I have permission to use this MIDI file.</span>
+            </label>
+          )}
           <p>This MIDI file will be added to your library. It will not be treated as audio or transcribed.</p>
           {midiOfferError && <p className="intake-error" role="alert">{midiOfferError.message} {midiOfferError.fix}</p>}
           <div className="midi-import-actions">
@@ -1092,7 +1579,11 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               setMidiOffers((current) => current.slice(1))
               setMidiOfferError(null)
             }}>Cancel</button>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void confirmMidiImport()}>
+            <button className="btn btn-primary"
+              disabled={busy || !!midiOffer.result
+                && (midiOffer.result.provider === 'bitmidi' || midiOffer.result.provider === 'freemidi')
+                && midiOffer.permissionConfirmed !== true}
+              onClick={() => void confirmMidiImport()}>
               {busy ? 'Importing…' : 'Import'}
             </button>
           </div>
@@ -1156,14 +1647,6 @@ function mergeVideoResults(youtube: YouTubeResult[], music: YouTubeResult[]): Un
   return [...merged.values()]
 }
 
-function chartDateLabel(value: string): string {
-  const dateOnly = value.match(/^(\d{4})-?(\d{2})-?(\d{2})$/)
-  const date = dateOnly
-    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-    : new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
-}
-
 function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
   jobs: QueueJob[]
   busy: boolean
@@ -1174,6 +1657,11 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
   const [error, setError] = useState<Problem | null>(null)
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
+  const [activePreview, setActivePreview] = useState<{
+    sectionId: string
+    videoId: string
+    title: string
+  } | null>(null)
   const shelves = useRef(new Map<string, HTMLOListElement>())
 
   useEffect(() => {
@@ -1191,17 +1679,17 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
     const track = shelves.current.get(id)
     if (track) track.scrollBy({ left: direction * track.clientWidth * 0.8, behavior: 'smooth' })
   }
+  const retryPlaylists = () => {
+    setActivePreview(null)
+    setRetry((value) => value + 1)
+  }
 
   return (
     <section className="popular-music" aria-labelledby="popular-music-title" aria-busy={loading}>
       <div className="popular-music-heading">
         <div>
           <h2 id="popular-music-title" className="lib-h2">Popular on YouTube Music</h2>
-          <p className="popular-music-summary">
-            {chart?.sample
-              ? `Snapshot from ${chartDateLabel(chart.fetchedAt)} · development data`
-              : 'Curated playlists from YouTube Music · open a video or choose Transcribe.'}
-          </p>
+          {chart?.sample && <p className="popular-music-summary">Development sample data</p>}
         </div>
         <div className="popular-heading-actions">
           {chart && <p className="popular-freshness">
@@ -1214,13 +1702,13 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
       {error && (
         <div className="popular-chart-error" role="alert">
           <span>{error.message}</span>
-          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry playlists</button>
+          <button className="btn btn-quiet" onClick={retryPlaylists}>Retry playlists</button>
         </div>
       )}
       {chart?.warning && (
         <p className="popular-chart-warning" role="status">
           {chart.warning}{' '}
-          <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry playlists</button>
+          <button className="btn btn-quiet" onClick={retryPlaylists}>Retry playlists</button>
         </p>
       )}
 
@@ -1229,7 +1717,6 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
           <div className="popular-shelf-heading">
             <div className="popular-shelf-title-group">
               <h3 id={`popular-shelf-${section.id}`}>{section.title}</h3>
-              <span className="popular-source-badge">{section.publisher}</span>
               {section.kind === 'chart' && <span className="popular-chart-badge">Chart</span>}
             </div>
             <div className="popular-heading-actions">
@@ -1247,16 +1734,10 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
               </div>
             </div>
           </div>
-          {(section.description || section.chartDate) && (
-            <p className="popular-shelf-summary">
-              {section.description}
-              {section.chartDate && ` · Updated ${chartDateLabel(section.chartDate)}`}
-            </p>
-          )}
           {section.status === 'unavailable' ? (
             <div className="popular-chart-error" role="alert">
               <span>{section.title} unavailable — {section.message ?? 'YouTube Music could not load this playlist.'}</span>
-              <button className="btn btn-quiet" onClick={() => setRetry((value) => value + 1)}>Retry</button>
+              <button className="btn btn-quiet" onClick={retryPlaylists}>Retry</button>
             </div>
           ) : (
             <>
@@ -1266,38 +1747,62 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
               }} className="popular-music-list" aria-label={section.title}>
                 {section.rows.map((row) => {
                   const url = `https://www.youtube.com/watch?v=${row.videoId}`
+                  const previewing = activePreview?.sectionId === section.id
+                    && activePreview.videoId === row.videoId
                   const queued = jobs.some((job) => job.kind === 'transcribe' && job.url === url
                     && (job.status === 'queued' || job.status === 'running'))
                   const pending = pendingLinks.includes(url)
                   const transcribeLabel = pending ? 'Queuing' : queued ? 'Queued' : 'Transcribe'
                   return (
-                    <li key={row.videoId} className="popular-music-card" tabIndex={0}>
-                      <div className="popular-cover">
-                        <a className="popular-cover-link" href={url} target="_blank" rel="noreferrer"
-                          aria-label={`Open ${row.title} on YouTube`}>
-                          <Thumb entry={{ thumbnail: row.thumbnail, source: 'youtube' }} />
-                          {row.rank !== undefined && (
-                            <span className="popular-rank num" aria-label={`Chart rank ${row.rank}`}>{row.rank}</span>
-                          )}
-                        </a>
-                        <button type="button" className="btn btn-primary popular-song-transcribe"
-                          disabled={busy || queued || pending}
-                          aria-label={`${transcribeLabel} ${row.title}`}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void onTranscribe(url)
-                          }}>
-                          {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
-                        </button>
+                    <li key={row.videoId} className="popular-music-card" data-previewing={previewing || undefined} tabIndex={0}>
+                      <div className={`popular-cover${previewing ? ' popular-cover-playing' : ''}`}>
+                        {previewing ? (
+                          <iframe
+                            key={`${activePreview.sectionId}:${activePreview.videoId}`}
+                            className="popular-preview-player"
+                            src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(activePreview.videoId)}?autoplay=1&playsinline=1&controls=1&origin=${encodeURIComponent(window.location.origin)}`}
+                            title={`YouTube preview: ${activePreview.title}`}
+                            allow="autoplay; encrypted-media; picture-in-picture; web-share"
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            allowFullScreen
+                          />
+                        ) : (
+                          <a className="popular-cover-link" href={url} target="_blank" rel="noreferrer"
+                            aria-label={`Open ${row.title} on YouTube`}>
+                            <Thumb entry={{ thumbnail: row.thumbnail, source: 'youtube' }} />
+                            {row.rank !== undefined && (
+                              <span className="popular-rank num" aria-label={`Chart rank ${row.rank}`}>{row.rank}</span>
+                            )}
+                          </a>
+                        )}
+                        <div className={`popular-cover-actions${previewing ? ' popular-cover-actions-playing' : ''}`}>
+                          <button type="button" className="btn btn-primary popular-song-preview"
+                            aria-label={`${previewing ? 'Stop preview of' : 'Preview'} ${row.title}`}
+                            aria-pressed={previewing}
+                            onClick={() => setActivePreview(previewing
+                              ? null
+                              : { sectionId: section.id, videoId: row.videoId, title: row.title })}>
+                            {previewing ? <X size={13} aria-hidden /> : <Play size={13} aria-hidden />}
+                            {previewing ? 'Stop' : 'Preview'}
+                          </button>
+                          <button type="button" className="btn btn-primary popular-song-transcribe"
+                            disabled={busy || queued || pending}
+                            aria-label={`${transcribeLabel} ${row.title}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void onTranscribe(url)
+                            }}>
+                            {pending ? 'Queuing…' : queued ? 'Queued' : 'Transcribe'}
+                          </button>
+                        </div>
                       </div>
                       <div className="popular-music-copy">
-                        <a className="popular-song-title" href={url} target="_blank" rel="noreferrer">{row.title}</a>
+                        <a className="popular-song-title" href={url} target="_blank" rel="noreferrer"
+                          aria-label={`Open ${row.title} on YouTube`}>{row.title}</a>
                         <p className="song-meta">{row.artist || 'Artist not listed'}</p>
-                        <div className="popular-card-actions">
-                          <a className="video-source" href={url} target="_blank" rel="noreferrer">YouTube</a>
-                          <a className="video-source" href={`https://music.youtube.com/watch?v=${row.videoId}`}
-                            target="_blank" rel="noreferrer">YouTube Music</a>
-                        </div>
+                        {previewing && <a className="popular-preview-fallback" href={url} target="_blank" rel="noreferrer">
+                          Open on YouTube <ExternalLink size={12} aria-hidden />
+                        </a>}
                       </div>
                     </li>
                   )
@@ -1393,7 +1898,7 @@ function YouTubeSearch({ query, jobs, busy, pendingLinks, processingMode, transc
   )
 }
 
-type MidiProvider = 'commons' | 'mutopia' | 'archive'
+type MidiProvider = 'commons' | 'mutopia' | 'archive' | 'bitmidi' | 'freemidi'
 type MidiProviderPage = { query: string; entries: MidiSearchResult[]; nextStart: number | null; error: Problem | null }
 type UnifiedMidiResult = { id: string; primary: MidiSearchResult; sources: MidiSearchResult[] }
 
@@ -1420,7 +1925,11 @@ function useMidiProviderSearch(provider: MidiProvider, query: string) {
         ? host.searchMidiCommons(query).then((entries) => ({ entries, nextStart: null }))
         : provider === 'mutopia'
           ? host.searchMidiMutopia(query, 0).then(({ results, nextStart }) => ({ entries: results, nextStart }))
-          : host.searchMidiArchive(query).then((entries) => ({ entries, nextStart: null }))
+          : provider === 'archive'
+            ? host.searchMidiArchive(query).then((entries) => ({ entries, nextStart: null }))
+            : provider === 'bitmidi'
+              ? host.searchMidiBitMidi(query).then((entries) => ({ entries, nextStart: null }))
+              : host.searchMidiFreeMidi(query).then((entries) => ({ entries, nextStart: null }))
       void request.then(
         ({ entries, nextStart }) => {
           if (!stale) setResult({ query, entries, nextStart, error: null })
@@ -1505,24 +2014,33 @@ function MidiSearch({ query, onImport }: {
   const commons = useMidiProviderSearch('commons', query)
   const mutopia = useMidiProviderSearch('mutopia', query)
   const archive = useMidiProviderSearch('archive', query)
+  const bitmidi = useMidiProviderSearch('bitmidi', query)
+  const freemidi = useMidiProviderSearch('freemidi', query)
 
   if (!query) return null
   const providers = [
     { id: 'commons' as const, label: 'Wikimedia Commons', state: commons },
     { id: 'mutopia' as const, label: 'Mutopia', state: mutopia },
     { id: 'archive' as const, label: 'Internet Archive', state: archive },
+    { id: 'bitmidi' as const, label: 'BitMidi', state: bitmidi },
+    { id: 'freemidi' as const, label: 'FreeMIDI', state: freemidi },
   ]
   const results = unifyMidiResults([
     ...(commons.page?.entries ?? []),
     ...(mutopia.page?.entries ?? []),
     ...(archive.page?.entries ?? []),
+    ...(bitmidi.page?.entries ?? []),
+    ...(freemidi.page?.entries ?? []),
   ], query)
-  const waiting = commons.loading || mutopia.loading || archive.loading
+  const waiting = commons.loading || mutopia.loading || archive.loading || bitmidi.loading || freemidi.loading
   return (
     <section className="youtube-results midi-results" aria-label="Public MIDI results"
       aria-busy={waiting || mutopia.moreLoading}>
       <h2 className="lib-h2">Public MIDI <span className="dim num">{results.length || ''}</span></h2>
-      <p className="youtube-help">Only files with a confirmed Public Domain, CC0, CC BY, or CC BY-SA license are offered.</p>
+      <p className="youtube-help">
+        Commons, Mutopia, and Internet Archive results need a confirmed per-file license.
+        BitMidi and FreeMIDI may not list one; import those files only if you have permission to use them.
+      </p>
       <ul className="provider-status-list" aria-label="MIDI search sources">
         {providers.map(({ id, label, state }) => {
           const error = state.page?.error
@@ -1962,7 +2480,7 @@ function SongRow({
             <span className="dim"> · {sourceLine(e)}{e.duration ? ` · ${clock(e.duration)}` : ''}{folderNames.length ? ` · ${folderNames.join(', ')}` : ''}</span>
           </span>
           <span className="song-meta" title={e.source === 'youtube' ? 'The saved analysis, not the model currently selected in settings' : undefined}>
-            {imported ? `${e.source === 'midi' ? 'MIDI' : 'MusicXML'} import${e.attribution ? ` · Credit: ${e.attribution}` : ''}` :
+            {imported ? `${e.source === 'midi' ? 'MIDI' : 'MusicXML'} import${e.provider ? ` · ${e.provider}` : ''}${e.license ? ` · ${e.license}` : ''}${e.attribution ? ` · Credit: ${e.attribution}` : ''}` :
               `Notes: ${modelChoices.find((choice) => choice.id === e.transcriptionModel)?.label ?? 'Model not recorded'}${e.separationMethod ? ` · Stems: ${e.separationMethod === 'htdemucs-6s-onnx' ? 'HT-Demucs' : e.separationMethod}` : ''}`}
           </span>
           {(updating || (e.outdated && !imported)) && <span className="song-analysis" role="status">

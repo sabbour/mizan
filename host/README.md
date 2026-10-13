@@ -1,28 +1,50 @@
 # Mizan desktop host
 
-Requires Python 3.12 ARM64, the Windows WebView2 runtime, and the ARM64
-.NET 10 Desktop Runtime. From the repository root:
+The Python host manages jobs, the local library, and artifact downloads.
+The WinUI 3 shell communicates with the host through JSON standard input and
+output. The host also serves local audio and score files to WebView2.
+
+Development requires Windows ARM64, Python 3.12 ARM64, the .NET 10 SDK, Node.js,
+and the WebView2 Runtime. See the [repository prerequisites](../README.md#run-from-source)
+for the other tools. From the repository root, create the host environment:
 
 ```powershell
-uv venv --python "$env:LOCALAPPDATA\Programs\Python\Python312-arm64\python.exe" host\.venv
+uv venv --seed --python "$env:LOCALAPPDATA\Programs\Python\Python312-arm64\python.exe" host\.venv
 uv pip install --python host\.venv\Scripts\python.exe -e "host[dev]"
+host\.venv\Scripts\python.exe -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
 $env:MIZAN_DEV_URL = "http://localhost:5173"
 host\.venv\Scripts\python -m mizan
 ```
 
+Install FFmpeg separately for YouTube audio.
+Open the [official FFmpeg download page](https://ffmpeg.org/download.html#build-windows).
+Choose a Windows build from one of the providers listed there.
+Download a ZIP package.
+Extract the package, then browse for `bin\ffmpeg.exe` in Song analysis settings
+or enter its full path. The settings field shows the configured path or the
+path found on this PC. Select **Save path** to validate and save a new path.
+Mizan uses this path on this PC. It does not set a path on a cloud worker.
+
+The FFmpeg project provides source code.
+The listed providers supply the Windows executables.
+
+The pinned MuScriptor source install uses `--no-deps`. Its unused upstream
+server and `beat-this` dependencies require `torchaudio`, which has no
+Windows ARM64 wheel.
 The host pins the pending pywebview ARM64/CoreCLR fix until that support is
 available in a release.
 
-Start the Vite server separately. Without `MIZAN_DEV_URL`, the host loads
+Install the UI dependencies with `npm ci` from `ui`, then start Vite in a
+separate terminal. Without `MIZAN_DEV_URL`, the host loads
 `ui\dist\index.html`. Data lives in `%LOCALAPPDATA%\Mizan`; `MIZAN_HOME` overrides
 this location. Downloads, cache, logs, and temporary directories are created
 only when requested.
 The host writes diagnostics to `%LOCALAPPDATA%\Mizan\logs\mizan.log`, or
 `%MIZAN_HOME%\logs\mizan.log` when `MIZAN_HOME` is set. The active log is capped
 at 5 MiB with three rotated backups. Cloud runs record a generated run ID,
-Container Apps execution ID and status changes; failed Azure requests include
-their HTTP status and Azure request ID. Logs do not include access tokens,
-recording audio, or transcript content. Review the log before sharing it.
+provider, remote job ID, and status changes. Azure request errors include an
+HTTP status and Azure request ID. Logs do not include access tokens, recording
+audio, or transcript content. Review the log before sharing it.
 
 For an isolated development library that uses already-downloaded model weights,
 set `MIZAN_MODELS_DIR="$env:LOCALAPPDATA\Mizan\models"` alongside `MIZAN_HOME`.
@@ -35,6 +57,7 @@ handshake error, use the environment's configured pip feed:
 ```powershell
 host\.venv\Scripts\python -m ensurepip
 host\.venv\Scripts\python -m pip install -e "host[dev]"
+host\.venv\Scripts\python -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
 ```
 
 The JS bridge exposes `start_job`, `get_job`, `cancel_job`, `list_jobs`, and
@@ -53,18 +76,21 @@ Unknown jobs return `job_not_found`; invalid instruments return `invalid_instrum
 
 `import_file(name, dataBase64)` uses the existing MIDI/MusicXML parser and library
 path. The UI asks before it imports a MIDI file opened from Windows, selected in
-the picker, or dropped onto the app. `search_midi_commons` and
-`search_midi_mutopia` and `search_midi_archive` are separate provider calls so
-one slow or failed source does not block YouTube or the other MIDI sources.
-They offer only per-file Public Domain, CC0, CC BY, and CC BY-SA results.
-Archive search currently accepts only the exact per-item CC0 URL and only
-original MIDI files with verified size and any listed hashes.
-`import_midi_result` accepts
-only a result returned by those searches, follows HTTPS redirects only on the
-approved provider hosts (including Archive storage subdomains), limits downloads
-to 2 MiB, checks the MIDI header, and then uses the same score-import parser and
-storage path. Imported provider entries retain the source page, artist, license,
-and attribution.
+the picker, or dropped onto the app. `search_midi_commons`, `search_midi_mutopia`, `search_midi_archive`,
+`search_midi_bitmidi`, and `search_midi_freemidi` are separate calls. A slow or
+failed source does not block the others. Commons, Mutopia, and Archive offer
+only files with confirmed per-file Public Domain, CC0, CC BY, or CC BY-SA terms.
+Archive also requires the exact per-item CC0 URL and an original MIDI file with
+verified size and any listed hashes.
+
+BitMidi and FreeMIDI do not list clear per-file licenses. Their results say
+`Not listed by source`. Before either file is downloaded, the user must confirm
+that they have permission to use it. This confirmation is not a license.
+`import_midi_result` accepts only a remembered search result. It checks approved
+HTTPS hosts and redirects, limits downloads to 2 MiB, checks the MIDI header,
+and uses the normal score-import parser and storage path. FreeMIDI downloads use
+the matching file page's download control. Imported entries retain their title,
+source page, provider, artist, license status, and attribution.
 
 Video search also calls `search_youtube_music` independently. It uses yt-dlp
 against `music.youtube.com/search` without credentials, keeps only video IDs,
@@ -72,219 +98,53 @@ and returns canonical YouTube watch URLs for the existing transcription path.
 The UI merges the two video lists by ID and keeps each provider's loading or
 error status visible.
 
-The Library landing page lazily fetches two public YouTube Music playlists in
-parallel through yt-dlp, without credentials or media downloads. The lead
+The Library has separate **Discover**, **Local song catalog**, and **Course**
+tabs. Discover lazily fetches four public YouTube Music playlists in parallel
+through yt-dlp, without credentials or media downloads. The lead
 editorial shelf is **Today's Biggest Hits — The Hit List**; its playlist order
-is not presented as a chart. The secondary **Top 100 Songs Global** playlist
-is published by YouTube Music Global Charts, and its description and playlist
-order provide the chart label and ranks. Each shelf reports its own failure,
-so one unavailable playlist does not hide the other. Successful
-responses are cached in memory for six hours; a complete refresh failure shows
-the last successful snapshot and its date. Cards link to the source video on
-YouTube and YouTube Music, and only the explicit Transcribe button starts work.
+is not presented as a chart. The secondary editorial shelves are **Pop's
+Biggest Hits**, **Classic Rock's Greatest Hits**, and **All-Time Alt**, in
+that order. The native host fetches live playlist entries; only the browser
+development host uses a fixed snapshot marked as development data. All four
+shelves are published by YouTube Music; their descriptions and playlist order
+are editorial, not chart rankings. Each shelf reports its own failure, so one
+unavailable playlist does not hide the others. Successful responses are cached
+in memory for six hours; a complete refresh failure shows the last successful
+snapshot and its date. A card's **Preview** opens one inline YouTube player on
+that selected card; its **Stop** control removes the player. The video title
+and the playlist link remain available as YouTube fallbacks. Only the explicit
+**Transcribe** button starts work. The player sends the app's origin and
+strict referrer; test the browser host at `localhost`, not `127.0.0.1`, which
+YouTube rejected as an embed origin during playback checks.
 
-### Single-user Azure GPU offload
+### Cloud GPU providers
 
-See the editable [Cloud architecture diagram](../docs/cloud-architecture.drawio)
-for setup, the runtime data path, and the preflight boundary.
+Mizan supports This PC and three cloud providers: Azure, Google Cloud,
+and AWS. Each new job saves its provider and non-secret resource
+references when it enters the queue. Switching providers does not redirect an
+existing job.
 
-The bridge exposes `azure_subscriptions() → {ok:true,subscriptions:[{id,name,tenantId}]}` through
-Azure Identity's default credential chain, `cloud_status() → {ok:true, available:boolean, configured:boolean, mode:"local"|"cloud", config?:{tenantId,subscriptionId,resourceGroup,storageAccount,container,jobName,location,registry,vnet,subnet,vnetCidr,subnetCidr,environment,identity}, prepared?:boolean, jobCreated?:boolean, issue?:string}`,
-`configure_cloud(config: dict) → cloud_status` (resource identifiers, no client secret),
-`prepare_cloud(config, consent:true) → {prepared:true, identityPrincipalId, identityClientId, containerScope, registryScope, next}`,
-`build_cloud_worker() → {image,digest}`,
-`finish_cloud(imageDigest, useSavedToken:bool) → {jobCreated:true, configured:false, next}`,
-`set_processing_mode("local"|"cloud") → {ok:true, mode}` and
-`clear_cloud() → cloud_status`. Invalid mode/readiness returns `{ok:false,error:{code:"cloud_failed",message}}`.
-Cloud configuration contains no Azure credential. Sign in with an Azure Identity
-credential available to the packaged app (for example, `az login` with Azure CLI
-installed), then select an accessible subscription in the wizard. Nonsecret
-resource settings and mode are stored in the host SQLite database; Azure
-access tokens are obtained on demand and reused in memory until shortly before
-expiry, never saved to disk.
-Local remains the default. Cloud selection requires valid saved Azure settings,
-a recorded GPU Job, a bundled worker, and a supported model, but does not wait
-for a live Azure check. A revised GPU worker
-can produce original-mix and vocal-stem MuScriptor events plus six HT-Demucs
-WAVs, and the host can validate and import these results without running its
-local separation or transcription. The combined worker produced six verified
-stems and mix/vocal note lists on an A100 GPU with a synthetic recording; the
-full Small-model host path also saved a song at 2/8. T4-profile pilot
-executions still fail before container startup (see the pilot README).
-Wizard provisioning and orphan retention have **not** been verified in live Azure;
-role assignments may require elevated permission or an Azure administrator. The transport deletes
-known files after a terminal failed execution and after a successful library
-save, but retains input when Job start may have succeeded without returning an
-execution name. `cloud_status.available:true` means this build includes the
-Cloud worker; `verifiedModels` currently contains Small, while `supportedModels`
-contains Small, Medium and Large. `configured:false` means this customer's Azure identity
-and Job are not yet ready. A developer's CLI-token
-pilot does **not** verify any customer's Azure identity.
-`set_processing_mode("cloud")` saves processing intent, not Azure readiness.
-Invalid or incomplete local setup returns `cloud_failed`. `configure_cloud`
-validates and stores nonsecret identifiers **without provisioning Azure resources**.
-On successful Cloud selection the host returns the saved local setup snapshot;
-the UI still requires a live access check before it calls Azure ready. If access
-is unknown or a check fails, check the existing Azure setup instead of starting
-new environment provisioning. Model sizes use per-execution budgets in the
-selected Container Apps environment; choosing a larger model does not require a
-new environment. Once selected, Cloud remains selected across restarts and
-temporary readiness failures.
-New analysis and Redo analysis snapshot the selected processing mode and MuScriptor
-size; queued jobs and retries keep that snapshot. A Cloud job that cannot pass
-execution preflight fails explicitly rather than using local model inference.
-Adding a YouTube link creates its queue entry before fetching video metadata;
-inspection errors are reported by that job, and the UI shows pending submission
-and prevents duplicate clicks while the host is accepting it.
-The Song analysis panel checks Azure asynchronously with a 120-second overall
-readiness deadline and shows the current local check stage while it waits.
-Concurrent panel checks share the same read-only verification, and successful
-results are reused for up to 30 seconds; execution preflight still checks Azure
-again before starting GPU work. Closing the panel or choosing
-Cancel check cancels only that request, never provisioning or an analysis job.
-An in-progress Azure credential request may finish in the background, but a
-cancelled or timed-out check does not continue subsequent readiness requests or
-overwrite newer UI state.
-Only after explicit cost consent, `prepare_cloud` creates a dedicated resource
-group in the chosen subscription, private Blob storage/container, a one-day `jobs/` expiry
-policy, authenticated ACR, user-assigned identity and an ACA environment with an
-A100 GPU profile. New setup defaults to a Mizan-managed VNet
-(10.42.0.0/16, delegated 10.42.0.0/23 subnet); Custom VNet prepopulates
-editable VNet/subnet names and private IPv4 address ranges, then creates both
-after approval. Existing saved no-VNet and existing-subnet configurations remain
-supported by the host. Retrying the same saved setup checks all existing
-resource shapes before creating missing infrastructure and leaves
-existing-pilot Job semantics unchanged. This can incur idle costs.
-After cost consent, a new or resumed non-pilot setup also creates or reuses
-`mizan-aca-env-logs` in the same resource group and connects the environment's
-future console and system logs. Log Analytics uses the PerGB2018 SKU and 30-day
-retention; ingestion can add ongoing charges, and logs from past Job runs are
-not backfilled. An existing-pilot setup remains read-only for logging until the
-user separately approves the workspace and ingestion charges. Mizan keeps only
-the workspace resource ID, customer ID and region locally; the shared key stays
-in memory and is sent only in the environment's logging configuration.
-`build_cloud_worker` uploads the small bundled Docker context and schedules
-an Azure Container Registry Linux amd64 build. ACR build time is billable.
-Its resulting immutable SHA-256 image digest is pinned for `finish_cloud`,
-which creates a dormant manual Job using the **lowest tested 2-vCPU/8-GiB
-request**. It does not start a Job. The profile's
-24-vCPU/220-GiB capacity is **not** its minimum request; smaller than 2/8
-has not been validated.
-Azure accepted 8-vCPU/32-GiB, 4-vCPU/16-GiB and 2-vCPU/8-GiB pilot Job
-configurations. The combined worker's eight-second **Small** synthetic run
-succeeded at 4/16 in 166 seconds and a second 2/8 real A100 Job completed
-the full host import/save (six checked stems, analysis, MIDI, MusicXML) and
-remote Blob cleanup without invoking local separation or transcription. An initial
-test asserted cleanup before its async deletion completed; a subsequent
-remote listing showed zero `jobs/` Blobs, and the test now waits for cleanup.
-Large completed a synthetic A100 worker run at 2/8 in 230 seconds, with
-PyTorch CUDA notes, CUDA HT-Demucs and six stems. Its **full host pipeline**
-has not been validated; Medium has not completed a live GPU worker run either.
-All three sizes are selectable for Cloud, with this validation gap disclosed
-in the app; Medium and Large may require more resources.
-Each Cloud execution uses a conservative per-model resource budget: Small 2 vCPU /
-8 GiB, Medium 4 vCPU / 16 GiB, and Large 8 vCPU / 32 GiB. These are policy
-allocations, not measured minimums or proof that a model completes successfully.
-Before starting a run, the host reads the saved Job and builds the request from
-the fields supported by the [2024-03-01 Start API](https://learn.microsoft.com/en-us/rest/api/resource-manager/containerapps/jobs/start?view=rest-resource-manager-containerapps-2024-03-01):
-top-level `containers` and `initContainers`, with container `name`, `image`,
-`args`, `command`, `env` and `resources`. Job-only fields such as `volumes` and
-`scale` are not copied into the start request; neither are unsupported
-`volumeMounts`, probes or read-only `resources.ephemeralStorage`. The existing
-Job and its volume definitions are not patched.
-The host raises only the worker container's resources to the selected budget
-when needed and never reduces a larger existing request.
-Customer preflight checks the deployed Job's CPU/memory against the saved
-requests; changing them requires registering the updated Job.
-Accepted 2/8 and successful Small/Large worker runs do not guarantee lower
-billing. A matching existing 2/8 or 4/16 pilot can be registered without
-changing its resource requests; new Jobs default to 2/8.
-The pilot's validated image digest is
-`sha256:5fe0f3b2fc894a8e9c3079baf3cc59f0f3b297ab049bc730d59882bfb8b79c5a`.
-A build in another registry gets its own digest; the Job must use that
-registry's completed-build digest, not a mutable tag or the pilot digest.
-Existing-job adoption also accepts 8 vCPU / 32 GiB on the same A100 profile.
-Readiness recognizes the authorized upgrade from a saved 2/8 or 4/16 pair to
-8/32 without changing Azure resources or transferring secrets; unchanged
-ephemeral storage, image, identity, secret binding and private-storage checks
-remain required. Other resource mismatches and downgrades remain unready.
-This compatibility is not evidence that Large succeeds or that 32 GiB is its
-minimum memory requirement.
-Sweden Central's stated component rates are $0.000688/GPU-s,
-$0.000024/vCPU-s and $0.000003/GiB-s, roughly $0.000760/s for 2/8 and
-$0.175 for the 230-second Large worker run before other charges; check
-current regional prices and bills.
-The desktop Azure identity needs Blob Data Contributor on the container;
-the Job identity needs Blob Data Contributor on the container and AcrPull
-on the registry. RG Contributor alone cannot grant these roles; if automatic
-role assignments fail, an administrator must grant them at the indicated
-scopes. `finish_cloud` checks the scoped grants and reports missing permissions
-before creating the Job. For a new Job, explicit transfer approval lets the
-host read the previously saved Hugging Face token from Windows Credential Manager
-and send it once to Azure ARM as Job secret `hf-token`, binding
-`HF_TOKEN=secretref:hf-token`; the token never reaches the web UI or host settings.
-Existing-pilot mode checks security settings
-without modifying existing resources. Setup never enables Cloud. Customer
-`configured` requires the current desktop Azure credential to access a Job
-with pinned image, correct manual A100 profile and managed identity, HF
-secret binding, exact scoped Blob/ACR grants, a private HTTPS-only Blob
-container and a successful Blob **data-plane HEAD** using that identity.
-These checks run again before enabling Cloud and on Cloud selection; losing
-permissions or changing the Job resets mode to Local. No first customer
-Cloud Job is required to establish readiness, and no developer-harness
-proof is copied into customer settings.
-Previously queued Cloud jobs fail rather than publishing a locally separated
-score labelled Azure GPU. See
-[`spikes\aca_gpu\README.md`](..\spikes\aca_gpu\README.md) for prerequisites,
-data retention, RBAC, quota and deployment limitations.
-If a Cloud run fails, use the run ID and Azure request ID in `mizan.log` when
-checking Azure diagnostics. The host obtains scoped Azure Identity tokens for
-its Blob and Job requests, but never writes those tokens to the log. The known
-T4 pilot failure occurred before a container started; it is evidence of an ACA
-GPU-profile startup/scheduling problem, not a worker inference failure. The
-pilot evidence does not determine whether regional capacity or another Azure
-platform issue caused it; see the spike README for details.
+Azure keeps its own-account Container Apps GPU Jobs, Blob Storage, and Azure
+Container Registry build path. Google Cloud and AWS use one shared
+public Linux AMD64 CUDA worker image. Its owner and digest are not confirmed or
+published yet. Do not use the placeholder image reference as a working image.
 
-The A100 pilot logs also captured two earlier, image-specific worker failures:
-an ONNX Runtime 1.22 image could not load `libcublasLt.so.12`, and the
-`combined-20260929-linked` image refused separation because HT-Demucs did not
-select CUDA exclusively. The worker now pins ONNX Runtime 1.20.2 with its
-CUDA libraries available and uses the corrected CUDA-provider guard. The
-current A100 Job uses `combined-20260929-a100`, which later succeeded as
-execution `mizan-gpu-transcribe-2cluljy`; those historical failures do not
-indicate that the current image is broken.
+Google Cloud uses authenticated REST API requests. AWS uses the
+`boto3` SDK. Neither runs a cloud CLI to create resources. The wizard finds
+Google Cloud projects through the API and confirms AWS accounts through STS.
+It fills in resource names for review before setup.
 
-At the time of this diagnosis, this desktop's database was still in
-`processing_mode=local`. It had saved Cloud identifiers but no prepared
-environment, registered Job, or runtime verification, so it had not submitted
-a host Cloud run. This local setup state is separate from the historical
-failures recorded by the pilot Job.
+Cloud setup requires explicit approval for resources, permissions, and token
+transfer. Readiness checks do not start GPU jobs. Remote recordings stay in
+the selected account. Mizan deletes result files only after a clean remote
+success and a successful save to the local library. Unknown submissions or
+stop results retain remote files, and Mizan does not retry them automatically.
 
-One background worker runs jobs sequentially. Pipelines receive
-`(job, report(stage, progress), cancelled)` and must check the cancellation event
-during long operations. Progress is a fraction from 0 to 1; completed jobs finish
-at `finalize`, 1. Only completed jobs are reused, keyed by video ID, instrument,
-selected transcription model, and pipeline/model version, including beat/provider overrides. Missing or
-malformed analysis caches are not reused. Jobs inspect/download YouTube audio
-with yt-dlp, decode with FFmpeg, separate candidate stems, transcribe the chosen
-instruments (both piano and drums in auto mode), analyze harmony, generate accompaniment/MIDI, and publish artifacts
-atomically. Host shutdown requests cancellation and waits for the worker.
-Job records and result manifests persist in SQLite; interrupted jobs are not
-automatically resumed. Long recordings receive duration/disk warnings, not a cap.
-
-FFmpeg must be installed separately. The engine looks at `MIZAN_FFMPEG`, `PATH`,
-then the existing Gyan FFmpeg WinGet installation. YouTube extraction is for
-personal use and may break as YouTube changes; access restrictions and download
-errors are surfaced, not bypassed. If YouTube denies a direct audio stream with
-HTTP 403 but offers HLS audio, the downloader retries that stream before failing.
-
-Initial stem levels prioritize work but never exclude auto-mode piano and drums;
-the vocal pass requires an audible isolated vocal stem. Without transcribed
-pitched notes, chord labels and generated accompaniment are withheld.
-Jobs expose `selectedInstruments`, `transcribedInstruments`, and
-`transcriptionQuality` with actual event counts, confidence/energy/timing checks,
-and reasons. Weak results remain playable as tentative/low-confidence drafts;
-empty attempts are reported explicitly.
+Disconnect returns new jobs to Local processing. It does not delete cloud
+resources or stop existing jobs. See [cloud setup](../docs/cloud-setup.md) for
+provider details, model capacity, cost, and validation limits. See the
+[worker image guide](../docs/cloud-worker-image.md) for its first publication
+and anonymous-access check.
 
 The basic command above installs Windows ML's ONNX Runtime build. Install the
 Windows App SDK Runtime if it is not already present; Windows ML uses it to load
@@ -330,10 +190,12 @@ See [ENGINE.md](ENGINE.md) for the exact contract, measured hardware results,
 licenses, historical comparisons, and limitations.
 
 ```powershell
-host\.venv\Scripts\python -m pytest host\tests -q
+Push-Location host
+.\.venv\Scripts\python.exe -m pytest tests -q
 # Include the real-model integration test without network access:
 $env:MIZAN_TEST_MODEL = "$env:LOCALAPPDATA\Mizan\models\basic-pitch-icassp-2022.onnx"
-host\.venv\Scripts\python -m pytest host\tests -q
+.\.venv\Scripts\python.exe -m pytest tests -q
+Pop-Location
 
 host\.venv\Scripts\python -m mizan.engine.providers --output host\provider-benchmark.json
 host\.venv\Scripts\python -m mizan.engine.benchmark --seconds 60 --probe-model-providers --output host\engine-benchmark.json
@@ -341,8 +203,8 @@ host\.venv\Scripts\python -m mizan.engine.benchmark --seconds 60 --probe-model-p
 # Downloads checksum-pinned CC0 source samples, builds a 30-second reference,
 # and runs the normal analysis pipeline with an isolated temporary MIZAN_HOME.
 host\.venv\Scripts\python -m mizan.engine.real_sample_benchmark `
-  --samples <artifact-directory>\samples `
-  --output <artifact-directory>\real-sample-benchmark.json
+  --samples "<artifact-directory>\samples" `
+  --output "<artifact-directory>\real-sample-benchmark.json"
 ```
 
 ### Opt-in piano model comparison
@@ -361,9 +223,9 @@ and Offsets Times* (2020), and ONNX conversion by Mingji Wang.
 ```powershell
 $env:PYTHONPATH = "host"
 host\.venv\Scripts\python -m mizan.engine.kong_piano_benchmark `
-  --reference <artifact-directory>\real-sample-model-comparison.json `
-  --model <artifact-directory>\kong_CRNN_note_F1.0.9677_pedal_F1.0.9186.onnx `
-  --output <artifact-directory>\kong-piano-comparison.json
+  --reference "<artifact-directory>\real-sample-model-comparison.json" `
+  --model "<artifact-directory>\kong_CRNN_note_F1.0.9677_pedal_F1.0.9186.onnx" `
+  --output "<artifact-directory>\kong-piano-comparison.json"
 ```
 
 Both models receive the same **clean piano** and **piano+drums mix** WAVs,
@@ -414,10 +276,10 @@ Run from `host` with the project venv:
 
 ```powershell
 .\.venv\Scripts\python.exe -m mizan.engine.muscriptor_medium_spike `
-  --model-dir "$env:USERPROFILE\.copilot\session-state\<session-id>\files\muscriptor-medium-spike\w4a32_optimized" `
-  --reference "$env:USERPROFILE\.copilot\session-state\<session-id>\files\real-sample-model-comparison.json" `
+  --model-dir "<artifact-directory>\muscriptor-medium-spike\w4a32_optimized" `
+  --reference "<artifact-directory>\real-sample-model-comparison.json" `
   --seconds 30 --threads 12 `
-  --output "$env:USERPROFILE\.copilot\session-state\<session-id>\files\muscriptor-medium-spike\thirty-second-12threads-report.json"
+  --output "<artifact-directory>\muscriptor-medium-spike\thirty-second-12threads-report.json"
 ```
 
 On Windows ARM64 with 8 CPU threads, all six chunks reached EOS (251 model
@@ -490,7 +352,7 @@ No weights are installed or bundled.
 Run from `host` after placing the public files outside Git:
 
 ```powershell
-$work = "$env:USERPROFILE\.copilot\session-state\<session-id>\files"
+$work = "<artifact-directory>"
 $graph = "$work\muscriptor-medium-fp16-graph"
 $reference = "$work\real-sample-model-comparison.json"
 .\.venv\Scripts\python.exe -m mizan.engine.muscriptor_fp16_spike `
@@ -596,7 +458,7 @@ The opt-in command (also from `host`); the copied fixture report and verified
 checkpoint directory must already exist outside Git:
 
 ```powershell
-$work = "$env:USERPROFILE\.copilot\session-state\<session-id>\files"
+$work = "<artifact-directory>"
 .\.venv\Scripts\python.exe -m mizan.engine.muscriptor_large_spike `
   --model-dir "$work\muscriptor-large-official" `
   --reference "$work\real-sample-model-comparison.json" `

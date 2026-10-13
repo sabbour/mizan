@@ -160,6 +160,24 @@ class JobStore:
             """, (model,))
         return model
 
+    def get_ffmpeg_path(self) -> str | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = 'ffmpeg_path'").fetchone()
+        return row[0] if row else None
+
+    def set_ffmpeg_path(self, path: str | None) -> None:
+        if path is not None and (type(path) is not str or not path):
+            raise ValueError("FFmpeg path must be a non-empty string or None.")
+        with closing(self._connect()) as connection, connection:
+            if path is None:
+                connection.execute("DELETE FROM settings WHERE key = 'ffmpeg_path'")
+            else:
+                connection.execute("""
+                    INSERT INTO settings (key, value) VALUES ('ffmpeg_path', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """, (path,))
+
     @staticmethod
     def _job(row) -> Job:
         job = dict(row)
@@ -174,7 +192,8 @@ class JobStore:
     def create(self, video_id: str, url: str, instrument: str, version: str, *,
                kind: str = "transcribe", song_id: str | None = None,
                metadata: dict | None = None, reuse: bool = True,
-               processing_mode: str = "local", transcription_model: str | None = None) -> Job:
+               processing_mode: str = "local", transcription_model: str | None = None,
+               cloud_provider: str | None = None, cloud_target: dict | None = None) -> Job:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             setting = connection.execute(
@@ -189,8 +208,10 @@ class JobStore:
                         AND (song_id IS ? OR (song_id IS NULL AND ? IS NOT NULL))
                         AND status IN ('queued', 'running')
                         AND COALESCE(json_extract(details, '$.processingMode'), 'local') = ?
+                        AND COALESCE(json_extract(details, '$.cloudProvider'), 'azure') = ?
                     ORDER BY (song_id IS NULL), created_at LIMIT 1
-                """, (video_id, instrument, model, song_id, song_id, processing_mode)).fetchone()
+                """, (video_id, instrument, model, song_id, song_id, processing_mode,
+                      cloud_provider if cloud_provider is not None else "azure")).fetchone()
                 if active is not None:
                     if song_id and not active["song_id"]:
                         connection.execute("UPDATE jobs SET song_id = ? WHERE id = ?", (song_id, active["id"]))
@@ -227,6 +248,10 @@ class JobStore:
                 details["metadata"] = metadata
             if processing_mode == "cloud":
                 details["processingMode"] = "cloud"
+                if cloud_provider is not None:
+                    details["cloudProvider"] = cloud_provider
+                if cloud_target is not None:
+                    details["cloudTarget"] = cloud_target
             connection.execute("""
                 INSERT INTO jobs (id, video_id, url, instrument, kind, song_id, title,
                     thumbnail, stage, status, progress, order_index, dismissed, error_code,
@@ -381,13 +406,18 @@ class JobRunner:
 
     def _enqueue(self, video_id: str, url: str, instrument: str, **kwargs) -> Job:
         cloud = False
+        cloud_provider = None
+        cloud_target = None
         model = self.store.get_transcription_model()
         if kwargs.get("kind", "transcribe") == "transcribe":
             from .cloud import selected
             cloud = selected()
             if cloud:
-                from .cloud import require_model
-                require_model(model)
+                from .cloud import require_model, selected_provider
+                cloud_provider = selected_provider()
+                require_model(model, provider=cloud_provider)
+                from .cloud import provider_target
+                cloud_target = provider_target(cloud_provider)
             if not cloud:
                 from .engine.muscriptor import check_model_resources
                 check_model_resources(model)
@@ -396,7 +426,8 @@ class JobRunner:
                 raise MizanError("The job runner has shut down.")
             job = self.store.create(video_id, url, instrument, self.pipeline_version,
                                     processing_mode="cloud" if cloud else "local",
-                                    transcription_model=model, **kwargs)
+                                    transcription_model=model, cloud_provider=cloud_provider,
+                                    cloud_target=cloud_target, **kwargs)
             if job["status"] == "queued":
                 self._events.setdefault(job["id"], Event())
                 self._condition.notify()
@@ -454,6 +485,12 @@ class JobRunner:
             if job["details"].get("processingMode") != "cloud":
                 from .engine.muscriptor import check_model_resources
                 check_model_resources(job["transcription_model"])
+            else:
+                from .cloud import provider_for_job, validate_provider_target
+                provider = provider_for_job(job["details"].get("cloudProvider"))
+                target = job["details"].get("cloudTarget")
+                if target is not None:
+                    validate_provider_target(target, provider)
         with self._condition:
             job = self.store.retry(job_id)
             self._events[job_id] = Event()
@@ -510,20 +547,40 @@ class JobRunner:
             if event.is_set() or queued["status"] != "queued":
                 return
             details = queued["details"]
+            if details.get("processingMode") == "cloud":
+                from .cloud import provider_for_job, validate_provider_target
+                try:
+                    provider = provider_for_job(details.get("cloudProvider"))
+                    details["cloudProvider"] = provider
+                    target = details.get("cloudTarget")
+                    if target is not None:
+                        validate_provider_target(target, provider)
+                except MizanError as exc:
+                    details["finishedAt"] = now()
+                    self.store.update(job_id, status="failed", error=exc, details=details)
+                    return
             attempt_started_at = now()
             queue_wait = _elapsed_seconds(details.get("attemptQueuedAt"), attempt_started_at)
             execution_started = time.perf_counter()
             details["startedAt"] = attempt_started_at
             for key in ("finishedAt", "elapsedSeconds", "cloudElapsedSeconds",
                         "stageStartedAt", "timingStage", "stageProgressMeasured",
-                        "stageMessage", "cloudFiles", "activeStage"):
+                        "stageMessage", "cloudFiles", "activeStage", "found", "previewArtifacts"):
                 details.pop(key, None)
             self.store.update(job_id, status="running", details=details)
             job = self.store.get(job_id)
 
         def report(stage: str, progress: float, *, measured: bool = False,
-                   message: str | None = None) -> None:
+                   message: str | None = None, cloud_job: dict | None = None) -> None:
             with self._lock:
+                if cloud_job is not None:
+                    from .cloud import CloudError, validate_remote_job
+                    if job["details"].get("processingMode") != "cloud":
+                        raise CloudError("A Local job cannot record a Cloud job identifier.")
+                    job["details"]["cloudJob"] = validate_remote_job(
+                        cloud_job, job["details"].get("cloudProvider", "azure"))
+                    # A remote submission can finish after cancellation was requested.
+                    self.store.update(job_id, details=job["details"])
                 if event.is_set():
                     raise Cancelled()
                 if stage not in ALL_STAGES or not isinstance(progress, (int, float)) \
@@ -554,6 +611,8 @@ class JobRunner:
             error = MizanError()
 
         cleanup_names = None
+        cloud_provider = (job["details"].get("cloudProvider", "azure")
+                          if job["details"].get("processingMode") == "cloud" else None)
 
         def finished_details(details: dict) -> dict:
             finished_at = now()
@@ -588,7 +647,7 @@ class JobRunner:
                         if entry:
                             song_id = entry["id"]
                         elif details.get("cloudFiles"):
-                            raise MizanError("Cloud output was not saved to the library; Azure files were retained.")
+                            raise MizanError("Cloud output was not saved to the library; remote files were retained.")
                     details = finished_details(details)
                     self.store.update(job_id, status="done", stage="finalize", progress=1,
                                       details=details, song_id=song_id)
@@ -597,12 +656,16 @@ class JobRunner:
                     logger.exception("Could not save result for job %s", job_id)
                     details = finished_details(details)
                     self.store.update(job_id, status="failed",
-                                      error=MizanError("Could not save the song to the library; Azure files were retained."),
+                                      error=MizanError("Could not save the song to the library; remote Cloud files were retained."),
                                       details=details)
         if cleanup_names:
             from .cloud import cleanup
             try:
-                cleanup(cleanup_names)
+                target = job["details"].get("cloudTarget")
+                if target is None:
+                    cleanup(cleanup_names, provider=cloud_provider)
+                else:
+                    cleanup(cleanup_names, provider=cloud_provider, target=target)
             except Exception:
                 logger.exception("Cloud files could not be removed after saving job %s", job_id)
             else:

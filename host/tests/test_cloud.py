@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mizan import cloud, cloud_auth, logging_setup
+from mizan import azure_cloud as cloud, cloud as cloud_facade, cloud_auth, logging_setup
 from mizan.api import Api
 from mizan.jobs import JobRunner, JobStore
 
@@ -38,9 +38,9 @@ def signed_in(monkeypatch):
                "scp": "user_impersonation", "exp": 2147483647}
     access = f"header.{base64.urlsafe_b64encode(json.dumps(subject).encode()).decode().rstrip('=')}.sig"
     monkeypatch.setattr(cloud, "token", lambda scope, tenant=None, expected_oid=None: access)
-    cloud.clear()
+    cloud_facade.clear()
     yield enable_log_analytics
-    cloud.clear()
+    cloud_facade.clear()
 
 
 def test_subscription_bridge_lists_signed_in_user_and_handles_failure(monkeypatch):
@@ -72,7 +72,8 @@ def test_log_analytics_api_forwards_explicit_consent(monkeypatch):
     finally:
         runner.close()
     assert calls == [True]
-    assert result == {"ok": True, "workspaceId": "/workspace", "location": "italynorth"}
+    assert result == {"ok": True, "workspaceId": "/workspace", "location": "italynorth",
+                      "provider": "azure", "providerName": "Azure"}
 
 
 def test_progress_bridge_can_be_polled_while_discovery_blocks(monkeypatch):
@@ -138,7 +139,7 @@ def test_build_cloud_worker_bridge_returns_only_pinned_image_and_digest(monkeypa
     runner = JobRunner(JobStore(), pipeline=lambda *args: {})
     try:
         assert Api(runner).build_cloud_worker() == {
-            "ok": True, "image": image, "digest": digest}
+            "ok": True, "image": image, "digest": digest, "provider": "azure"}
     finally:
         runner.close()
 
@@ -256,11 +257,13 @@ def test_configure_rejects_sp_secrets_and_foreign_subscriptions(signed_in):
     assert "config" not in cloud.status()
     saved = cloud.configure({key: value for key, value in SETUP.items() if key != "tenantId"})
     assert saved["config"] == {
-        **SETUP, "subnetResourceId": "", "vnetCidr": "10.42.0.0/16", "subnetCidr": "10.42.0.0/23"}
+        **SETUP, "provider": "azure", "subnetResourceId": "",
+        "vnetCidr": "10.42.0.0/16", "subnetCidr": "10.42.0.0/23"}
     assert not saved["prepared"] and not saved["configured"]
     assert "private-secret" not in cloud._setting("cloud_config")
     assert "userObjectId" in cloud._setting("cloud_config")
     assert "userObjectId" not in saved["config"]
+    assert json.loads(cloud._setting("cloud_config"))["provider"] == "azure"
     with pytest.raises(cloud.CloudError, match="not complete"):
         cloud.set_mode("cloud")
 
@@ -2021,7 +2024,8 @@ def test_import_copies_untagged_pinned_manifest_and_verifies_identity(signed_in,
         runner.close()
     assert result == {"ok": True, "image": "mizanregistry.azurecr.io/mizan-aca-gpu@"
                       + cloud.SUPPORTED_WORKER_DIGEST,
-                      "digest": cloud.SUPPORTED_WORKER_DIGEST, "verified": True}
+                      "digest": cloud.SUPPORTED_WORKER_DIGEST, "verified": True,
+                      "provider": "azure", "providerName": "Azure"}
     imported = next(body for method, path, version, body in calls if method == "POST")
     assert imported == {
         "source": {"registryUri": "registry.example.com",
@@ -2108,7 +2112,8 @@ def test_build_bundles_exact_worker_and_pins_actual_acr_digest(signed_in, monkey
             assert cloud.setup_progress()["stage"] == "upload"
             assert cloud.setup_progress()["completed"] == 1
             with tarfile.open(fileobj=BytesIO(request.data), mode="r:gz") as archive:
-                assert {entry.name for entry in archive} == {"Dockerfile", "worker.py"}
+                assert {entry.name for entry in archive} == {
+                    "Dockerfile", "worker.py", "storage.py", "LICENSE"}
                 for name, content in cloud._worker_source()[0].items():
                     assert archive.extractfile(name).read() == content
             return BytesIO(b"")
@@ -2265,6 +2270,16 @@ def test_worker_image_resume_requires_selected_registry_and_current_source(signe
     cloud.configure({**SETUP, "registry": "otherregistry"})
     assert not cloud._setting("cloud_built_image")
     assert cloud.status()["workerImage"] is None
+
+
+def test_azure_build_record_accepts_legacy_worker_source_hash(signed_in):
+    cloud.configure(SETUP)
+    image = "mizanregistry.azurecr.io/mizan-aca-gpu@sha256:" + "a" * 64
+    cloud._setting("cloud_built_image", json.dumps({
+        "image": image, "sourceHash": cloud.LEGACY_AZURE_SOURCE_HASH}))
+
+    assert cloud.status()["workerImage"] == image
+    assert cloud._image_digest(SETUP, image) == "sha256:" + "a" * 64
 
 
 def test_private_blob_preflight_uses_current_user(signed_in, monkeypatch):

@@ -658,6 +658,7 @@ def test_cancel_stops_just_this_execution(monkeypatch, tmp_path):
     transport = CloudTransport(CONFIG)
     calls = []
     cancelled = Event()
+    remote_jobs = []
     monkeypatch.setattr(transport, "_put", lambda *args, **kwargs: None)
     monkeypatch.setattr(transport, "delete", lambda names: calls.append(("DELETE", names)))
 
@@ -671,10 +672,20 @@ def test_cancel_stops_just_this_execution(monkeypatch, tmp_path):
         return {}, None
 
     monkeypatch.setattr(transport, "_arm", arm)
+    def report(_stage, _progress, **kwargs):
+        if "cloud_job" in kwargs:
+            remote_jobs.append(kwargs["cloud_job"])
+            assert cancelled.is_set()
+            raise Cancelled()
     with pytest.raises(Cancelled):
-        transport.run(tmp_path / "source.wav", tmp_path, "muscriptor-small", cancelled,
-                      lambda *args, **kwargs: None)
+        transport.run(tmp_path / "source.wav", tmp_path, "muscriptor-small", cancelled, report)
     assert ("POST", "/executions/gpu-abcd1234/stop") in calls
+    assert remote_jobs == [{
+        "provider": "azure", "id": "gpu-abcd1234",
+        "prefix": calls[-1][1][0].removesuffix("/input.wav"),
+    }]
+    assert not any(method == "GET" and suffix.startswith("/executions/")
+                   for method, suffix in calls if isinstance(suffix, str))
     assert any(call[0] == "DELETE" for call in calls)
 
 

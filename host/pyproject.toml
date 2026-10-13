@@ -23,6 +23,8 @@ dependencies = [
     "huggingface-hub==1.32.0",
     "azure-identity>=1.20,<2",
     "azure-containerregistry>=1.2,<2",
+    "boto3==1.40.27",
+    "google-auth[requests]==2.41.1",
     "cryptography==46.0.3",
 ]
 
@@ -38,4 +40,4 @@ probe = ["onnx==1.23.0"]
 include = ["mizan*"]
 
 [tool.setuptools.package-data]
-mizan = ["*.runtimeconfig.json", "assets/*.ico", "cloud_worker/Dockerfile", "cloud_worker/worker.py"]
+mizan = ["*.runtimeconfig.json", "assets/*.ico", "cloud_worker/Dockerfile", "cloud_worker/*.py", "cloud_worker/LICENSE"]

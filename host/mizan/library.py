@@ -413,7 +413,11 @@ def _rights(entry: dict) -> dict:
         rights = json.loads(Path(path).read_text(encoding="utf-8")) if path else {}
     except (OSError, ValueError):
         rights = {}
-    return {"license": rights.get("license"), "attribution": rights.get("attribution")}
+    return {
+        "license": rights.get("license"),
+        "attribution": rights.get("attribution"),
+        "provider": rights.get("provider"),
+    }
 
 
 def public_entry(entry: dict, pipeline_version: str) -> dict:

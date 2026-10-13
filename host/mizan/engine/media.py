@@ -3,20 +3,25 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from threading import Event
 import time
 import warnings
 
 from scipy.io.wavfile import WavFileWarning
 
-from ..errors import DownloadFailed, InsufficientDisk, UnsupportedMedia, VideoUnavailable
+from ..errors import DownloadFailed, FFmpegUnavailable, InsufficientDisk, UnsupportedMedia, VideoUnavailable
+from ..paths import home
 from .audio import read_audio
 from .providers import check_cancel
 
 logger = logging.getLogger(__name__)
+FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/"
 
 
 def copy_decoded(source: Path, output: Path, cancelled: Event) -> float:
@@ -47,20 +52,100 @@ def copy_decoded(source: Path, output: Path, cancelled: Event) -> float:
     return audio.duration
 
 
-def ffmpeg_path() -> str:
+def _saved_ffmpeg_path() -> str | None:
+    if not os.environ.get("MIZAN_HOME") and not os.environ.get("LOCALAPPDATA"):
+        return None
+    database = home() / "mizan.db"
+    if not database.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(database, timeout=1)) as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = 'ffmpeg_path'").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: settings" in str(exc).lower():
+            return None
+        raise FFmpegUnavailable("Mizan could not read the saved FFmpeg path.") from exc
+    return row[0] if row else None
+
+
+def _normalize_ffmpeg_path(value: str, *, require_absolute: bool) -> str:
+    if type(value) is not str:
+        raise FFmpegUnavailable("Enter the full path to ffmpeg.exe.")
+    value = value.strip()
+    if value.startswith('"') and value.endswith('"') and len(value) >= 2:
+        value = value[1:-1].strip()
+    elif '"' in value:
+        raise FFmpegUnavailable("Remove unmatched quotes from the FFmpeg path.")
+    if not value:
+        raise FFmpegUnavailable("Enter the full path to ffmpeg.exe.")
+    path = Path(value)
+    if require_absolute and not path.is_absolute():
+        raise FFmpegUnavailable("Enter a full absolute path to ffmpeg.exe.")
+    if not path.is_file():
+        raise FFmpegUnavailable(f"FFmpeg was not found at {value}.")
+    return str(path)
+
+
+def validate_ffmpeg_executable(value: str, *, require_absolute: bool = False) -> str:
+    executable = _normalize_ffmpeg_path(value, require_absolute=require_absolute)
+    try:
+        result = subprocess.run(
+            [executable, "-version"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FFmpegUnavailable("FFmpeg did not respond to -version within 5 seconds.") from exc
+    except OSError as exc:
+        raise FFmpegUnavailable(f"FFmpeg could not start: {exc}") from exc
+    version = (result.stdout or "") + "\n" + (result.stderr or "")
+    if result.returncode != 0 or not re.search(r"(?im)^ffmpeg version\s+\S+", version):
+        raise FFmpegUnavailable("The selected file is not a working FFmpeg executable.")
+    return executable
+
+
+def _winget_ffmpeg_path() -> str | None:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    package = Path(local_app_data) / "Microsoft" / "WinGet" / "Packages" / (
+        "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe")
+    candidates = sorted(package.glob("ffmpeg-*-full_build/bin/ffmpeg.exe"))
+    return str(candidates[-1]) if candidates else None
+
+
+def _resolve_ffmpeg_path(configured: str | None) -> str:
+    if configured is not None:
+        return validate_ffmpeg_executable(configured, require_absolute=True)
     override = os.environ.get("MIZAN_FFMPEG")
     if override:
-        if not Path(override).is_file():
-            raise UnsupportedMedia("MIZAN_FFMPEG does not point to an executable file.")
-        return override
+        return validate_ffmpeg_executable(override)
     executable = shutil.which("ffmpeg")
     if executable:
-        return executable
-    package = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    candidates = sorted(package.glob(r"ffmpeg-*-full_build\bin\ffmpeg.exe"))
-    if candidates:
-        return str(candidates[-1])
-    raise UnsupportedMedia("FFmpeg was not found. Install FFmpeg or set MIZAN_FFMPEG to ffmpeg.exe.")
+        return validate_ffmpeg_executable(executable)
+    winget = _winget_ffmpeg_path()
+    if winget:
+        return validate_ffmpeg_executable(winget)
+    raise FFmpegUnavailable(
+        "FFmpeg was not found. Download it from "
+        f"{FFMPEG_DOWNLOAD_URL} and choose bin\\ffmpeg.exe in Song analysis settings.")
+
+
+def ffmpeg_path() -> str:
+    return _resolve_ffmpeg_path(_saved_ffmpeg_path())
+
+
+def ffmpeg_status() -> dict[str, str | bool | None]:
+    configured = None
+    try:
+        configured = _saved_ffmpeg_path()
+        effective = _resolve_ffmpeg_path(configured)
+        return {"configuredPath": configured, "effectivePath": effective,
+                "available": True, "issue": None}
+    except FFmpegUnavailable as exc:
+        return {"configuredPath": configured, "effectivePath": None,
+                "available": False, "issue": str(exc)}
 
 
 def run_command(command: list[str], directory: Path, cancelled: Event, error_type, progress=None) -> str:
@@ -136,6 +221,7 @@ def preflight(metadata: dict, directory: Path) -> list[str]:
 
 def download_video(url: str, directory: Path, cancelled: Event, progress=None) -> Path:
     command = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
+               "--ffmpeg-location", ffmpeg_path(),
                "-f", "bestaudio/best", "--newline", "--progress",
                "--progress-template", "download:progress:%(progress._percent_str)s",
                "--print", "after_move:filepath", "--no-simulate",

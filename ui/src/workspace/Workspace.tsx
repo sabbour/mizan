@@ -7,15 +7,19 @@ import { barAt, barStart, measures } from './meter'
 import { buildSong, chordAt, hasPitchedScore, invert, sectionAt, slash, smoothInversions, type Instrument, type Song, type Track } from './song'
 import type { Position, Stem } from '../library/bridge'
 import { ArrowLeft } from 'lucide-react'
-import { creativeTracks, HARMONY_DEFAULT, type HarmonyOptions } from './creative'
-import { HarmonyLineView } from './HarmonyLineView'
 import { Transport } from './Transport'
 import { TrackPicker } from './TrackPicker'
 import { ChordView, type ChordMode } from './ChordView'
-import { PracticeViewPicker, type PracticeView } from './PracticeViewPicker'
+import { PracticeViewPicker, type PracticeInstrument, type PracticeView } from './PracticeViewPicker'
 import { ChordChart } from './ChordChart'
 import { DrumKitView } from './DrumKitView'
 import { PianoView } from './PianoView'
+import { GuitarView } from './GuitarView'
+import { BassView } from './BassView'
+import { GuitarTabView } from './GuitarTabView'
+import { BassTabView } from './BassTabView'
+import { isGuitarTrack } from './guitar'
+import { isBassTrack } from './bass'
 import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
 import './workspace.css'
@@ -34,7 +38,7 @@ type Props = {
   onDeleteTrack?: (trackId: string) => Promise<void>
   analysisNotice?: ReactNode
   /** Starting choices when the player has not saved preferences, e.g. a drum lesson opens with the 3D kit. */
-  defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView; noteNames?: boolean; fingering?: boolean }
+  defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView; guitar?: PracticeView; bass?: PracticeView; noteNames?: boolean; fingering?: boolean }
   /** Told when Note letters or Fingering change, so the next lesson can keep them. */
   onGuides?: (guides: { noteNames: boolean; fingering: boolean }) => void
 }
@@ -43,6 +47,26 @@ const DEMO = buildSong()
 const EMPTY_STEMS: Stem[] = []
 
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
+
+function FrettedPractice({ song, track, engine, instrument, view }: {
+  song: Song; track: Track; engine: Engine; instrument: 'guitar' | 'bass'; view: PracticeView
+}) {
+  const [transport, setTransport] = useState(() => engine.read())
+  const [handedness, setHandedness] = useState(() => loadPrefs().frettedHandedness ?? 'right')
+  useFrame(engine, (next) => {
+    if (next.beat !== transport.beat || next.playing !== transport.playing || next.countingIn !== transport.countingIn)
+      setTransport(next)
+  })
+  const Tab = instrument === 'guitar' ? GuitarTabView : BassTabView
+  const props = { song, track, beat: transport.beat, playing: transport.playing,
+    countingIn: transport.countingIn, onPick: (beat: number) => engine.seek(beat) }
+  if (view === 'tab') return <Tab {...props} />
+  const PhysicalView = instrument === 'guitar' ? GuitarView : BassView
+  return <PhysicalView {...props} handedness={handedness} onHandednessChange={(value) => {
+    setHandedness(value)
+    savePref('frettedHandedness', value)
+  }} />
+}
 
 export function Workspace({
   song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onGuides,
@@ -70,9 +94,11 @@ export function Workspace({
   // Chord style and voicing belong to the Chords track; the other tracks always show chord names.
   const [chordMode, setChordMode] = useState<ChordMode>('names')
   // A view choice only; it never touches the engine, so playback, mixer and position carry on.
-  const [practice, setPractice] = useState<{ piano: PracticeView; drums: PracticeView }>({
-    piano: prefs.pianoView ?? defaults?.piano ?? 'score',
+  const [practice, setPractice] = useState<Record<PracticeInstrument, PracticeView>>({
+    piano: prefs.pianoView ?? defaults?.piano ?? 'hands',
     drums: prefs.drumsView ?? defaults?.drums ?? 'score',
+    guitar: prefs.guitarView ?? defaults?.guitar ?? 'fretboard',
+    bass: prefs.bassView ?? defaults?.bass ?? 'fretboard',
   })
   const [noteNames, setNoteNames] = useState(defaults?.noteNames ?? false)
   // Finger numbers on the piano keyboards; on unless the player turned them off.
@@ -90,28 +116,25 @@ export function Workspace({
     })
     return { ...song, chords }
   }, [song, smooth])
-  // Generated play-along parts, listed under "Creative" after the transcribed tracks.
-  const [harmony, setHarmony] = useState<HarmonyOptions>(HARMONY_DEFAULT)
-  const creative = useMemo(() => creativeTracks(song, harmony), [song, harmony])
-  const tracks = useMemo<Track[]>(() => [...song.tracks, ...creative], [song, creative])
+  const tracks = useMemo<Track[]>(() => song.tracks.filter((item) => item.group !== 'creative'), [song])
   const track = tracks.find((t) => t.id === trackId) ?? tracks[0]
-  const part = creative.find((t) => t.id === track?.id)
   const instrument: Instrument = track?.instrument ?? 'piano'
+  const practiceInstrument: PracticeInstrument | null = instrument === 'piano' || instrument === 'drums' ? instrument
+    : instrument === 'other' && track ? isBassTrack(track) ? 'bass' : isGuitarTrack(track) ? 'guitar' : null : null
+  const frettedInstrument = practiceInstrument === 'guitar' || practiceInstrument === 'bass' ? practiceInstrument : null
   const pitched = instrument !== 'drums'
   // Chord-based tracks can be read as notes (Names) or as a chord chart (Shapes); melodic parts read like their instrument.
   const playAlong = !!track?.chordal
   const chart = playAlong && chordMode === 'shapes'
-  // The song as this track reads it: a creative part brings its own notes and chords.
   const viewed = useMemo(
     () => {
-      if (part) return { ...song, chords: part.chords, piano: part.piano }
       if (instrument === 'chords') return voiced
       if (instrument === 'other') return song
       if (!track || !song.tracks.some((item) => item.id === track.id && item.group !== 'creative')) return song
       if (song.tracks.filter((item) => item.instrument === instrument && item.group !== 'creative').length < 2) return song
       return { ...song, [instrument]: song[instrument].filter((event) => event.trackId === track.id) }
     },
-    [song, voiced, part, instrument, track],
+    [song, voiced, instrument, track],
   )
   // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
   const kitPane = !chart && instrument === 'drums' && practice.drums === 'kit'
@@ -126,7 +149,6 @@ export function Workspace({
     if (instrument === 'other' && track) return instrumentXml(viewed, track)
     return pianoXml(viewed)
   }, [viewed, song, instrument, chart, track, sticking])
-  // Play-along parts start muted: read one while the recording plays, unmute to hear it.
   const storageKey = `mizan:mixer:${songId}`
   const stored = useMemo<StoredMixer | null>(() => {
     try {
@@ -151,7 +173,6 @@ export function Workspace({
   const restoredSolo = stored?.soloId && mixerIds.includes(stored.soloId) ? stored.soloId : undefined
   const defaultMuted = useMemo(() => [
     ...(start?.muted ?? []),
-    ...tracks.filter((track) => track.group === 'creative').map((track) => track.id),
     ...visibleStems.map((stem) => `stem:${stem.id}`),
   ], [tracks, start, visibleStems])
   const [muted, setMuted] = useState<ReadonlySet<string>>(() => {
@@ -218,10 +239,9 @@ export function Workspace({
     // Chords whose voicing differs from the detected one (smooth voicing) play as shown.
     const swaps = new Map<number, number[]>()
     voiced.chords.forEach((c, i) => c.tones !== song.chords[i].tones && swaps.set(i, c.tones))
-    const extras = creative.map((t) => ({ id: t.id, notes: t.piano }))
-    Object.assign(engine, { rate, loop, click, swaps, extras })
+    Object.assign(engine, { rate, loop, click, swaps })
     engine.refresh()
-  }, [engine, rate, loop, click, voiced, song, creative])
+  }, [engine, rate, loop, click, voiced, song])
   useEffect(() => {
     Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)) })
     engine.refreshMix()
@@ -356,6 +376,13 @@ export function Workspace({
   const toggleSticking = useCallback(() => setShowSticking((on) => { savePref('sticking', !on); return !on }), [])
   // A look only: the engine, position and sounds are untouched.
   const chooseKitStyle = useCallback((style: KitStyle) => { setKitStyle(style); savePref('kitStyle', style) }, [])
+  const choosePractice = (part: PracticeInstrument, view: PracticeView) => {
+    setPractice((current) => ({ ...current, [part]: view }))
+    if (part === 'piano' && (view === 'score' || view === 'hands' || view === 'keyboard')) savePref('pianoView', view)
+    if (part === 'drums' && (view === 'score' || view === 'kit')) savePref('drumsView', view)
+    if ((part === 'guitar' || part === 'bass') && (view === 'score' || view === 'tab' || view === 'fretboard'))
+      savePref(part === 'guitar' ? 'guitarView' : 'bassView', view)
+  }
   const setVolume = useCallback((id: string, value: number) => {
     setVolumes((current) => ({ ...current, [id]: Math.max(0, Math.min(1.25, value)) }))
   }, [])
@@ -427,7 +454,7 @@ export function Workspace({
   }, [togglePlay, toggleLoop, toggleClick, jump, pos.bar, pos.chordIdx, rate, setSpeed, toggleMute, toggleSolo, track, pitched, instrument, playAlong])
 
   return (
-    <div className="ws" data-instrument={instrument}>
+    <div className="ws" data-instrument={instrument} data-practice-instrument={practiceInstrument ?? undefined}>
       <header className="ws-head">
         <div className="ws-title">
           {onBack && (
@@ -466,13 +493,9 @@ export function Workspace({
         {playAlong && (
           <ChordView value={chordMode} onChange={setChordMode} smooth={instrument === 'chords' ? smooth : null} onSmooth={() => setSmooth((v) => !v)} />
         )}
-        {track?.id === 'harmony-line' && <HarmonyLineView value={harmony} onChange={setHarmony} />}
-        {!chart && (instrument === 'piano' || instrument === 'drums') && (
-          <PracticeViewPicker instrument={instrument} value={practice[instrument]}
-            onChange={(view) => {
-              setPractice((current) => ({ ...current, [instrument]: view }))
-              savePref(instrument === 'piano' ? 'pianoView' : 'drumsView', view)
-            }} />
+        {!chart && practiceInstrument && (
+          <PracticeViewPicker instrument={practiceInstrument} value={practice[practiceInstrument]}
+            onChange={(view) => choosePractice(practiceInstrument, view)} />
         )}
         <TrackPicker
           tracks={tracks}
@@ -499,7 +522,9 @@ export function Workspace({
       {audioError && <div className="audio-error" role="alert">{audioError}</div>}
       {audioLoading && <div className="audio-error" role="status">Preparing sounds...</div>}
 
-      {kitPane ? (
+      {frettedInstrument && track && practice[frettedInstrument] !== 'score' ? (
+        <FrettedPractice song={viewed} track={track} engine={engine} instrument={frettedInstrument} view={practice[frettedInstrument]} />
+      ) : kitPane ? (
         <div className="ws-split">
           <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={false} instrument="drums" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="kit" onPick={pick} previewId={track?.id ?? 'chords'} />
           {/* The 3D kit sits beside the score, outside it, so redrawing the score never restarts the kit. */}

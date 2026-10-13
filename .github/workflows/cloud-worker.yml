@@ -1,0 +1,79 @@
+name: Cloud worker image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and publish Linux AMD64 image
+        id: image
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ github.token }}
+          GH_USER: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$owner" =~ ^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?$ ]]; then
+            echo "The GitHub repository owner is invalid." >&2
+            exit 1
+          fi
+          source_hash="$(PYTHONPATH=host python -c \
+            'from mizan.cloud_worker.source import worker_source; print(worker_source()[1])')"
+          if [[ ! "$source_hash" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "The bundled worker source hash is invalid." >&2
+            exit 1
+          fi
+          image="ghcr.io/${owner}/mizan-cloud-worker"
+          tag="${image}:source-${source_hash}-${RUN_ID}"
+          metadata="cloud-worker-build-metadata.json"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io \
+            --username "$GH_USER" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker buildx build \
+            --platform linux/amd64 \
+            --file host/mizan/cloud_worker/Dockerfile \
+            --push \
+            --tag "$tag" \
+            --label "org.mizan.worker.source-sha256=${source_hash}" \
+            --metadata-file "$metadata" \
+            host/mizan/cloud_worker
+          digest="$(python -c \
+            'import json; print(json.load(open("cloud-worker-build-metadata.json", encoding="utf-8"))["containerimage.digest"])')"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The container build did not return an immutable SHA256 digest." >&2
+            exit 1
+          fi
+          reference="${image}@${digest}"
+          printf '{"image":"%s","digest":"%s","sourceHash":"%s"}\n' \
+            "$reference" "$digest" "$source_hash" > cloud-worker-image.json
+          {
+            echo "## Cloud worker image"
+            echo
+            printf -- '- Image: `%s`\n' "$reference"
+            printf -- '- Digest: `%s`\n' "$digest"
+            printf -- '- Source hash: `%s`\n' "$source_hash"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "image=$reference" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "source_hash=$source_hash" >> "$GITHUB_OUTPUT"
+          rm -f "$metadata"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-worker-image-${{ github.run_id }}
+          path: cloud-worker-image.json
+          if-no-files-found: error
+          retention-days: 30

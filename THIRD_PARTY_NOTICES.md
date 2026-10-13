@@ -40,19 +40,23 @@ Development and probe-only packages installed in the venv are excluded.
 | anyio | 4.15.1 | [MIT](licenses/host-anyio.txt) | Copyright (c) 2018 Alex Grönholm | https://anyio.readthedocs.io/en/stable/versionhistory.html |
 | azure-containerregistry | 1.2.0 | [MIT](licenses/host-azure-containerregistry.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
 | azure-core | 1.41.0 | [MIT](licenses/host-azure-core.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/core/azure-core |
-| azure-identity | 1.25.3 | [MIT](licenses/host-azure-identity.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
+| azure-identity | 1.26.0 | [MIT](licenses/host-azure-identity.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
+| boto3 | 1.40.27 | [Apache-2.0](licenses/host-boto3.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/boto3 |
+| botocore | 1.40.76 | [Apache-2.0](licenses/host-botocore.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/botocore |
 | bottle | 0.13.4 | [MIT](licenses/host-bottle.txt) | Copyright (c) 2009-2024, Marcel Hellkamp. | http://bottlepy.org/ |
+| cachetools | 6.2.6 | [MIT](licenses/host-cachetools.txt) | Copyright (c) 2014-2026 Thomas Kemmer | https://github.com/tkem/cachetools/ |
 | certifi | 2026.7.22 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
 | cffi | 2.1.1 | [MIT-0](licenses/host-cffi.txt) | Copyright Armin Rigo and contributors | https://cffi.readthedocs.io/en/latest/whatsnew.html |
-| charset-normalizer | 3.5.1 | [MIT](licenses/host-charset-normalizer.txt) | Copyright (c) 2025 TAHRI Ahmed R. | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
+| charset-normalizer | 3.5.2 | [MIT](licenses/host-charset-normalizer.txt) | Copyright (c) 2025 TAHRI Ahmed R. | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
 | click | 8.5.0 | [BSD-3-Clause](licenses/host-click.txt) | Copyright 2014 Pallets | https://github.com/pallets/click/ |
 | clr_loader | 0.3.1 | [MIT](licenses/host-clr-loader.txt) | Copyright (c) 2019-2026 Benedikt Reinartz | https://pythonnet.github.io/clr-loader/ |
 | colorama | 0.4.6 | [BSD-3-Clause](licenses/host-colorama.txt) | Copyright (c) 2010 Jonathan Hartley | https://github.com/tartley/colorama |
 | cryptography | 46.0.3 | [Apache-2.0 OR BSD-3-Clause](licenses/host-cryptography.txt) | Project contributors | https://github.com/pyca/cryptography |
 | einops | 0.8.2 | [MIT](licenses/host-einops.txt) | Copyright (c) 2018 Alex Rogozhnikov | https://github.com/arogozhnikov/einops |
-| filelock | 4.0.1 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/py-filelock |
+| filelock | 4.0.12 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/py-filelock |
 | flatbuffers | 25.12.19 | [Apache-2.0](licenses/host-flatbuffers.txt) | Copyright Google LLC | https://google.github.io/flatbuffers/ |
 | fsspec | 2026.9.0 | [BSD-3-Clause](licenses/host-fsspec.txt) | Copyright (c) 2018, Martin Durant | https://github.com/fsspec/filesystem_spec |
+| google-auth | 2.41.1 | [Apache-2.0](licenses/host-google-auth.txt) | copyright notice that is included in or attached to the work | https://github.com/googleapis/google-auth-library-python |
 | h11 | 0.16.0 | [MIT](licenses/host-h11.txt) | Copyright (c) 2016 Nathaniel J. Smith <njs@pobox.com> and other contributors | https://github.com/python-hyper/h11 |
 | httpcore | 1.0.9 | [BSD-3-Clause](licenses/host-httpcore.txt) | Copyright © 2020, [Encode OSS Ltd](https://www.encode.io/). | https://www.encode.io/httpcore/ |
 | httpx | 0.28.1 | [BSD-3-Clause](licenses/host-httpx.txt) | Copyright © 2019, [Encode OSS Ltd](https://www.encode.io/). | https://github.com/encode/httpx |
@@ -60,26 +64,33 @@ Development and probe-only packages installed in the venv are excluded.
 | idna | 3.20 | [BSD-3-Clause](licenses/host-idna.txt) | Copyright (c) 2013-2026, Kim Davies and contributors. | https://github.com/kjd/idna |
 | isodate | 0.7.2 | [BSD-3-Clause](licenses/host-isodate.txt) | Copyright (c) 2021, Hugo van Kemenade and contributors | https://github.com/gweis/isodate/ |
 | Jinja2 | 3.1.6 | [BSD-3-Clause](licenses/host-jinja2.txt) | Copyright 2007 Pallets | https://github.com/pallets/jinja/ |
-| MarkupSafe | 3.0.3 | [BSD-3-Clause](licenses/host-markupsafe.txt) | Copyright 2010 Pallets | https://github.com/pallets/markupsafe/ |
+| jmespath | 1.1.0 | [MIT](licenses/host-jmespath.txt) | Copyright (c) 2013 Amazon.com, Inc. or its affiliates.  All Rights Reserved | https://github.com/jmespath/jmespath.py |
+| MarkupSafe | 3.0.4 | [BSD-3-Clause](licenses/host-markupsafe.txt) | Copyright 2010 Pallets | https://github.com/pallets/markupsafe/ |
 | mido | 1.3.3 | [MIT](licenses/host-mido.txt) | Copyright (c) Ole Martin Bjørndalen | https://github.com/mido/mido |
 | mpmath | 1.3.0 | [BSD-3-Clause](licenses/host-mpmath.txt) | Copyright (c) 2005-2021 Fredrik Johansson and mpmath contributors | http://mpmath.org/ |
 | msal | 1.39.0 | [MIT](licenses/host-msal.txt) | Copyright (c) Microsoft Corporation. | https://github.com/AzureAD/microsoft-authentication-library-for-python |
 | msal-extensions | 1.3.1 | [MIT](licenses/host-msal-extensions.txt) | Copyright (c) Microsoft Corporation. All rights reserved. | https://github.com/AzureAD/microsoft-authentication-extensions-for-python/releases |
 | muscriptor | 0.3.0 | [MIT](licenses/host-muscriptor.txt) | Copyright (c) 2026 Kyutai x Mirelo | https://github.com/muscriptor/muscriptor |
-| networkx | 3.6.1 | [BSD-3-Clause](licenses/host-networkx.txt) | Copyright (c) 2004-2025, NetworkX Developers | https://networkx.org/ |
+| networkx | 3.7 | [BSD-3-Clause](licenses/host-networkx.txt) | Copyright (c) 2004-2026, NetworkX Developers | https://networkx.org/ |
 | numpy | 2.5.3 | [BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0](licenses/host-numpy.txt) | Copyright (c) 2005-2025, NumPy Developers. | https://numpy.org |
 | onnxruntime-windowsml | 1.27.1.202607110137 | [MIT](licenses/host-onnxruntime-windowsml.txt) | Copyright (c) Microsoft Corporation | https://onnxruntime.ai |
 | packaging | 26.3 | [Apache-2.0 OR BSD-2-Clause](licenses/host-packaging.txt) | Python Packaging Authority and contributors | https://github.com/pypa/packaging |
 | protobuf | 7.36.2 | [BSD-3-Clause](licenses/host-protobuf.txt) | Copyright 2008 Google Inc.  All rights reserved. | https://developers.google.com/protocol-buffers/ |
 | proxy_tools | 0.1.0 | [MIT](licenses/host-proxy-tools.txt) | Copyright Jacob Tushman and contributors | http://github.com/jtushman/proxy_tools |
+| pyasn1 | 0.6.4 | [BSD-2-Clause](licenses/host-pyasn1.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1 |
+| pyasn1_modules | 0.4.2 | [BSD-3-Clause](licenses/host-pyasn1-modules.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1-modules |
 | pycparser | 3.0 | [BSD-3-Clause](licenses/host-pycparser.txt) | Copyright (c) 2008-2022, Eli Bendersky | https://github.com/eliben/pycparser |
-| PyJWT | 2.14.0 | [MIT](licenses/host-pyjwt.txt) | Copyright (c) 2015-2022 José Padilla | https://github.com/jpadilla/pyjwt |
-| pythonnet | 3.1.0 | [MIT](licenses/host-pythonnet.txt) | Copyright (c) 2006-2021 the contributors of the Python.NET project | https://pythonnet.github.io/ |
+| PyJWT | 2.15.1 | [MIT](licenses/host-pyjwt.txt) | Copyright (c) 2015-2022 José Padilla | https://github.com/jpadilla/pyjwt |
+| python-dateutil | 2.9.0.post0 | [Apache Software License; BSD License](licenses/host-python-dateutil.txt) | Copyright 2017- Paul Ganssle <paul@ganssle.io> | https://github.com/dateutil/dateutil |
+| pythonnet | 3.2.0 | [MIT](licenses/host-pythonnet.txt) | Copyright (c) 2006-2021 the contributors of the Python.NET project | https://pythonnet.github.io/ |
 | pywebview | 0.1.dev2430+ga2bf0df4a | [BSD-3-Clause](licenses/host-pywebview.txt) | Copyright (c) 2014-2017, Roman Sirokov | https://pywebview.flowrl.com/ |
 | PyYAML | 6.0.3 | [MIT](licenses/host-pyyaml.txt) | Copyright (c) 2017-2021 Ingy döt Net | https://pyyaml.org/ |
 | requests | 2.34.2 | [Apache-2.0](licenses/host-requests.txt) | copyright notice that is included in or attached to the work | https://github.com/psf/requests |
+| rsa | 4.9.1 | [Apache-2.0](licenses/host-rsa.txt) | Copyright 2011 Sybren A. Stüvel <sybren@stuvel.eu> | https://stuvel.eu/rsa |
+| s3transfer | 0.14.0 | [Apache-2.0](licenses/host-s3transfer.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/s3transfer |
 | safetensors | 0.8.0 | [Apache-2.0](licenses/host-safetensors.txt) | copyright notice that is included in or attached to the work | https://github.com/huggingface/safetensors |
 | scipy | 1.18.1 | [BSD-3-Clause](licenses/host-scipy.txt) | Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers. | https://scipy.org/ |
+| six | 1.17.0 | [MIT](licenses/host-six.txt) | Copyright (c) 2010-2024 Benjamin Peterson | https://github.com/benjaminp/six |
 | sympy | 1.14.0 | [BSD-3-Clause](licenses/host-sympy.txt) | Copyright (c) 2006-2023 SymPy Development Team | https://sympy.org |
 | torch | 2.14.0+cpu | [Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT](licenses/host-torch.txt) | Copyright (c) 2016-     Facebook, Inc            (Adam Paszke) | https://pytorch.org |
 | tqdm | 4.70.1 | [MPL-2.0 AND MIT](licenses/host-tqdm.txt) | Copyright (c) 2013 noamraph | https://tqdm.github.io |
@@ -184,8 +195,6 @@ Development and probe-only packages installed in the venv are excluded.
 |---|---|---|---|---|
 | .NET Runtime | 10 | [LicenseRef-Microsoft-.NET-Library](licenses/tool-dotnet-runtime.txt) | Microsoft Corporation | https://github.com/dotnet/runtime |
 |  |  |  |  | *The ARM64 runtime is bundled in the MSIX.* |
-| FFmpeg | 9.0.2-full_build-www.gyan.dev | [GPL-3.0-or-later](licenses/tool-ffmpeg.txt) | FFmpeg developers | https://www.gyan.dev/ffmpeg/builds/ |
-|  |  |  |  | *Bundled executable; the Gyan x64 build runs under Windows ARM64 emulation. Exact configuration and upstream source reference are in licenses/tool-ffmpeg-build.txt. Public redistribution still requires corresponding source for FFmpeg and its linked libraries.* |
 | Microsoft Edge WebView2 Runtime | System installed | LicenseRef-Microsoft-WebView2-Runtime | Microsoft Corporation | https://developer.microsoft.com/microsoft-edge/webview2/ |
 |  |  |  |  | *Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime.* |
 | Python | 3.12 | [PSF-2.0](licenses/tool-python.txt) | Python Software Foundation | https://www.python.org/ |
@@ -235,8 +244,7 @@ installed, bundled, downloaded, or used by the current engine.
 - Preserve the OFL-1.1 copyright and license with Archivo and the Noto Kufi outlines.
 - NumPy, SciPy, ONNX Runtime, and other packages carry bundled third-party notices;
   their component-specific license files are retained in `licenses/`.
-- Do not redistribute the detected GPL-enabled Gyan FFmpeg build as an LGPL build.
-  Select a compliant build and provide matching source/build information.
+- FFmpeg is a user-installed tool. Its license and linked libraries depend on the selected build.
 - Review Windows ML catalog-provider and WebView2 terms before shipping an installer.
 
 Mizan's own code is released under the MIT License (see `LICENSE`). The components

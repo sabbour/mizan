@@ -49,7 +49,20 @@ export async function practiceChecks(phase) {
       key, song: piece, songId: `practice-browser-${key}`, stems, defaults,
       start: { bar: 1, rate: 1, loop: { startBar: 1, endBar: piece.bars }, muted: [], solo: [], trackId: piece.tracks[0].id },
     }))
-    await until(() => engine?.song === piece && find('.score[aria-busy="false"]'), `${key} opens`)
+    try {
+      await until(() => engine?.song === piece && find('.score[aria-busy="false"]'), `${key} opens`)
+    } catch (error) {
+      throw new Error(`${error.message}; readiness=${JSON.stringify({
+        engineCaptured: !!engine,
+        sameSong: engine?.song === piece,
+        engineTitle: engine?.song?.title,
+        expectedTitle: piece.title,
+        selectedPart: engine?.selectedPart,
+        scoreBusy: find('.score')?.getAttribute('aria-busy'),
+        view: view(),
+        error: find('[role="alert"]')?.textContent,
+      })}`, { cause: error })
+    }
   }
   const pickView = async (choice) => {
     const button = find(`.chordview-option[data-view="${choice}"]`)
@@ -103,8 +116,20 @@ export async function practiceChecks(phase) {
       kitStyle: 'electronic:Realistic' })) savePref(key, value)
     const initial = localStorage.getItem('mizan:practice')
     await render('first')
-    check(view() === 'score' && localStorage.getItem('mizan:practice') === initial,
-      'Without a saved view, the song default applies and does not write preferences')
+    check(view() === 'hands' && localStorage.getItem('mizan:practice') === initial,
+      'Without a saved view, Hands & keys is selected without writing preferences')
+    savePref('pianoView', 'keyboard')
+    const savedKeyboard = localStorage.getItem('mizan:practice')
+    await render('saved-keyboard')
+    await until(() => view() === 'keyboard', 'Saved 3D keyboard choice is restored')
+    check(view() === 'keyboard' && localStorage.getItem('mizan:practice') === savedKeyboard,
+      'A saved 3D keyboard choice remains selected without rewriting preferences')
+    const invalidSaved = JSON.stringify({ ...JSON.parse(savedKeyboard), pianoView: 'not-a-view' })
+    localStorage.setItem('mizan:practice', invalidSaved)
+    await render('invalid-saved-view')
+    await until(() => view() === 'hands', 'Invalid saved view falls back to Hands & keys')
+    check(view() === 'hands' && loadPrefs().pianoView === undefined && localStorage.getItem('mizan:practice') === invalidSaved,
+      'An invalid saved view falls back to Hands & keys without rewriting preferences')
     await pickView('score')
     await pickView('hands')
     check(loadPrefs().pianoView === 'hands' && loadPrefs().drumsView === undefined, 'Only the selected piano view is saved')

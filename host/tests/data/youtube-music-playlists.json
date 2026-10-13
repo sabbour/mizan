@@ -20,24 +20,120 @@
       }
     ]
   },
-  "globalTop100": {
-    "id": "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i",
-    "title": "Top 100 Songs Global",
-    "channel": "YouTube Music Global Charts",
-    "description": "This week's ranking of the most popular songs on YouTube.",
-    "modified_date": "20261010",
+  "popsBiggestHits": {
+    "id": "RDCLAK5uy_nmS3YoxSwVVQk9lEQJ0UX4ZCjXsW_psU8",
+    "title": "Pop's Biggest Hits",
+    "channel": "YouTube Music",
+    "description": "The biggest pop songs from the last two decades, all in one place.",
+    "modified_date": "20261013",
     "entries": [
       {
-        "id": "fcnDmrtj6Sk",
-        "title": "Shakira, Burna Boy - Dai Dai (Official Video)",
-        "channel": "Shakira",
-        "thumbnail": "https://i.ytimg.com/vi/fcnDmrtj6Sk/maxresdefault.jpg"
+        "id": "ic8j13piAhQ",
+        "title": "Taylor Swift - Cruel Summer (Official Audio)",
+        "channel": "Taylor Swift"
       },
       {
-        "id": "fRIhCiUVaKs",
-        "title": "KAROL G, Judeline, rusowsky - BbY WOW (Visualizer)",
-        "channel": "KAROL G",
-        "thumbnail": "https://i.ytimg.com/vi/fRIhCiUVaKs/maxresdefault.jpg"
+        "id": "ekr2nIex040",
+        "title": "ROSÉ & Bruno Mars - APT. (Official Music Video)",
+        "channel": "ROSÉ"
+      },
+      {
+        "id": "yebNIHKAC4A",
+        "title": "“Golden” Official Lyric Video | KPop Demon Hunters | Sony Animation",
+        "channel": "Sony Pictures Animation"
+      },
+      {
+        "id": "kPa7bsKwL-c",
+        "title": "Lady Gaga, Bruno Mars - Die With A Smile (Official Music Video)",
+        "channel": "Lady Gaga"
+      },
+      {
+        "id": "RgKAFK5djSk",
+        "title": "Wiz Khalifa - See You Again ft. Charlie Puth [Official Video] Furious 7 Soundtrack",
+        "channel": "Wiz Khalifa"
+      },
+      {
+        "id": "ko70cExuzZM",
+        "title": "Taylor Swift - The Fate of Ophelia (Official Music Video)",
+        "channel": "Taylor Swift"
+      }
+    ]
+  },
+  "classicRocksGreatestHits": {
+    "id": "RDCLAK5uy_nZiG9ehz_MQoWQxY5yElsLHCcG0tv9PRg",
+    "title": "Classic Rock's Greatest Hits",
+    "channel": "YouTube Music",
+    "description": "Essential hits from the classic rock era, featuring long hair, big solos and singers who graduated from frontman school with honors! ",
+    "modified_date": "20261013",
+    "entries": [
+      {
+        "id": "OMOGaugKpzs",
+        "title": "The Police - Every Breath You Take (Official Music Video)",
+        "channel": "The Police"
+      },
+      {
+        "id": "eWiHX_xWa6Y",
+        "title": "Dream On",
+        "channel": "Aerosmith"
+      },
+      {
+        "id": "v2AC41dglnM",
+        "title": "AC/DC - Thunderstruck (Official Video)",
+        "channel": "AC/DC"
+      },
+      {
+        "id": "ZWijx_AgPiA",
+        "title": "Creedence Clearwater Revival - Fortunate Son",
+        "channel": "Creedence Clearwater Revival"
+      },
+      {
+        "id": "P5ZJui3aPoQ",
+        "title": "Kansas - Carry on Wayward Son (Official Video)",
+        "channel": "KANSAS"
+      },
+      {
+        "id": "VsNtkuJEgRQ",
+        "title": "Stevie Nicks - Edge of Seventeen (2019 Remaster) (Official Audio)",
+        "channel": "Stevie Nicks"
+      }
+    ]
+  },
+  "allTimeAlt": {
+    "id": "RDCLAK5uy_mgHrXs_5F6wPwPFA47S8yrzCfjCi4AXDE",
+    "title": "All-Time Alt",
+    "channel": "YouTube Music",
+    "description": "Alternative hits from the '90s through today.",
+    "modified_date": "20261013",
+    "entries": [
+      {
+        "id": "hTWKbfoikeg",
+        "title": "Nirvana - Smells Like Teen Spirit (Official Music Video)",
+        "channel": "Nirvana"
+      },
+      {
+        "id": "6hzrDeceEKc",
+        "title": "Oasis - Wonderwall (Official Video)",
+        "channel": "Oasis"
+      },
+      {
+        "id": "gGdGFtwCNBE",
+        "title": "The Killers - Mr. Brightside (Official Music Video)",
+        "channel": "TheKillersMusic"
+      },
+      {
+        "id": "Soa3gO7tL-c",
+        "title": "Green Day - Boulevard Of Broken Dreams [Official Music Video] [4K Upgrade]",
+        "channel": "Green Day"
+      },
+      {
+        "id": "mzJj5-lubeM",
+        "title": "Red Hot Chili Peppers - Scar Tissue [Official Music Video] [HD UPGRADE]",
+        "channel": "Red Hot Chili Peppers"
+      },
+      {
+        "id": "UprcpdwuwCg",
+        "title": "twenty one pilots: Heathens (from Suicide Squad: The Album) [OFFICIAL VIDEO]",
+        "channel": "Fueled By Ramen"
       }
     ]
   }

@@ -7,7 +7,7 @@ from threading import Event
 import numpy as np
 import pytest
 
-from mizan import cloud
+from mizan import azure_cloud as cloud
 from mizan.cloud_transport import STEMS
 from mizan.engine.audio import Audio, write_audio
 from mizan.engine.models import HTDEMUCS_6S
@@ -49,7 +49,7 @@ def cloud_fixture(tmp_path):
     }
 
     class Transport:
-        def _get(self, blob: str, target: Path, *, limit: int):
+        def download(self, blob: str, target: Path, *, limit: int):
             assert blob in names and limit > 0
             data = (source / Path(blob).name).read_bytes()
             shutil.copy(source / Path(blob).name, target)

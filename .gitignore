@@ -13,6 +13,10 @@
 **/.learnings/
 **/.playwright-mcp/
 **/.mizan-playback-*/
+**/.mizan-hf-test-*/
+**/.edge-*/
+ui/.test-playback-temp/
+ui/visual-checks/
 *.log
 *.local
 
@@ -28,5 +32,8 @@ update-verification/installed-edge-*/
 update-verification/midi-pytest-temp/
 update-verification/native-midi-*/
 update-verification/mizan-update-gate-*/
+update-verification/native-preview-*/
+update-verification/gitleaks-*/
+update-verification/popular-playlists-baseline/
 update-verification/__pycache__/
 update-verification/.pytest_cache/

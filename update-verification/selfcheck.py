@@ -40,6 +40,10 @@ with tempfile.TemporaryDirectory(prefix="mizan-update-gate-", dir=root) as direc
     updated["Python/Lib/site-packages/mizan/build_info.json"] = b'{"build":"new"}'
     content = b"stage piano"
     updated["ui/dist/models/StagePiano88.glb"] = content
+    for filename in ("ElectricGuitar.glb", "ElectricBass.glb"):
+        updated["ui/dist/models/" + filename] = (
+            root.parent / "ui" / "public" / "models" / filename
+        ).read_bytes()
     variants = {
         "stage_piano_88": {
             "file": "StagePiano88.glb", "sha256": hashlib.sha256(content).hexdigest(),
@@ -79,7 +83,8 @@ with tempfile.TemporaryDirectory(prefix="mizan-update-gate-", dir=root) as direc
         (b"<uap:SupportedFileTypes>", b"<uap:SupportedFileTypes><uap:FileType>.mp3</uap:FileType>"),
     ):
         check({**updated, "AppxManifest.xml": new_manifest.replace(before, after)}, False)
-    for key in ("Mizan.Shell.dll", "ui/dist/models/AcousticKit.glb", "ui/dist/models/StagePiano88.glb"):
+    for key in ("Mizan.Shell.dll", "ui/dist/models/AcousticKit.glb", "ui/dist/models/StagePiano88.glb",
+                "ui/dist/models/ElectricGuitar.glb", "ui/dist/models/ElectricBass.glb"):
         check({**updated, key: b"unexpected change"}, False)
     check({**updated, "Mizan.Shell.dll": b"expected MIDI file activation"}, True, ("Mizan.Shell.dll",))
     check({**updated, "Mizan.Shell.dll": b"expected MIDI file activation",
@@ -87,6 +92,9 @@ with tempfile.TemporaryDirectory(prefix="mizan-update-gate-", dir=root) as direc
     check(updated, False, ("Mizan.Shell.dll",))
     missing = {name: content for name, content in updated.items() if name != "ui/dist/models/StagePiano88.glb"}
     check(missing, False)
+    for filename in ("ElectricGuitar.glb", "ElectricBass.glb"):
+        check({name: content for name, content in updated.items()
+               if name != "ui/dist/models/" + filename}, False)
     wrong = json.loads(updated["ui/dist/models/KeyboardInstruments.json"])
     wrong["variants"]["stage_piano_88"]["whiteKeys"] = 51
     check({**updated, "ui/dist/models/KeyboardInstruments.json": json.dumps(wrong).encode()}, False)
@@ -119,4 +127,4 @@ with tempfile.TemporaryDirectory(prefix="mizan-update-gate-", dir=root) as direc
         capture_output=True, text=True,
     )
     assert result.returncode != 0
-print("Final update gate accepts only a newer matching app identity, unchanged permissions, MIDI associations, exact backend changes, preserved drum assets, the matching stage piano, and exact installed UI")
+print("Final update gate accepts only a newer matching app identity, unchanged permissions, MIDI associations, exact backend changes, preserved drum assets, matching guitar, bass and stage piano models, and exact installed UI")

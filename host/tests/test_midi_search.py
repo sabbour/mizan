@@ -14,6 +14,7 @@ from mizan import midi_search
 from mizan.api import Api
 from mizan.errors import InvalidFile, MidiSearchFailed
 from mizan.jobs import JobRunner, JobStore
+from mizan.library import public_entry
 
 
 DATA = Path(__file__).parent / "data"
@@ -225,6 +226,169 @@ def test_commons_search_uses_required_action_api_parameters(monkeypatch):
     assert params["formatversion"] == ["2"]
 
 
+def test_bitmidi_response_reads_only_ordered_search_results_and_keeps_license_unknown():
+    payload = {
+        "location": {"name": "search"},
+        "data": {"midis": {
+            "moonlight-sonata": {
+                "id": 16752, "slug": "moonlight-sonata", "name": "Moonlight Sonata",
+                "url": "/moonlight-sonata", "downloadUrl": "/uploads/16752.mid",
+            },
+            "unrelated": {
+                "id": 99, "slug": "unrelated", "name": "Unrelated",
+                "url": "/unrelated", "downloadUrl": "/uploads/99.mid",
+            },
+        }},
+        "views": {"search": {"Moonlight": {"0": ["moonlight-sonata"], "total": 1, "pageTotal": 1}}},
+    }
+    document = f"<script>window.initStore = {json.dumps(payload)};</script>"
+
+    results = midi_search.parse_bitmidi_response(document, "Moonlight")
+
+    assert len(results) == 1
+    assert results[0]["title"] == "Moonlight Sonata"
+    assert results[0]["source"] == "BitMidi"
+    assert results[0]["artist"] is None
+    assert results[0]["license"] == "Not listed by source"
+    assert results[0]["licenseUrl"] is None
+    assert results[0]["url"] == "https://bitmidi.com/uploads/16752.mid"
+    assert results[0]["sourceUrl"] == "https://bitmidi.com/moonlight-sonata"
+
+
+def test_bitmidi_empty_search_is_empty_but_unrecognized_layout_fails():
+    empty = {"location": {"name": "search"}, "data": {"midis": {}},
+             "views": {"search": {"Moonlight": {"0": [], "total": 0, "pageTotal": 0}}}}
+    assert midi_search.parse_bitmidi_response(
+        f"<script>window.initStore = {json.dumps(empty)};</script>", "Moonlight") == []
+    with pytest.raises(MidiSearchFailed):
+        midi_search.parse_bitmidi_response("<html><title>Check your browser</title></html>", "Moonlight")
+
+
+def test_bitmidi_search_encodes_query_and_uses_only_approved_search_host(monkeypatch):
+    requested = []
+    payload = {
+        "location": {"name": "search"}, "data": {"midis": {}},
+        "views": {"search": {"A & B": {"0": [], "total": 0, "pageTotal": 0}}},
+    }
+    monkeypatch.setattr(midi_search, "_request_bytes",
+                        lambda url, hosts: requested.append((url, hosts))
+                        or f"<script>window.initStore = {json.dumps(payload)};</script>".encode())
+
+    assert midi_search.search_bitmidi("A & B") == []
+    params = parse_qs(urlsplit(requested[0][0]).query)
+    assert params == {"q": ["A & B"]}
+    assert requested[0][1] == midi_search.BITMIDI_HOSTS
+
+
+def test_freemidi_cards_keep_title_artist_and_deduplicate_view_links():
+    document = """
+      <div class="card"><div class="card-body">
+        <h5 class="card-title"><a href="download3-1034-mr-moonlight-beatles"
+          title="Mr. Moonlight">Mr. Moonlight</a></h5>
+        <div class="card-text"><a href="/artist-251-beatles">Beatles</a></div>
+        <div class="card-img"><a href="/download3-1034-mr-moonlight-beatles">cover</a></div>
+      </div></div>
+    """
+
+    results = midi_search.parse_freemidi_response(document)
+
+    assert len(results) == 1
+    assert results[0]["title"] == "Mr. Moonlight"
+    assert results[0]["artist"] == "Beatles"
+    assert results[0]["source"] == "FreeMIDI"
+    assert results[0]["license"] == "Not listed by source"
+    assert results[0]["attribution"] == "Artist listed: Beatles"
+    assert results[0]["sourceUrl"] == "https://freemidi.org/download3-1034-mr-moonlight-beatles"
+
+    unsafe = document.replace(
+        "download3-1034-mr-moonlight-beatles",
+        "https://attacker.example/download3-1034-mr-moonlight-beatles",
+    )
+    with pytest.raises(MidiSearchFailed):
+        midi_search.parse_freemidi_response(unsafe)
+
+
+def test_freemidi_search_encodes_query_and_uses_only_approved_search_host(monkeypatch):
+    requested = []
+    monkeypatch.setattr(midi_search, "_request_bytes",
+                        lambda url, hosts: requested.append((url, hosts))
+                        or b"<form action='/search'></form><div id='mainContent' class='container'></div>")
+
+    assert midi_search.search_freemidi("A & B") == []
+    assert parse_qs(urlsplit(requested[0][0]).query) == {"q": ["A & B"]}
+    assert requested[0][1] == midi_search.FREEMIDI_HOSTS
+
+
+def test_freemidi_empty_search_shape_is_not_a_layout_failure():
+    document = "<form action='/search'></form><div id='mainContent' class='container'><a href='/search-help'>Help</a></div>"
+    assert midi_search.parse_freemidi_response(document) == []
+    with pytest.raises(MidiSearchFailed):
+        midi_search.parse_freemidi_response("<html><title>Access denied</title></html>")
+
+
+def test_freemidi_import_uses_matching_detail_control_referer_and_ephemeral_cookies(monkeypatch):
+    result = {
+        "id": "freemidi:1034", "provider": "freemidi",
+        "license": "Not listed by source",
+        "sourceUrl": "https://freemidi.org/download3-1034-mr-moonlight-beatles",
+    }
+    calls = []
+
+    def fetch(url, hosts, limit=midi_search.MAX_MIDI_BYTES, headers=None, cookie_jar=None):
+        calls.append((url, hosts, headers, cookie_jar))
+        if url == result["sourceUrl"]:
+            return b'<a id="downloadmidi" href="getter-1034">Download MIDI</a>'
+        return _midi_bytes()
+
+    monkeypatch.setattr(midi_search, "_request_bytes", fetch)
+    assert midi_search.download_midi(result).startswith(b"MThd")
+    assert [call[0] for call in calls] == [
+        result["sourceUrl"], "https://freemidi.org/getter-1034",
+    ]
+    assert calls[1][2] == {"Referer": result["sourceUrl"]}
+    assert calls[0][3] is calls[1][3]
+
+
+def test_freemidi_import_rejects_a_download_control_for_another_file(monkeypatch):
+    result = {
+        "id": "freemidi:1034", "provider": "freemidi",
+        "license": "Not listed by source",
+        "sourceUrl": "https://freemidi.org/download3-1034-mr-moonlight-beatles",
+    }
+    calls = []
+    monkeypatch.setattr(midi_search, "_request_bytes",
+                        lambda url, _hosts, **_kwargs:
+                        calls.append(url) or b'<a id="downloadmidi" href="getter-999">Download</a>')
+
+    with pytest.raises(InvalidFile, match="does not match"):
+        midi_search.download_midi(result)
+    assert calls == [result["sourceUrl"]]
+
+
+def test_bitmidi_download_requires_its_searched_file_path_and_approved_host(monkeypatch):
+    result = {
+        "id": "bitmidi:16752", "provider": "bitmidi",
+        "license": "Not listed by source",
+        "url": "https://bitmidi.com/uploads/16752.mid",
+        "sourceUrl": "https://bitmidi.com/moonlight-sonata",
+        "_downloadPath": "/uploads/16752.mid",
+    }
+    calls = []
+    monkeypatch.setattr(midi_search, "_request_bytes",
+                        lambda url, hosts: calls.append((url, hosts)) or _midi_bytes())
+    assert midi_search.download_midi(result).startswith(b"MThd")
+    assert calls == [(result["url"], midi_search.BITMIDI_HOSTS)]
+
+    calls.clear()
+    result["url"] = "https://bitmidi.com/uploads/other.mid"
+    with pytest.raises(InvalidFile, match="approved download path"):
+        midi_search.download_midi(result)
+    result["url"] = "https://attacker.example/16752.mid"
+    with pytest.raises(InvalidFile, match="approved download path"):
+        midi_search.download_midi(result)
+    assert calls == []
+
+
 def test_metadata_html_removes_markup_and_script_content():
     assert midi_search._clean_html("Composer <b>Example</b><script>bad()</script>") == "Composer Example"
 
@@ -393,5 +557,64 @@ def test_import_by_url_cannot_be_requested_without_a_searched_result():
         assert result["ok"] is False
         assert result["error"]["code"] == "invalid_file"
         assert api._library.list() == []
+    finally:
+        runner.close()
+
+
+@pytest.mark.parametrize("provider", ["bitmidi", "freemidi"])
+def test_unknown_license_import_requires_strict_confirmation_before_download(monkeypatch, provider):
+    result = {
+        "id": "bitmidi:16752",
+        "provider": "bitmidi",
+        "source": "BitMidi",
+        "title": "Moonlight Sonata",
+        "artist": None,
+        "license": "Not listed by source",
+        "licenseUrl": None,
+        "attribution": "Not listed by source",
+        "url": "https://bitmidi.com/uploads/16752.mid",
+        "sourceUrl": "https://bitmidi.com/moonlight-sonata",
+        "_downloadPath": "/uploads/16752.mid",
+    }
+    if provider == "freemidi":
+        result.update({
+            "id": "freemidi:1034", "provider": "freemidi", "source": "FreeMIDI",
+            "artist": "Example Artist",
+            "sourceUrl": "https://freemidi.org/download3-1034-moonlight-example",
+        })
+    monkeypatch.setattr(midi_search, f"search_{provider}", lambda _query: [result])
+    downloads = []
+    monkeypatch.setattr(midi_search, "download_midi",
+                        lambda item: downloads.append(item) or _midi_bytes())
+    runner = JobRunner(JobStore())
+    api = Api(runner)
+    try:
+        searched = getattr(api, f"search_midi_{provider}")("Moonlight")
+        assert searched["ok"]
+        assert "_downloadPath" not in searched["results"][0]
+        assert "url" not in searched["results"][0]
+        result_id = searched["results"][0]["id"]
+
+        assert not api.import_midi_result(result_id)["ok"]
+        assert not api.import_midi_result(result_id, False)["ok"]
+        assert not api.import_midi_result(result_id, "true")["ok"]
+        assert not api.import_midi_result(result_id, 1)["ok"]
+        assert downloads == []
+
+        imported = api.import_midi_result(result_id, True)
+
+        assert imported["ok"]
+        entry = imported["entry"]
+        assert entry["title"] == "Moonlight Sonata"
+        assert entry["artist"] == result["artist"]
+        assert entry["sourceUrl"] == result["sourceUrl"]
+        assert entry["provider"] == result["source"]
+        assert entry["license"] == "Not listed by source"
+        assert entry["attribution"] == "Not listed by source"
+        reopened = public_entry(api._library.get(entry["id"]), runner.pipeline_version)
+        assert reopened["provider"] == result["source"]
+        assert reopened["license"] == "Not listed by source"
+        assert reopened["attribution"] == "Not listed by source"
+        assert len(downloads) == 1
     finally:
         runner.close()

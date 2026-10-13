@@ -1,5 +1,7 @@
 import type { DrumHit, DrumLane, Song, Track } from './song'
 import { barAt as measureIndex, barStart, barTempo, measures as meterMeasures } from './meter'
+import { isGuitarTrack } from './guitar'
+import { isBassTrack } from './bass'
 
 const DIV = 16 // divisions per quarter note
 const notationEvents = (song: Song) => [...song.piano, ...song.vocals, ...song.chords, ...song.drums,
@@ -633,17 +635,20 @@ export function vocalXml(song: Song): string {
   return wrap('Vocal melody (draft)', measures)
 }
 
-/** Transcribed pitched notes; mixed registers use treble and bass staves without inventing hands or fingering. */
+/** Guitar and bass use their octave-transposing clefs; unknown mixed registers use two staves. */
 export function instrumentXml(song: Song, track: Track): string {
   const grid = notationGrid(song)
   const DIV = grid.division
   const notes = notationNotes(song.instrumentNotes?.[track.id] ?? [], track.id, song)
   const low = notes.some((n) => n.midi < 60)
   const high = notes.some((n) => n.midi >= 60)
-  const split = low && high
+  const bass = isBassTrack(track)
+  const guitar = !bass && isGuitarTrack(track)
+  const fretted = bass || guitar
+  const split = !fretted && low && high
   const attrs = `<attributes><divisions>${DIV}</divisions>${timeXml(song)}${split
     ? '<staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef>'
-    : `<clef><sign>${low ? 'F' : 'G'}</sign><line>${low ? 4 : 2}</line></clef>`}</attributes>`
+    : `<clef><sign>${bass || (!guitar && low) ? 'F' : 'G'}</sign><line>${bass || (!guitar && low) ? 4 : 2}</line>${fretted ? '<clef-octave-change>-1</clef-octave-change>' : ''}</clef>`}</attributes>`
   const lines = voiceLines(notes.filter((note) => note.source.beats > 0).map((note) => {
     const base = Math.ceil(note.midi - 0.5)
     const cents = Math.round((note.midi - base) * 100)
@@ -651,7 +656,7 @@ export function instrumentXml(song: Song, track: Track): string {
       startDiv: note.startDiv,
       endDiv: note.endDiv,
       staff: split && note.midi < 60 ? 2 : 1,
-      head: { xml: pitch(base, keyFlats(song)), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
+      head: { xml: pitch(base + (fretted ? 12 : 0), keyFlats(song)), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
     }
   }))
   const measures: string[] = []

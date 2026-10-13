@@ -77,7 +77,7 @@ export const COLLECTIONS: Record<Collection, { title: string; intro: string }> =
     intro: 'Five lessons per style: an 8-bar basic groove, two 8-bar variations, an 8-bar fill study and a 16-bar performance phrase. Each plays with original bass and chords; mute or turn them down in the track list.' },
 }
 
-export const LEVELS = ['Pulse and rests', 'Subdivision', 'Rudiments', 'Grooves', 'Limb independence', 'Fills', 'Meter', 'Advanced']
+export const LEVELS = ['Pulse and rests', 'Subdivision', 'Rudiments', 'Grooves', 'Fills', 'Limb independence', 'Meter', 'Advanced']
 
 const ROCK = { steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R R R R+L R',
   notes: { hh: 'xxxxxxxx', sn: '--X---X-', bd: 'x---x---' } } satisfies LessonBar
@@ -344,6 +344,47 @@ const BASE_LESSONS: Lesson[] = [
       'Beat 3 on the snare is R L R; beat 4 on tom 1 is L R L.', 'Accent the first note of each triplet and land the crash on the next 1.'],
     bars: [CRASH_IN, ROCK, ROCK, { steps: 3, count: TRIPLETS, sticking: 'R R+L R L R L R L',
       notes: { hh: 'x--x--------', sn: '---X--Xxx---', t1: '---------Xxx', bd: 'x-----------' } }],
+    sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
+  },
+  {
+    id: 'snare-eighth-fill', level: 6, title: 'Four-stroke snare fill', meter: { numerator: 4, denominator: 4 },
+    goal: 'Play three bars of rock groove, then four even snare eighths on beats 3 and 4 before the crash return.',
+    tempo: { start: 63, target: 90 }, limbs: 'Groove as the rock beat; alternate R L on the snare fill',
+    steps: ['Bars 1–3 establish the hi-hat eighths and backbeat.', 'In bar 4, keep the groove through beat 2, then play R L R L on the snare across beats 3 and 4.',
+      'The next bar 1 returns with crash and kick; count straight through the loop.'],
+    bars: [CRASH_IN, ROCK, ROCK, { steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R R L R L',
+      notes: { hh: 'xxxx----', sn: '--X-xxxx', bd: 'x-------' } }],
+    sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
+  },
+  {
+    id: 'two-tom-eighth-fill', level: 6, title: 'Two-tom eighth-note fill', meter: { numerator: 4, denominator: 4 },
+    goal: 'Keep the groove for two beats, then play two eighths on tom 1 and two on tom 2 to lead back to the crash.',
+    tempo: { start: 63, target: 90 }, limbs: 'Groove as the rock beat; alternate R L down the toms',
+    steps: ['Bars 1–3 keep the rock beat steady.', 'In bar 4, play the backbeat on 2, then move R L on tom 1 during beat 3 and R L on tom 2 during beat 4.',
+      'Return to crash and kick on the next bar 1 without stopping.'],
+    bars: [CRASH_IN, ROCK, ROCK, { steps: 2, count: '1 & 2 & 3 & 4 &', sticking: 'R R R+L R R L R L',
+      notes: { hh: 'xxxx----', sn: '--X-----', t1: '----xx--', t2: '------xx', bd: 'x-------' } }],
+    sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
+  },
+  {
+    id: 'snare-to-floor-sixteenth-fill', level: 6, title: 'Snare-to-floor sixteenth fill', meter: { numerator: 4, denominator: 4 },
+    goal: 'Play two groove beats, then a sixteenth run from snare to tom 1 and floor tom, returning to the opening crash.',
+    tempo: { start: 56, target: 80 }, limbs: 'Groove as the rock beat; alternate R L through the sixteenth fill',
+    steps: ['Bars 1–3 are the rock groove.', 'In bar 4, keep the hi-hat on beats 1 and 2 and the snare backbeat on 2.',
+      'On beat 3 play four sixteenths on snare; on beat 4 play two on tom 1 and two on floor tom.', 'The next bar 1 is the crash-and-kick return.'],
+    bars: [CRASH_IN, ROCK, ROCK, { steps: 4, count: SIXTEENS, sticking: 'R R R+L R R L R L R L R L',
+      notes: { hh: 'x-x-x-x---------', sn: '----X---xxxx----', t1: '------------xx--',
+        f1: '--------------xx', bd: 'x---------------' } }],
+    sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
+  },
+  {
+    id: 'triplet-tom-answer-fill', level: 6, title: 'Triplet tom-answer fill', meter: { numerator: 4, denominator: 4 },
+    goal: 'Play three groove bars, then answer a three-note snare triplet with a two-tom triplet into the crash.',
+    tempo: { start: 56, target: 80 }, limbs: 'Groove as the rock beat; alternate R L through the triplet fill',
+    steps: ['Bars 1–3 keep the rock groove and backbeat.', 'In bar 4, keep the hi-hat on beats 1 and 2; play R L R on the snare triplet of beat 3.',
+      'Continue the alternation on beat 4: L R on tom 1, then L on floor tom.', 'The next bar 1 returns on crash and kick.'],
+    bars: [CRASH_IN, ROCK, ROCK, { steps: 3, count: TRIPLETS, sticking: 'R R+L R L R L R L',
+      notes: { hh: 'x--x--------', sn: '---X--XxX---', t1: '---------Xx-', f1: '-----------X', bd: 'x-----------' } }],
     sections: [{ name: 'Groove', bars: 3 }, { name: 'Fill', bars: 1 }],
   },
   {
@@ -681,13 +722,29 @@ const BASE_LESSONS: Lesson[] = [
 ]
 
 /** The course, then each collection; additions follow their prerequisites, and genre studies follow their basics. */
-export const LESSONS: Lesson[] = BASE_LESSONS.flatMap((lesson) => {
+const EXPANDED_LESSONS: Lesson[] = BASE_LESSONS.flatMap((lesson) => {
   if (lesson.collection === 'genre')
     return [expandGenreLesson(lesson, 0), ...GENRE_LESSONS[lesson.id].map((item, index) => expandGenreLesson(item, index + 1))]
   const additions = BASIC_INSERTIONS[lesson.id] ?? []
   const inspired = lesson.id === 'inspired-odd-meter' ? INSPIRED_LESSONS : []
   return [lesson, ...additions, ...inspired]
 })
+
+const remapLevel = (level: number) => level === 5 ? 6 : level === 6 ? 5 : level
+const expanded = EXPANDED_LESSONS.map((lesson) => ({ ...lesson, level: remapLevel(lesson.level) }))
+const genreLevels = new Map<string, number>()
+// Keep each genre's stage references progressive when its old level-5/6 references cross.
+const adjustedGenreLessons = expanded.filter((lesson) => lesson.collection === 'genre').map((lesson) => {
+  const level = Math.max(lesson.level, genreLevels.get(lesson.style!) ?? 0)
+  genreLevels.set(lesson.style!, level)
+  return { ...lesson, level }
+})
+
+export const LESSONS: Lesson[] = [
+  ...expanded.filter((lesson) => !lesson.collection).sort((a, b) => a.level - b.level),
+  ...expanded.filter((lesson) => lesson.collection === 'inspired'),
+  ...adjustedGenreLessons,
+]
 
 /** What each of a genre's five lessons teaches, in order. */
 export const GENRE_STAGES = ['Basic groove', 'Variation', 'Variation', 'Fill', 'Sixteen-bar phrase']

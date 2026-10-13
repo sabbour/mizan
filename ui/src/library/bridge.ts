@@ -4,8 +4,11 @@ import { mockHost } from './mock'
 export type Source = 'youtube' | 'midi' | 'musicxml'
 export type TranscriptionModel = 'muscriptor-small' | 'muscriptor-medium' | 'muscriptor-large'
 export type ProcessingMode = 'local' | 'cloud'
+export type CloudProvider = 'azure' | 'gcp' | 'aws'
+export type CloudProviderInfo = { id: CloudProvider; name: string }
 export type AzureSubscription = { id: string; name: string; tenantId: string }
-export type CloudConfig = {
+export type AzureCloudConfig = {
+  provider?: 'azure'
   tenantId: string
   subscriptionId: string
   resourceGroup: string
@@ -24,11 +27,61 @@ export type CloudConfig = {
   existingPilot?: boolean
   resumePartial?: boolean
 }
+export type GcpProject = { projectId: string; projectName: string; projectNumber: string; state: string }
+export type AwsAccount = { accountId: string; profile: string; region: string; arn: string; userId: string | null }
+type CloudAccountsById = { gcp: GcpProject; aws: AwsAccount }
+export type GcpCloudSettings = {
+  provider?: 'gcp'
+  projectId?: string
+  location?: string
+  region?: string
+  bucket?: string
+  serviceAccount?: string
+  machineType?: string
+  accelerator?: string
+  image?: string
+  workerSourceHash?: string
+  workerAuthResource?: string
+}
+export type AwsCloudSettings = {
+  provider?: 'aws'
+  profile?: string
+  region?: string
+  accountId?: string
+  bucket?: string
+  computeEnvironment?: string
+  jobQueue?: string
+  jobDefinition?: string
+  role?: string
+  subnetIds?: string[]
+  securityGroupIds?: string[]
+  image?: string
+  sourceHash?: string
+  executionRole?: string
+  serviceRole?: string
+  instanceRole?: string
+  hfSecretArn?: string
+  vpcId?: string
+  routeTableId?: string
+  internetGatewayId?: string
+}
+export type CloudConfig = AzureCloudConfig
+export type CloudProviderSettings =
+  | AzureCloudConfig
+  | GcpCloudSettings
+  | AwsCloudSettings
+export type CloudProviderSettingsById = {
+  azure: AzureCloudConfig
+  gcp: GcpCloudSettings
+  aws: AwsCloudSettings
+}
 export type CloudStatus = {
+  provider?: CloudProvider
+  providerName?: string
   available?: boolean
   configured: boolean
   mode: ProcessingMode
-  config?: CloudConfig
+  config?: CloudProviderSettings
   issue?: string
   warning?: string
   runtimeVerified?: boolean
@@ -45,8 +98,19 @@ export type CloudStatus = {
   loggingConfigured?: boolean
   loggingLocation?: string
 }
+export type FfmpegStatus = {
+  configuredPath: string | null
+  effectivePath: string | null
+  available: boolean
+  issue: string | null
+}
+export type CloudStatusFor<P extends CloudProvider> = Omit<CloudStatus, 'provider' | 'config'> & {
+  provider?: P
+  config?: CloudProviderSettingsById[P]
+}
 export type ProcessingModeResult = { mode: ProcessingMode } & Partial<Omit<CloudStatus, 'mode'>>
-export type CloudPrepared = {
+export type AzureCloudPrepared = {
+  provider: 'azure'
   prepared: boolean
   configured: false
   identityPrincipalId: string
@@ -54,6 +118,23 @@ export type CloudPrepared = {
   containerScope: string
   registryScope: string
   next: string
+}
+export type ProviderCloudPrepared = {
+  provider: Exclude<CloudProvider, 'azure'>
+  prepared: boolean
+  configured: boolean
+  mode?: ProcessingMode
+  next?: string
+}
+export type CloudPrepared = AzureCloudPrepared | ProviderCloudPrepared
+export type CloudPreparedFor<P extends CloudProvider> =
+  P extends 'azure' ? AzureCloudPrepared : ProviderCloudPrepared & { provider: P }
+export type CloudImageImportResult<P extends CloudProvider = CloudProvider> = {
+  provider: P
+  image: string
+  digest: string
+  verified: boolean
+  sourceHash?: string
 }
 export type CloudSetupProgress = {
   operation: string | null
@@ -113,6 +194,7 @@ export type Entry = {
   sourceUrl?: string | null
   license?: string | null
   attribution?: string | null
+  provider?: string | null
 }
 export type Folder = { id: string; name: string; count: number }
 export type ResourceUsage = { cpu: number | null; ramBytes: number | null; gpu: null; npu: null }
@@ -153,9 +235,9 @@ export type PopularChart = {
 }
 export type MidiSearchResult = {
   id: string
-  provider: 'commons' | 'mutopia' | 'archive'
+  provider: 'commons' | 'mutopia' | 'archive' | 'bitmidi' | 'freemidi'
   dedupeKey: string
-  source: 'Wikimedia Commons' | 'Mutopia Project' | 'Internet Archive'
+  source: 'Wikimedia Commons' | 'Mutopia Project' | 'Internet Archive' | 'BitMidi' | 'FreeMIDI'
   title: string
   artist: string | null
   license: string
@@ -176,6 +258,8 @@ export type QueueJob = {
   progress: number
   order: number
   processingMode?: 'local' | 'cloud'
+  cloudProvider?: string
+  cloudProviderName?: string | null
   errorCode: string | null
   errorMessage: string | null
   fix: string | null
@@ -316,13 +400,24 @@ async function call<T = object>(name: string, ...args: unknown[]): Promise<T> {
 let subscriptionsRequest: Promise<AzureSubscription[]> | null = null
 
 export const host = {
-  cloudStatus: (requestId?: string) => call<CloudStatus>('cloud_status', requestId ?? null),
-  cancelCloudStatus: (requestId: string) =>
-    call<{ cancelRequested: boolean }>('cancel_cloud_status', requestId),
-  cloudReadinessProgress: (requestId: string) =>
-    call<CloudReadinessProgress>('cloud_readiness_progress', requestId),
-  cloudSetupProgress: () => call<CloudSetupProgress>('cloud_setup_progress'),
-  cancelCloudSetup: () => call<{ cancelRequested: boolean }>('cancel_cloud_setup'),
+  cloudProviders: () =>
+    call<{ providers: CloudProviderInfo[]; activeProvider: CloudProvider | null; issue?: string }>('cloud_providers'),
+  cloudSettings: <P extends CloudProvider>(provider: P) =>
+    call<{ provider: P; settings: CloudProviderSettingsById[P] }>('cloud_settings', provider),
+  selectCloudProvider: (provider: CloudProvider) =>
+    call<{ provider: CloudProvider; providerName: string }>('select_cloud_provider', provider),
+  cloudStatus: <P extends CloudProvider = CloudProvider>(requestId?: string, provider?: P) =>
+    call<CloudStatusFor<P>>('cloud_status', requestId ?? null, provider ?? null),
+  cancelCloudStatus: (requestId: string, provider?: CloudProvider) =>
+    call<{ cancelRequested: boolean }>('cancel_cloud_status', requestId, provider ?? null),
+  cloudReadinessProgress: (requestId: string, provider?: CloudProvider) =>
+    call<CloudReadinessProgress>('cloud_readiness_progress', requestId, provider ?? null),
+  cloudSetupProgress: (provider?: CloudProvider) =>
+    call<CloudSetupProgress>('cloud_setup_progress', provider ?? null),
+  cancelCloudSetup: (provider?: CloudProvider) =>
+    call<{ cancelRequested: boolean }>('cancel_cloud_setup', provider ?? null),
+  cloudSubscriptions: <P extends keyof CloudAccountsById>(provider: P, profile?: string, region?: string) =>
+    call<{ subscriptions: CloudAccountsById[P][] }>('list_cloud_subscriptions', provider, profile ?? null, region ?? null),
   azureSubscriptions: () => {
     if (!subscriptionsRequest)
       subscriptionsRequest = call<{ subscriptions: AzureSubscription[] }>('azure_subscriptions')
@@ -330,20 +425,25 @@ export const host = {
         .finally(() => { subscriptionsRequest = null })
     return subscriptionsRequest
   },
-  configureCloud: (config: CloudConfig) => call<CloudStatus>('configure_cloud', config),
-  prepareCloud: (config: CloudConfig, consent: boolean) =>
-    call<CloudPrepared>('prepare_cloud', config, consent),
-  enableCloudLogging: (consent: boolean) =>
-    call<{ workspaceId: string; customerId: string; location: string }>('enable_cloud_logging', consent),
-  buildCloudWorker: () =>
-    call<{ image: string; digest: string }>('build_cloud_worker'),
-  finishCloud: (image: string, useSavedToken: boolean) =>
-    call<CloudStatus & { next: string }>('finish_cloud', image, useSavedToken),
-  setProcessingMode: async (mode: ProcessingMode) =>
-    (await call<ProcessingModeResult>('set_processing_mode', mode)).mode,
-  setProcessingModeWithStatus: (mode: ProcessingMode) =>
-    call<ProcessingModeResult>('set_processing_mode', mode),
-  clearCloud: () => call<CloudStatus>('clear_cloud'),
+  configureCloud: <P extends CloudProvider>(config: CloudProviderSettingsById[P], provider: P) =>
+    call<CloudStatusFor<P>>('configure_cloud', config, provider),
+  prepareCloud: <P extends CloudProvider>(config: CloudProviderSettingsById[P], consent: boolean, provider: P) =>
+    call<CloudPreparedFor<P>>('prepare_cloud', config, consent, provider),
+  enableCloudLogging: (consent: boolean, provider?: CloudProvider) =>
+    call<{ workspaceId: string; customerId: string; location: string }>(
+      'enable_cloud_logging', consent, provider ?? null),
+  buildCloudWorker: (provider?: CloudProvider) =>
+    call<{ provider: CloudProvider; image: string; digest: string }>(
+      'build_cloud_worker', provider ?? null),
+  importCloudImage: <P extends CloudProvider>(sourceImage: string, provider: P) =>
+    call<CloudImageImportResult<P>>('import_cloud_image', sourceImage, provider),
+  finishCloud: <P extends CloudProvider>(image: string, useSavedToken: boolean, provider: P) =>
+    call<CloudStatusFor<P> & { next?: string }>('finish_cloud', image, useSavedToken, provider),
+  setProcessingMode: async (mode: ProcessingMode, provider?: CloudProvider) =>
+    (await call<ProcessingModeResult>('set_processing_mode', mode, provider ?? null)).mode,
+  setProcessingModeWithStatus: (mode: ProcessingMode, provider?: CloudProvider) =>
+    call<ProcessingModeResult>('set_processing_mode', mode, provider ?? null),
+  clearCloud: (provider?: CloudProvider) => call<CloudStatus>('clear_cloud', provider ?? null),
   modelDownloadStatus: () => call<{ models: ModelDownloads }>('model_download_status').then((r) => r.models),
   modelPreflight: () => call<{ models: ModelPreflight }>('model_preflight').then((r) => r.models),
   startModelDownload: (model: TranscriptionModel) =>
@@ -351,6 +451,9 @@ export const host = {
   getTranscriptionModel: () => call<{ model: TranscriptionModel }>('get_transcription_model').then((r) => r.model),
   setTranscriptionModel: (model: TranscriptionModel) =>
     call<{ model: TranscriptionModel }>('set_transcription_model', model).then((r) => r.model),
+  ffmpegStatus: () => call<FfmpegStatus>('ffmpeg_status'),
+  setFfmpegPath: (path: string) => call<FfmpegStatus>('set_ffmpeg_path', path),
+  browseFfmpegPath: () => call<{ path: string | null }>('browse_ffmpeg_path'),
   hfTokenStatus: () => call<{ configured: boolean }>('hf_token_status').then((r) => r.configured),
   setHfToken: (token: string) => call<{ configured: boolean }>('set_hf_token', token).then((r) => r.configured),
   clearHfToken: () => call<{ configured: boolean }>('clear_hf_token').then((r) => r.configured),
@@ -365,8 +468,12 @@ export const host = {
     call<{ results: MidiSearchResult[]; nextStart: number | null }>('search_midi_mutopia', query, startAt),
   searchMidiArchive: (query: string) =>
     call<{ results: MidiSearchResult[] }>('search_midi_archive', query).then((r) => r.results),
-  importMidiResult: (resultId: string) =>
-    call<{ entry: Entry }>('import_midi_result', resultId).then((r) => r.entry),
+  searchMidiBitMidi: (query: string) =>
+    call<{ results: MidiSearchResult[] }>('search_midi_bitmidi', query).then((r) => r.results),
+  searchMidiFreeMidi: (query: string) =>
+    call<{ results: MidiSearchResult[] }>('search_midi_freemidi', query).then((r) => r.results),
+  importMidiResult: (resultId: string, allowUnknownLicense = false) =>
+    call<{ entry: Entry }>('import_midi_result', resultId, allowUnknownLicense).then((r) => r.entry),
   addLink: (url: string) => call<{ job: QueueJob }>('add_link', url).then((r) => r.job),
   importFile: (name: string, dataBase64: string) => call<{ entry: Entry }>('import_file', name, dataBase64).then((r) => r.entry),
   library: () => call<{ entries: Entry[] }>('list_library').then((r) => r.entries),

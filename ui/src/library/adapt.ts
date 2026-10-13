@@ -1,24 +1,18 @@
-import { hasPitchedScore, type Confidence, type Song, type Track } from '../workspace/song'
+import { type Confidence, type Song, type Track } from '../workspace/song'
 import { measures } from '../workspace/meter'
 
 type HostTrack = Track & { sourceInstrument?: string }
 
-/**
- * The host's song JSON, shaped for the workspace: the host's generated accompaniment is replaced
- * by the workspace's own Creative tracks, and the Chords track and its confidence are added.
- */
+/** Shape saved song data for practice without generated accompaniment tracks. */
 export function fromHost(raw: Omit<Song, 'tracks'> & { accompaniment?: unknown; tracks: HostTrack[] }): Song {
   const bpb = raw.beatsPerBar || 4
   const bars = raw.bars
   const barMap = measures({ ...raw, beatsPerBar: bpb })
   const tracks: Track[] = raw.tracks
-    .filter((t) => t.id !== 'accompaniment' && t.instrument !== 'chords')
+    .filter((t) => t.id !== 'accompaniment' && t.instrument !== 'chords' && t.group !== 'creative')
     .map((track) => track.gmProgram != null || track.sourceInstrument !== 'clean_electric_guitar'
       ? track
       : { ...track, gmProgram: 27 })
-  if (hasPitchedScore(raw) && raw.chords.some((chord) => chord.symbol && chord.symbol !== 'N.C.' && chord.tones.length)) {
-    tracks.push({ id: 'chords', instrument: 'chords', group: 'creative', chordal: true, name: 'Chords', detail: 'The progression as held chords over a bass line' })
-  }
   const filled = (list: Confidence[] | undefined): Confidence[] => Array.from({ length: bars }, (_, i) => list?.[i] ?? 'high')
   const chordConfidence = Array.from({ length: bars }, (_, i): Confidence => {
     const span = barMap[i]

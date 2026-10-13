@@ -477,6 +477,7 @@ export class Engine {
 
     const sustained = new Map(sustainedChords(song.chords).map((chord) => [chord.startBeat, chord.beats]))
     song.chords.forEach((chord, i) => {
+      if (!song.tracks.some((track) => track.instrument === 'chords' && track.group !== 'creative')) return
       if (!chord.symbol || chord.symbol === 'N.C.' || !chord.tones.length) return
       const tones = this.swaps.get(i) ?? chord.tones
       if (!tones.length) return

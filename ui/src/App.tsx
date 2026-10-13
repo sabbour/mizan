@@ -9,9 +9,10 @@ import { fromHost } from './library/adapt'
 import { useQueue } from './library/useQueue'
 import { activeAnalysis, analysisProgress, decodingErrorHeadline, jobTitle } from './library/format'
 import { lessonById, lessonNote, lessonSong } from './course/curriculum'
-import { LessonPanel, PianoLessonPanel } from './course/Course'
+import { FrettedLessonPanel, LessonPanel, PianoLessonPanel } from './course/Course'
 import { browseTo, DEFAULT_BROWSE, type CourseBrowse } from './course/browse'
 import { pianoLessonById, pianoLessonNote, pianoLessonSong } from './course/piano'
+import { frettedLessonById, frettedLessonNote, frettedLessonSong } from './course/fretted'
 import { lessonPosition, saveLessonPosition } from './course/state'
 
 type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
@@ -50,8 +51,8 @@ class WorkspaceBoundary extends Component<{ children: ReactNode; onBack: () => v
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
-  // Songs or Drum course, kept while a song or lesson is open so Back returns to the same tab.
-  const [libraryTab, setLibraryTab] = useState<LibraryTab>('songs')
+  // The selected library tab is kept while a song or lesson is open so Back returns to it.
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>('catalog')
   // Where the Course tab is (instrument, drum list, genre); Back shows the list a lesson came from. Not stored.
   const [courseBrowse, setCourseBrowse] = useState<CourseBrowse>(DEFAULT_BROWSE)
   // Note letters and Fingering follow this run of lessons; Back clears them. The practice views use saved preferences.
@@ -96,10 +97,12 @@ export default function App() {
   const opened = view.kind === 'song' || view.kind === 'job' ? view.opened : undefined
   const lesson = view.kind === 'lesson' ? lessonById(view.id) : undefined
   const pianoLesson = view.kind === 'lesson' && !lesson ? pianoLessonById(view.id) : undefined
+  const frettedLesson = view.kind === 'lesson' && !lesson && !pianoLesson ? frettedLessonById(view.id) : undefined
   // One song and starting setup per opened lesson, so the workspace keeps its engine across renders. A lesson always
   // starts at bar 1; its loop and other saved choices carry over.
   const practised = useMemo(() => lesson ? { song: lessonSong(lesson), start: { ...lessonPosition(lesson), bar: 1 } }
-    : pianoLesson && { song: pianoLessonSong(pianoLesson), start: { ...lessonPosition(pianoLesson), bar: 1 } }, [lesson, pianoLesson])
+    : pianoLesson ? { song: pianoLessonSong(pianoLesson), start: { ...lessonPosition(pianoLesson), bar: 1 } }
+      : frettedLesson && { song: frettedLessonSong(frettedLesson), start: { ...lessonPosition(frettedLesson), bar: 1 } }, [lesson, pianoLesson, frettedLesson])
   const updating = opened && activeAnalysis(queue.jobs, opened.entry.id)
   const updated = opened && done?.songId === opened.entry.id
   const decodingHeadline = decodingErrorHeadline(opened?.song.decodingErrors?.count)
@@ -148,11 +151,26 @@ export default function App() {
             songId={`course:${pianoLesson.id}`}
             start={practised.start}
             note={pianoLessonNote(pianoLesson)}
-            defaults={{ click: true, piano: 'keyboard', noteNames: lessonGuides.noteNames, fingering: lessonGuides.fingering }}
+            defaults={{ click: true, piano: 'hands', noteNames: lessonGuides.noteNames, fingering: lessonGuides.fingering }}
             onGuides={keepGuides}
             onPosition={(position) => saveLessonPosition(pianoLesson, position)}
             onBack={back}
             analysisNotice={<PianoLessonPanel lesson={pianoLesson} onLesson={openLesson} />}
+          />
+        </WorkspaceBoundary>
+      ) : frettedLesson && practised ? (
+        <WorkspaceBoundary key={`course:${frettedLesson.id}`} onBack={back}>
+          <Workspace
+            key={`course:${frettedLesson.id}`}
+            song={practised.song}
+            songId={`course:${frettedLesson.id}`}
+            start={practised.start}
+            note={frettedLessonNote(frettedLesson)}
+            defaults={{ click: true, guitar: 'fretboard', bass: 'fretboard', noteNames: lessonGuides.noteNames, fingering: lessonGuides.fingering }}
+            onGuides={keepGuides}
+            onPosition={(position) => saveLessonPosition(frettedLesson, position)}
+            onBack={back}
+            analysisNotice={<FrettedLessonPanel lesson={frettedLesson} onLesson={openLesson} />}
           />
         </WorkspaceBoundary>
       ) : opened ? (

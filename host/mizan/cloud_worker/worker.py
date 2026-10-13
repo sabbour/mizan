@@ -94,7 +94,8 @@ def _worker_error(exc: Exception, stage: str, run_id: str | None,
             message = message.replace(value, "[redacted]")
     message = re.sub(r"https?://\S+", "[redacted URL]", message)
     message = re.sub(
-        r"(?i)\b(?:bearer|hf[_-]?token|token|sig|sas|authorization|accountkey|sharedkey)\b"
+        r"(?i)\b(?:bearer|hf[_-]?token|token|access[_-]?token|sig|sas|authorization|accountkey|"
+        r"sharedkey|aws_access_key_id|aws_secret_access_key|aws_session_token|private_key)\b"
         r"\s*[=:]?\s*\S+",
                      "[redacted secret]", message)
     message = re.sub(
@@ -117,17 +118,17 @@ def _worker_error(exc: Exception, stage: str, run_id: str | None,
     }
 
 
-def _publish_worker_error(container, result_blob: str, envelope: dict) -> None:
+def _publish_worker_error(storage, result_blob: str, envelope: dict) -> None:
     payload = json.dumps(envelope, allow_nan=False, separators=(",", ":")).encode("utf-8")
     if len(payload) > MAX_WORKER_ERROR_BYTES:
         envelope["error"]["message"] = "Worker error details exceeded the safe size limit."
         envelope["error"]["frames"] = []
         payload = json.dumps(envelope, allow_nan=False, separators=(",", ":")).encode("utf-8")
     print(f"MIZAN_WORKER_ERROR {payload.decode('utf-8')}", file=sys.stderr, flush=True)
-    if container is None or envelope["runId"] is None:
+    if storage is None or envelope["runId"] is None:
         return
     try:
-        container.upload_blob(result_blob, payload, overwrite=True)
+        storage.upload_bytes(result_blob, payload, limit=MAX_WORKER_ERROR_BYTES, overwrite=True)
     except Exception as publish_error:
         print(f"MIZAN_WORKER_ERROR_ARTIFACT_UNAVAILABLE type={type(publish_error).__name__[:80]}",
               file=sys.stderr, flush=True)
@@ -302,7 +303,7 @@ def main() -> None:
     args = parser.parse_args()
     stage = "startup"
     run_id = _run_id(args.result_blob)
-    container = None
+    storage = None
     workspace = Path(".aca-job")
     failed = False
     try:
@@ -311,30 +312,18 @@ def main() -> None:
         stage = "credentials"
         token = os.environ["HF_TOKEN"]
         stage = "storage"
-        from azure.identity import ManagedIdentityCredential
-        from azure.storage.blob import BlobServiceClient
-
-        blob_service = BlobServiceClient(
-            os.environ["AZURE_STORAGE_BLOB_URL"],
-            credential=ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"]),
-        )
-        container = blob_service.get_container_client(os.environ["AZURE_STORAGE_CONTAINER"])
+        if __package__:
+            from .storage import from_environment
+        else:
+            from storage import from_environment
+        storage = from_environment()
         stage = "download"
-        source = container.get_blob_client(args.source_blob)
-        source_size = source.get_blob_properties().size
+        source_size = storage.size(args.source_blob)
         if not 0 < source_size <= MAX_AUDIO_BYTES:
-            raise ValueError("Audio exceeds the 250 MiB spike limit.")
+            raise ValueError("Audio exceeds the 250 MiB Cloud worker limit.")
         workspace.mkdir()
         audio = workspace / "input.wav"
-        with audio.open("wb") as output:
-            received = 0
-            for chunk in source.download_blob(max_concurrency=1).chunks():
-                received += len(chunk)
-                if received > source_size or received > MAX_AUDIO_BYTES:
-                    raise ValueError("Downloaded WAV exceeds its declared Blob size or the 250 MiB limit.")
-                output.write(chunk)
-        if audio.stat().st_size != source_size:
-            raise ValueError("Downloaded WAV size does not match the source Blob.")
+        storage.download(args.source_blob, audio, limit=MAX_AUDIO_BYTES)
         stage = "separate"
         separation = separate(audio, workspace)
         stage = "transcribe"
@@ -343,8 +332,8 @@ def main() -> None:
         stems = separation.pop("stems")
         for name, metadata in stems.items():
             key = args.result_blob[:-5] + f"/stems/{name}.wav"
-            with (workspace / f"{name}.wav").open("rb") as stream:
-                container.upload_blob(key, stream, overwrite=False)
+            storage.upload(key, workspace / f"{name}.wav",
+                           limit=MAX_STEM_BYTES, overwrite=False)
             metadata["blob"] = key
         result["input"] = {"blob": args.source_blob, "bytes": source_size, "sha256": _sha256(audio)}
         result["separation"] = separation
@@ -353,15 +342,18 @@ def main() -> None:
         if len(manifest) > MAX_RESULT_BYTES:
             raise ValueError("Combined transcription manifest exceeds 32 MiB.")
         stage = "upload_result"
-        container.upload_blob(args.result_blob, manifest, overwrite=False)
+        storage.upload_bytes(args.result_blob, manifest,
+                             limit=MAX_RESULT_BYTES, overwrite=False)
     except Exception as exc:
         failed = True
         envelope = _worker_error(
             exc, stage, run_id,
             (os.environ.get("HF_TOKEN", ""), os.environ.get("AZURE_STORAGE_BLOB_URL", ""),
-             os.environ.get("AZURE_CLIENT_ID", ""), args.source_blob, args.result_blob),
+             os.environ.get("AZURE_CLIENT_ID", ""), os.environ.get("AWS_ACCESS_KEY_ID", ""),
+             os.environ.get("AWS_SECRET_ACCESS_KEY", ""), os.environ.get("AWS_SESSION_TOKEN", ""),
+             os.environ.get("S3_ENDPOINT_URL", ""), args.source_blob, args.result_blob),
         )
-        _publish_worker_error(container, args.result_blob, envelope)
+        _publish_worker_error(storage, args.result_blob, envelope)
         sys.tracebacklimit = 0
         raise SystemExit(1) from None
     finally:

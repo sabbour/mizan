@@ -3,9 +3,10 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const profile = await mkdtemp(join(process.cwd(), '.mizan-hf-test-'))
+const profile = await mkdtemp(join(tmpdir(), '.mizan-hf-test-'))
 const browser = spawn(process.env.MIZAN_TEST_BROWSER ?? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', [
   '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', 'about:blank',
 ], { stdio: 'ignore' })
@@ -43,13 +44,15 @@ try {
   }
   await call('Page.enable')
   await call('Runtime.enable')
-  await call('Page.navigate', { url: 'http://localhost:5173' })
+  await call('Page.navigate', { url: process.env.MIZAN_TEST_URL ?? 'http://localhost:5173' })
   for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-main")'); i++) await sleep(100)
   assert.ok(await evaluate('!!document.querySelector(".lib-main")'), 'Library loaded')
   const configured = await evaluate(`(async () => {
     const button = [...document.querySelectorAll('button')].find(el => /hugging face|model access|settings/i.test(el.textContent + ' ' + el.getAttribute('aria-label')))
     if (!button) throw new Error('Hugging Face settings button missing')
     button.click()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    ;[...document.querySelectorAll('.model-settings-sections button')].find(el => el.textContent.includes('Models and account')).click()
     await new Promise(resolve => setTimeout(resolve, 100))
     document.querySelector('.model-settings-access summary').click()
     const input = document.querySelector('input[type="password"]')
@@ -82,9 +85,9 @@ try {
       setter.call(input, token)
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.closest('form').querySelector('button[type="submit"]').click()
-      for (let i = 0; i < 50 && !input.closest('.model-settings-access').querySelector('[role="alert"]'); i++)
+      for (let i = 0; i < 50 && !document.querySelector('.model-settings [role="alert"]'); i++)
         await new Promise(resolve => setTimeout(resolve, 50))
-      const message = input.closest('.model-settings-access').querySelector('[role="alert"]')?.textContent
+      const message = document.querySelector('.model-settings [role="alert"]')?.textContent
       if (!message?.includes('Credential Manager unavailable')) throw new Error('Credential storage failure is hidden: ' + JSON.stringify({
         message, disabled: input.closest('form').querySelector('button[type="submit"]').disabled, status: status(),
       }))
@@ -107,13 +110,18 @@ try {
     for (let i = 0; i < 50 && !large.checked; i++) await new Promise(resolve => setTimeout(resolve, 50))
     if (!large.checked) throw new Error('Large did not become selected')
     document.querySelector('[aria-label="Close song analysis settings"]').click()
+    await new Promise(resolve => setTimeout(resolve, 50))
     document.querySelector('[aria-label="Song analysis settings"]').click()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    ;[...document.querySelectorAll('.model-settings-sections button')].find(el => el.textContent.includes('Models and account')).click()
+    await new Promise(resolve => setTimeout(resolve, 50))
     for (let i = 0; i < 50 && !document.querySelector('input[value="muscriptor-large"]')?.checked; i++)
       await new Promise(resolve => setTimeout(resolve, 50))
     const saved = document.querySelector('input[value="muscriptor-large"]')?.checked
     const appSource = await (await fetch('/src/App.tsx')).text()
     const bridgeUrl = appSource.match(/from "([^"]*bridge\\.ts[^"]*)"/)?.[1]
     const { host, HostError } = await import(bridgeUrl)
+    document.querySelector('.model-settings-access summary').click()
     const input = document.querySelector('input[type="password"]')
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
     setter.call(input, 'hf_browser_test_only_placeholder')
@@ -164,6 +172,8 @@ try {
     })
     try {
       document.querySelector('[aria-label="Song analysis settings"]').click()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      ;[...document.querySelectorAll('.model-settings-sections button')].find(el => el.textContent.includes('Models and account')).click()
       for (let i = 0; i < 50 && !document.querySelector('input[value="muscriptor-large"]')?.disabled; i++)
         await new Promise(resolve => setTimeout(resolve, 50))
       const large = document.querySelector('input[value="muscriptor-large"]')

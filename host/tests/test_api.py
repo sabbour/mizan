@@ -1,10 +1,13 @@
 import json
 import inspect
 from threading import Event
+from urllib.request import Request, urlopen
 
 import pytest
 
 from mizan.api import Api, _stage_details, queue_job
+from mizan.artifacts import ArtifactServer
+from mizan import azure_cloud
 from mizan.jobs import JobRunner, JobStore
 
 from test_jobs import URL, wait_for
@@ -104,7 +107,7 @@ def test_cloud_failure_hint_points_to_provider_error_details():
     })
 
     assert result["fix"] == (
-        "Review the Azure error details and correct the reported issue before retrying Cloud processing.")
+        "Review the Cloud error details and correct the reported issue before retrying.")
     assert "sign in" not in result["fix"].lower()
     assert "connectivity" not in result["fix"].lower()
     json.dumps(result)
@@ -145,9 +148,80 @@ def test_unexpected_errors_are_logged_and_enveloped(api, monkeypatch, caplog):
     assert "test storage failure" in caplog.text
 
 
+def test_job_preview_uses_served_existing_files(api, tmp_path):
+    bridge, runner = api
+    job_id = bridge.start_job(URL, "piano")["job"]["id"]
+    wait_for(runner.store, job_id, "done")
+    mix, piano = tmp_path / "original.wav", tmp_path / "piano.wav"
+    mix.write_bytes(b"RIFF-test-original-audio")
+    piano.write_bytes(b"RIFF-test-piano-audio")
+    runner.store.update(job_id, details={
+        "previewArtifacts": {"mix": str(mix), "piano": str(piano),
+                             "drums": str(tmp_path / "missing.wav")},
+        "found": {"key": "A minor", "tempo": 112},
+    })
+    server = ArtifactServer()
+    bridge._artifacts = server
+    try:
+        found = bridge.get_job(job_id)["job"]["found"]
+        assert found["key"] == "A minor" and found["tempo"] == 112
+        assert set(found["stems"]) == {"mix", "piano"}
+        assert str(tmp_path) not in json.dumps(found)
+        with urlopen(found["stems"]["mix"], timeout=5) as response:
+            assert response.read() == mix.read_bytes()
+        with urlopen(Request(found["stems"]["piano"], headers={"Range": "bytes=5-8"}),
+                     timeout=5) as response:
+            assert response.status == 206
+            assert response.read() == piano.read_bytes()[5:9]
+        mix.unlink()
+        piano.unlink()
+        assert "stems" not in bridge.get_job(job_id)["job"]["found"]
+    finally:
+        server.close()
+
+
+def test_completed_legacy_job_recovers_preview_without_reanalysis(api, tmp_path):
+    bridge, runner = api
+    job_id = bridge.start_job(URL, "piano")["job"]["id"]
+    wait_for(runner.store, job_id, "done")
+    analysis = tmp_path / "analysis.json"
+    analysis.write_text(json.dumps({"key": {"tonic": "F", "mode": "major"}, "bpm": 98}),
+                        encoding="utf-8")
+    mix = tmp_path / "original.wav"
+    mix.write_bytes(b"saved recording")
+    runner.store.update(job_id, details={
+        "processingMode": "cloud",
+        "artifacts": {"analysis": str(analysis), "mix": str(mix)},
+        "previewArtifacts": {"piano": str(mix)},
+    })
+    result = bridge.get_job(job_id)
+    assert result["ok"]
+    assert result["job"]["found"] == {
+        "key": "F major", "tempo": 98, "stems": {"mix": mix.as_uri()},
+    }
+    assert result["job"]["status"] == "done"
+    assert bridge.list_queue()["jobs"][0]["found"] == result["job"]["found"]
+
+
+def test_bad_saved_preview_facts_report_warning_but_keep_audio(api, tmp_path, caplog):
+    bridge, runner = api
+    job_id = bridge.start_job(URL, "piano")["job"]["id"]
+    wait_for(runner.store, job_id, "done")
+    analysis, mix = tmp_path / "analysis.json", tmp_path / "original.wav"
+    analysis.write_text("not JSON", encoding="utf-8")
+    mix.write_bytes(b"saved recording")
+    runner.store.update(job_id, details={"artifacts": {"analysis": str(analysis), "mix": str(mix)}})
+    result = bridge.get_job(job_id)["job"]
+    assert result["found"] == {"stems": {"mix": mix.as_uri()}}
+    assert any("Saved key and tempo could not be loaded" in warning for warning in result["warnings"])
+    assert "Could not read job preview facts" in caplog.text
+
+
 def test_pywebview_can_inspect_bridge_arguments(api):
     bridge, _ = api
     for method, expected in (
+        ("ffmpeg_status", []),
+        ("set_ffmpeg_path", ["path"]),
         ("get_transcription_model", []),
         ("set_transcription_model", ["model"]),
         ("model_download_status", []),
@@ -155,7 +229,7 @@ def test_pywebview_can_inspect_bridge_arguments(api):
         ("hf_token_status", []),
         ("set_hf_token", ["token"]),
         ("clear_hf_token", []),
-        ("cancel_cloud_setup", []),
+        ("cancel_cloud_setup", ["provider"]),
         ("start_job", ["url", "instrument"]),
         ("get_job", ["job_id"]),
         ("cancel_job", ["job_id"]),
@@ -172,20 +246,102 @@ def test_cancel_cloud_setup_only_signals_active_provision(api):
     assert bridge.cancel_cloud_setup() == {"ok": True, "cancelRequested": False}
     with cloud.track_setup("provision", 10):
         assert bridge.cancel_cloud_setup() == {"ok": True, "cancelRequested": True}
-        assert cloud._setup_cancelled.is_set()
-    assert not cloud._setup_cancelled.is_set()
+        assert azure_cloud._setup_cancelled.is_set()
+    assert not azure_cloud._setup_cancelled.is_set()
     assert bridge.cancel_cloud_status("unknown-request") == {"ok": True, "cancelRequested": False}
+
+
+def test_azure_subscription_compatibility_aliases_are_never_routed_to_active_provider(api, monkeypatch):
+    from mizan import cloud
+
+    bridge, _ = api
+    calls = []
+    cloud._setting("cloud_provider", "aws")
+    monkeypatch.setattr(cloud, "list_subscriptions", lambda *, provider=None: (
+        calls.append(provider) or [{
+            "subscriptionId": "sub", "displayName": "Azure account",
+            "tenantId": "tenant", "state": "Enabled",
+        }]))
+
+    assert bridge.azure_subscriptions()["subscriptions"] == [
+        {"id": "sub", "name": "Azure account", "tenantId": "tenant"},
+    ]
+    assert bridge.list_subscriptions()["subscriptions"][0]["subscriptionId"] == "sub"
+    assert calls == ["azure", "azure"]
+
+
+def test_cloud_account_discovery_forwards_the_selected_aws_profile(api, monkeypatch):
+    from mizan import cloud
+
+    bridge, _ = api
+    calls = []
+    account = {"accountId": "123456789012", "profile": "work", "region": "us-west-2"}
+    monkeypatch.setattr(cloud, "list_subscriptions", lambda **options: (
+        calls.append(options) or [account]))
+    result = bridge.list_cloud_subscriptions("aws", "work", "us-west-2")
+    assert result["ok"] is True
+    assert result["subscriptions"] == [account]
+    assert calls == [{"provider": "aws", "profile": "work", "region": "us-west-2"}]
+
+
+def test_setup_api_pins_provider_before_progress_tracking(api, monkeypatch):
+    from contextlib import contextmanager
+    from mizan import cloud
+
+    bridge, _ = api
+    calls = []
+
+    @contextmanager
+    def track(operation, total, *, provider=None):
+        calls.append(("track", operation, total, provider))
+        cloud._setting("cloud_provider", "gcp")
+        yield
+
+    monkeypatch.setattr(cloud, "track_setup", track)
+    monkeypatch.setattr(cloud, "configure", lambda config, *, provider=None: (
+        calls.append(("configure", provider, config)) or {"ok": True, "provider": provider}))
+
+    result = bridge.configure_cloud({"provider": "aws", "profile": "work"}, "aws")
+
+    assert result["ok"] is True
+    assert calls == [
+        ("track", "configuration", 2, "aws"),
+        ("configure", "aws", {"provider": "aws", "profile": "work"}),
+    ]
+
+
+def test_readiness_status_progress_and_cancellation_use_explicit_provider(api, monkeypatch):
+    from mizan import cloud
+
+    bridge, _ = api
+    calls = []
+    monkeypatch.setattr(cloud, "panel_status", lambda request_id, *, provider=None: (
+        calls.append(("status", request_id, provider)) or {"provider": provider, "configured": False}))
+    monkeypatch.setattr(cloud, "readiness_progress", lambda request_id, *, provider=None: (
+        calls.append(("progress", request_id, provider)) or {"stage": "idle"}))
+    monkeypatch.setattr(cloud, "cancel_panel_status", lambda request_id, *, provider=None: (
+        calls.append(("cancel", request_id, provider)) or {"cancelRequested": True}))
+    cloud._setting("cloud_provider", "gcp")
+
+    assert bridge.cloud_status("setup-1", "aws")["provider"] == "aws"
+    assert bridge.cloud_readiness_progress("setup-1", "aws")["stage"] == "idle"
+    assert bridge.cancel_cloud_status("setup-1", "aws")["cancelRequested"] is True
+    assert calls == [
+        ("status", "setup-1", "aws"),
+        ("progress", "setup-1", "aws"),
+        ("cancel", "setup-1", "aws"),
+    ]
 
 
 def test_cloud_readiness_progress_is_local_and_request_scoped(api, monkeypatch):
     from mizan import cloud
 
     bridge, _ = api
-    check = cloud._ReadinessCheck(("settings",))
+    check = azure_cloud._ReadinessCheck(("settings",))
     check.set_progress("ACR image", "Authenticating with the selected registry.")
     cancelled = Event()
-    cloud._readiness_requests["progress-request"] = (check, cancelled)
-    monkeypatch.setattr(cloud, "_job_capabilities",
+    azure_cloud._readiness_requests["progress-request"] = (check, cancelled)
+    monkeypatch.setattr(azure_cloud, "_job_capabilities",
                         lambda *_args: pytest.fail("Progress polling launched Azure readiness"))
     try:
         progress = bridge.cloud_readiness_progress("progress-request")
@@ -195,9 +351,9 @@ def test_cloud_readiness_progress_is_local_and_request_scoped(api, monkeypatch):
         assert progress["elapsedSeconds"] >= 0
         assert bridge.cloud_readiness_progress("unknown-request") == {
             "ok": True, "stage": "idle", "detail": None, "elapsedSeconds": 0,
-            "timeoutSeconds": cloud.READINESS_TIMEOUT}
+            "timeoutSeconds": azure_cloud.READINESS_TIMEOUT}
     finally:
-        cloud._readiness_requests.pop("progress-request", None)
+        azure_cloud._readiness_requests.pop("progress-request", None)
 
 
 @pytest.mark.parametrize("request_id", [None, "", "x" * 129, 42, []])
@@ -219,9 +375,9 @@ def test_cloud_mode_api_returns_saved_setup_without_live_readiness(api, monkeypa
     cloud._setting("cloud_prepared", json.dumps(config))
     cloud._setting("cloud_environment_ready", "yes")
     cloud._setting("cloud_job_created",
-                   f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@{cloud.SUPPORTED_WORKER_DIGEST}")
+                   f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@{azure_cloud.SUPPORTED_WORKER_DIGEST}")
     cloud._setting("transcription_model", "muscriptor-large")
-    monkeypatch.setattr(cloud, "_job_capabilities",
+    monkeypatch.setattr(azure_cloud, "_job_capabilities",
                         lambda *_args: pytest.fail("Cloud mode save ran live readiness"))
     monkeypatch.setattr(cloud, "panel_status",
                         lambda *_args: pytest.fail("Cloud mode save launched a panel check"))
@@ -259,7 +415,7 @@ def test_add_link_deduplicates_only_same_selected_provider_and_model(monkeypatch
     store = JobStore()
     cloud._setting("processing_mode", "cloud")
     monkeypatch.setattr("mizan.engine.muscriptor.check_model_resources", lambda _model: None)
-    monkeypatch.setattr(cloud, "_job_capabilities",
+    monkeypatch.setattr(azure_cloud, "_job_capabilities",
                         lambda *_args: pytest.fail("Submission checked remote readiness"))
     runner = JobRunner(store, pipeline)
     bridge = Api(runner)

@@ -1,6 +1,7 @@
 name: MSIX
 
 on:
+  pull_request:
   push:
     tags:
       - "v*"
@@ -34,39 +35,46 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          choco install ffmpeg-full -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "FFmpeg installation failed." }
-          $ffmpeg = Get-ChildItem "$env:ChocolateyInstall\lib\ffmpeg-full" -Filter ffmpeg.exe -Recurse |
-            Where-Object { Test-Path (Join-Path $_.Directory.Parent.FullName "LICENSE") } |
-            Select-Object -First 1
-          if (-not $ffmpeg) { throw "The FFmpeg distribution and license were not found." }
-          "MIZAN_FFMPEG=$($ffmpeg.FullName)" >> $env:GITHUB_ENV
           npm.cmd ci --prefix ui
           if ($LASTEXITCODE -ne 0) { throw "UI dependency installation failed." }
           python -m venv host\.venv
           if ($LASTEXITCODE -ne 0) { throw "Python environment creation failed." }
           host\.venv\Scripts\python.exe -m pip install .\host pip-licenses
           if ($LASTEXITCODE -ne 0) { throw "Host dependency installation failed." }
+          $muscriptorSource = & host\.venv\Scripts\python.exe -c "import tomllib; from pathlib import Path; print(tomllib.load(Path('host/pyproject.toml').open('rb'))['tool']['mizan']['muscriptor-inference-source'])"
+          if ($LASTEXITCODE -ne 0) { throw "MuScriptor source lookup failed." }
+          if ([string]::IsNullOrWhiteSpace($muscriptorSource)) { throw "Pinned MuScriptor source was not found." }
+          host\.venv\Scripts\python.exe -m pip install --no-deps $muscriptorSource
+          if ($LASTEXITCODE -ne 0) { throw "MuScriptor installation failed." }
 
       - name: Extract version
         id: version
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must be vMAJOR.MINOR.PATCH." }
           $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -ne $packageVersion) { throw "Tag v$version does not match Changesets version $packageVersion." }
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME.TrimStart("v")
+            if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must be vMAJOR.MINOR.PATCH." }
+            if ($version -ne $packageVersion) { throw "Tag v$version does not match Changesets version $packageVersion." }
+          } else {
+            $version = $packageVersion
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Build unsigned MSIX
         shell: pwsh
+        env:
+          MSIX_PUBLISHER: ${{ secrets.MSIX_PUBLISHER }}
         run: |
+          $publisher = $env:MSIX_PUBLISHER
+          if ([string]::IsNullOrWhiteSpace($publisher)) { $publisher = "CN=Mizan Development" }
           .\scripts\Build-Msix.ps1 `
             -Version "${{ steps.version.outputs.version }}" `
-            -Publisher "${{ secrets.MSIX_PUBLISHER }}" `
+            -Publisher $publisher `
             -SkipSign
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && vars.MIZAN_BINARY_DISTRIBUTION_READY == 'true'
         with:
           name: Mizan-${{ steps.version.outputs.version }}-msix-unsigned
           path: artifacts/Mizan_${{ steps.version.outputs.version }}_arm64.msix

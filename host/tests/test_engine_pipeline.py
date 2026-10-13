@@ -14,7 +14,7 @@ from mizan.engine.audio import Audio, read_audio, write_audio
 from mizan.engine.harmony import analyze_harmony
 from mizan.engine.media import decode, ffmpeg_path, preflight
 from mizan.engine.output import build_song, export_midi, quantize
-from mizan.errors import Cancelled, DownloadFailed, InsufficientDisk, UnsupportedMedia
+from mizan.errors import Cancelled, DownloadFailed, FFmpegUnavailable, InsufficientDisk, UnsupportedMedia
 from mizan.jobs import JobRunner, JobStore
 from mizan.paths import app_dir
 from test_drums import drum_sound
@@ -85,7 +85,7 @@ def test_only_muscriptor_transcribes_and_persists_result(monkeypatch):
     fake_ingestion(monkeypatch)
     fake_models(monkeypatch)
     monkeypatch.setattr(cloud, "status",
-                        lambda: pytest.fail("Local processing contacted Azure"))
+                        lambda **_kwargs: pytest.fail("Local processing contacted Azure"))
     runner = JobRunner(JobStore())
     try:
         job = runner.start(URL, "piano")
@@ -101,6 +101,51 @@ def test_only_muscriptor_transcribes_and_persists_result(monkeypatch):
         assert runner.start(URL, "piano")["id"] == job["id"]
     finally:
         runner.close()
+
+
+def test_real_job_preview_is_available_during_transcription_and_after_save(monkeypatch):
+    fake_ingestion(monkeypatch)
+    fake_models(monkeypatch)
+    entered, release = Event(), Event()
+    from mizan.engine import muscriptor
+    transcribe = muscriptor.transcribe_official
+
+    def wait_to_transcribe(*args, **kwargs):
+        entered.set()
+        assert release.wait(15)
+        return transcribe(*args, **kwargs)
+
+    monkeypatch.setattr(muscriptor, "transcribe_official", wait_to_transcribe)
+    runner = JobRunner(JobStore())
+    bridge = Api(runner)
+    try:
+        job_id = runner.start(URL, "piano")["id"]
+        assert entered.wait(15)
+        running = bridge.get_job(job_id)["job"]
+        assert running["status"] == "running" and running["stage"] == "transcribe"
+        assert set(running["found"]["stems"]) == {"mix", "piano", "drums"}
+        live = runner.store.get(job_id)["details"]["previewArtifacts"]
+        assert all(read_audio(Path(path)).duration == 8 for path in live.values())
+        release.set()
+        done = wait_for(runner.store, job_id, "done")
+        found = bridge.get_job(job_id)["job"]["found"]
+        assert found["tempo"] > 0
+        assert set(found["stems"]) == {"mix", "piano", "drums"}
+        assert all("/cache/" in url for url in found["stems"].values())
+        assert not any(Path(path).exists() for path in live.values())
+        assert done["details"]["found"]["tempo"] == found["tempo"]
+    finally:
+        release.set()
+        runner.close()
+
+
+def test_live_preview_uses_the_same_weak_stem_filter_as_saved_audio():
+    levels = {name: 0.5 for name in pipeline.SOURCES}
+    peaks = {name: 0.5 for name in pipeline.SOURCES}
+    peaks["drums"] = 0.17
+    peaks["piano"] = 0.009
+    levels["vocals"] = 0.009
+    assert set(pipeline._hidden_stems(levels, peaks)) == {"piano", "drums", "vocals"}
 
 
 def test_decoding_error_summary_survives_saved_result(monkeypatch):
@@ -150,7 +195,9 @@ def test_muscriptor_only_cloud_job_cannot_publish_a_local_separation_as_gpu(monk
     (tmp_path / "cache").mkdir()
     fake_ingestion(monkeypatch)
     monkeypatch.setattr(cloud, "status",
-                        lambda: {"available": False, "configured": False})
+                        lambda **_kwargs: {"available": False, "configured": False,
+                                           "providerName": "Azure",
+                                           "issue": "A customer GPU smoke run is required."})
     job = {"id": str(uuid4()), "url": URL, "instrument": "piano",
            "details": {"processingMode": "cloud"}}
     with pytest.raises(CloudError, match="customer GPU smoke run"):
@@ -178,11 +225,12 @@ def test_cached_local_decode_then_tls_get_failure_is_reported_as_cloud_failure(
     status_calls = []
 
     reports = []
-    def status():
-        assert reports[-1] == ("detect", 0, "Connecting to Azure GPU processing")
+    def status(**_kwargs):
+        assert reports[-1] == ("detect", 0, "Connecting to Azure processing")
+        assert _kwargs["provider"] == "azure"
         assert ("decode", 1, None) in reports
         status_calls.append("status")
-        return {"available": True, "configured": True}
+        return {"available": True, "configured": True, "providerName": "Azure"}
 
     monkeypatch.setattr(cloud, "status", status)
 
@@ -206,7 +254,7 @@ def test_cached_local_decode_then_tls_get_failure_is_reported_as_cloud_failure(
     monkeypatch.setattr(transport, "_put", upload)
     monkeypatch.setattr(transport, "_open", fail_open)
 
-    def fail_template_get(recording, directory, model, cancelled, report):
+    def fail_template_get(recording, directory, model, cancelled, report, **_kwargs):
         assert recording.is_file()
         assert recording.name == "original.wav"
         try:
@@ -233,10 +281,10 @@ def test_cached_local_decode_then_tls_get_failure_is_reported_as_cloud_failure(
         assert summary["stageMessage"] == "Checking Azure GPU Job"
         assert status_calls == ["status"]
         assert summary["fix"] == (
-            "Check your Azure sign-in and connectivity, then retry Cloud processing.")
+            "Review the Cloud error details and correct the reported issue before retrying.")
         assert template_gets == ["GET"], "template failure must not submit /start"
         assert [message for stage, _, message in reports if stage == "detect"] == [
-            "Connecting to Azure GPU processing",
+            "Connecting to Azure processing",
             "Connecting to Azure GPU processing", "Uploading prepared audio",
             "Checking Azure GPU Job"]
         assert [(stage["name"], stage["method"]) for stage in summary["stages"][:3]] == [
@@ -246,7 +294,7 @@ def test_cached_local_decode_then_tls_get_failure_is_reported_as_cloud_failure(
         ]
         assert ("decode", 1, None) in reports
         assert reports.index(("decode", 1, None)) < reports.index(
-            ("detect", 0, "Connecting to Azure GPU processing"))
+            ("detect", 0, "Connecting to Azure processing"))
         assert failed["details"]["diagnostics"]["decode"]["method"] == "reused-decoded-wav"
         assert cached.is_file()
     finally:
@@ -255,7 +303,7 @@ def test_cached_local_decode_then_tls_get_failure_is_reported_as_cloud_failure(
 
 def test_cloud_status_is_single_after_decode_and_saved_audio_is_labeled_before_reuse(
         monkeypatch, tmp_path):
-    from mizan import cloud
+    from mizan import azure_cloud, cloud
 
     saved = tmp_path / "saved.wav"
     write_audio(saved, fixture_audio())
@@ -270,20 +318,39 @@ def test_cloud_status_is_single_after_decode_and_saved_audio_is_labeled_before_r
     def report(stage, progress, **kwargs):
         reports.append((stage, progress, kwargs.get("message")))
 
-    def status():
-        assert reports[-1] == ("detect", 0, "Connecting to Azure GPU processing")
+    def azure_status(**kwargs):
+        assert reports[-1] == ("detect", 0, "Connecting to Azure processing")
+        assert kwargs == {"check_connection": True}
         assert ("decode", 1, None) in reports
         status_calls.append("status")
-        return {"available": True, "configured": True}
+        return {"available": True, "configured": True, "providerName": "Azure"}
+
+    def azure_offload(*_args):
+        status_calls.append("offload")
+        raise cloud.CloudError("offline")
+
+    cloud._setting("cloud_config", '{"provider":"unsupported"}')
+    cloud._setting("cloud_provider", "unsupported")
+    provider_status = cloud.status
+    provider_offload = cloud.offload
+
+    def status(*, provider=None, **kwargs):
+        assert provider == "azure"
+        return provider_status(provider=provider, **kwargs)
+
+    def offload(*args, provider=None):
+        assert provider == "azure"
+        return provider_offload(*args, provider=provider)
 
     def reuse(_job, output, cancelled):
         assert reports[-1] == ("inspect", 0, "Validating saved audio")
         pipeline.copy_decoded(saved, output, cancelled)
         return metadata, [], saved
 
+    monkeypatch.setattr(azure_cloud, "status", azure_status)
+    monkeypatch.setattr(azure_cloud, "offload", azure_offload)
     monkeypatch.setattr(cloud, "status", status)
-    monkeypatch.setattr(cloud, "offload",
-                        lambda *args: (_ for _ in ()).throw(cloud.CloudError("offline")))
+    monkeypatch.setattr(cloud, "offload", offload)
     monkeypatch.setattr(pipeline, "_reuse_recording", reuse)
     monkeypatch.setattr(pipeline, "preflight", lambda *args: [])
     job = {"id": str(uuid4()), "url": URL, "instrument": "piano", "song_id": "saved-song",
@@ -292,11 +359,11 @@ def test_cloud_status_is_single_after_decode_and_saved_audio_is_labeled_before_r
     with pytest.raises(cloud.CloudError, match="offline"):
         pipeline.run_pipeline(job, report, Event())
 
-    assert status_calls == ["status"]
+    assert status_calls == ["status", "offload"]
     assert ("inspect", 0, "Validating saved audio") in reports
     assert ("decode", 1, None) in reports
     assert reports.index(("decode", 1, None)) < reports.index(
-        ("detect", 0, "Connecting to Azure GPU processing"))
+        ("detect", 0, "Connecting to Azure processing"))
 
 
 def test_cloud_decode_failure_stays_in_decode_and_skips_azure(monkeypatch, tmp_path):
@@ -307,7 +374,7 @@ def test_cloud_decode_failure_stays_in_decode_and_skips_azure(monkeypatch, tmp_p
     (tmp_path / "cache").mkdir()
     fake_ingestion(monkeypatch)
     monkeypatch.setattr(cloud, "status",
-                        lambda: pytest.fail("Azure was contacted after a decode failure"))
+                        lambda **_kwargs: pytest.fail("Azure was contacted after a decode failure"))
     monkeypatch.setattr(pipeline, "decode",
                         lambda *args: (_ for _ in ()).throw(UnsupportedMedia("bad audio")))
     reports = []
@@ -394,7 +461,8 @@ def test_cloud_blobs_deleted_only_after_song_is_saved(monkeypatch):
         monkeypatch.setattr(pipeline, name, record_local_step)
     monkeypatch.setattr(cloud, "selected", lambda: True)
     monkeypatch.setattr(cloud, "status",
-                        lambda: {"available": True, "configured": True})
+                        lambda **_kwargs: {"available": True, "configured": True,
+                                           "providerName": "Azure"})
     monkeypatch.setattr(pipeline, "_demucs", lambda *args: pytest.fail("Local separation ran"))
     monkeypatch.setattr("mizan.engine.muscriptor.transcribe_official",
                         lambda *args, **kwargs: pytest.fail("Local transcription ran"))
@@ -417,8 +485,10 @@ def test_cloud_blobs_deleted_only_after_song_is_saved(monkeypatch):
         "mix": ([], [], details, notes), "vocals": ([], [], details, notes),
     }
     files = ["jobs/test/input.wav"]
-    def offload(recording, directory, model, cancelled, report):
+    def offload(recording, directory, model, cancelled, report, *, provider=None, target=None):
         assert recording.name == "original.wav" and recording.is_file()
+        assert provider == "azure"
+        assert target == {"version": 1, "provider": "azure", "settings": {}}
         assert model == "muscriptor-small"
         pipeline_events.append("offload")
         audio = read_audio(recording)
@@ -431,7 +501,9 @@ def test_cloud_blobs_deleted_only_after_song_is_saved(monkeypatch):
     saved_at_cleanup = []
     cleanup_complete = Event()
     runner = JobRunner(JobStore())
-    def cleanup(names):
+    def cleanup(names, **kwargs):
+        assert kwargs["provider"] == "azure"
+        assert kwargs["target"] == {"version": 1, "provider": "azure", "settings": {}}
         done = next(job for job in runner.store.list() if job["details"].get("cloudFiles") == names)
         assert done["status"] == "done"
         entry = runner.library.get(done["song_id"])
@@ -469,7 +541,8 @@ def test_cloud_blobs_deleted_only_after_song_is_saved(monkeypatch):
 def test_failed_library_save_keeps_cloud_files_for_recovery(monkeypatch):
     from mizan import cloud
     monkeypatch.setattr(cloud, "selected", lambda: True)
-    monkeypatch.setattr(cloud, "cleanup", lambda names: pytest.fail("Uncommitted Cloud files deleted"))
+    monkeypatch.setattr(cloud, "cleanup",
+                        lambda names, **_kwargs: pytest.fail("Uncommitted Cloud files deleted"))
     files = ["jobs/test/input.wav"]
     store = JobStore()
     runner = JobRunner(store, pipeline=lambda job, report, cancelled:
@@ -491,7 +564,7 @@ def test_failed_cloud_analysis_deletes_outputs_after_job_stops(monkeypatch):
 
     monkeypatch.setattr(cloud, "selected", lambda: True)
     removed = []
-    monkeypatch.setattr(cloud, "cleanup", lambda names: removed.append(names))
+    monkeypatch.setattr(cloud, "cleanup", lambda names, **_kwargs: removed.append(names))
     files = ["jobs/test/input.wav"]
 
     def failing_pipeline(job, report, cancelled):
@@ -545,7 +618,7 @@ def test_silent_contract_and_midi(tmp_path):
 def test_decode_actual_ffmpeg_and_metadata_preflight(tmp_path):
     try:
         ffmpeg_path()
-    except UnsupportedMedia:
+    except FFmpegUnavailable:
         pytest.skip("FFmpeg is not installed on this test machine.")
     source, output = tmp_path / "source.wav", tmp_path / "decoded.wav"
     write_audio(source, Audio(synth_chord([60], rate=16000), 16000))
@@ -561,6 +634,7 @@ def test_direct_audio_403_retries_hls_without_hiding_other_failures(monkeypatch,
     formats = []
     source = tmp_path / "source.mp4"
     source.write_bytes(b"audio")
+    monkeypatch.setattr(media, "ffmpeg_path", lambda: "test-ffmpeg")
 
     def download(command, *_):
         formats.append(command[command.index("-f") + 1])

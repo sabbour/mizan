@@ -178,9 +178,8 @@ Official PyPI checks and installation on this machine established:
   offline.
 - `numba` and `llvmlite` had no Windows ARM64 CPython 3.12 wheels in the
   inspected PyPI releases; the engine avoids librosa and their dependency chain.
-- The existing FFmpeg 9.0.2 Gyan full build is PE `0x8664` (x64), running
-  under Windows emulation. A real resampling/decode integration test passed.
-  FFmpeg is not bundled or silently installed by this patch.
+- Windows desktop packages do not bundle FFmpeg. Mizan uses the saved path in
+  Song analysis settings, then checks `MIZAN_FFMPEG`, `PATH`, and WinGet.
 
 `MIZAN_PROVIDER=auto` uses a measured order **per ONNX model**. HT-Demucs
 uses CPU; Beat This! always uses CPU because DirectML returned finite but wrong
@@ -411,7 +410,8 @@ selection uses CPU. Its CPU profile executed 1,170 nodes. Beat This! executed
 Raw evidence:
 `provider-benchmark.json`, `engine-benchmark.json`,
 `engine-benchmark-cpu.json`, `engine-benchmark-dml.json`,
-[`engine-benchmark-cairokee.json`](engine-benchmark-cairokee.json).
+`engine-benchmark-cairokee.json`.
+The historical `engine-benchmark-cairokee.json` file is not included in this repository.
 ORT profiles referenced by them remain in the machine's app-data logs.
 
 ## Models, dependencies and licenses
@@ -429,7 +429,7 @@ ORT profiles referenced by them remain in the machine's app-data logs.
 | ONNX | 1.23.0; Apache-2.0 | Optional probe dependency only |
 | mido | 1.3.3; MIT | MIDI export |
 | yt-dlp | 2026.8.19; Unlicense for this Python distribution; bundled/executable components have their own notices | YouTube ingestion |
-| FFmpeg | External installation; this Gyan build enables GPL and version3 | Used locally, not redistributed here |
+| FFmpeg | User-installed; license depends on the selected build | Selected in Song analysis settings or found automatically |
 
 Basic Pitch SHA-256:
 `2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec`.
@@ -638,12 +638,15 @@ the source beat.
 Remaining limits: Beat This! cannot distinguish 3/4 from 6/8 or a tempo octave;
 without downbeat evidence analysis retains 4/4. MIDI/MusicXML imports
 preserve explicit meters such as 6/8, including changes within a file, pickups
-and partial final bars. Public MIDI search offers only files with confirmed
-per-file Public Domain, CC0, CC BY, or CC BY-SA terms from Wikimedia Commons,
-Mutopia, or Internet Archive. Archive imports require the item's exact CC0
-license URL and an original MIDI file with checked size and hashes. The imported
-library entry retains the source page, artist, license, and attribution;
-public-domain composition age is not used to infer a file license. There are no reliable semantic
+and partial final bars. Public MIDI search offers per-file Public Domain, CC0,
+CC BY, or CC BY-SA files from Wikimedia Commons, Mutopia, and Internet Archive.
+Archive imports require the item's exact CC0 license URL and an original MIDI
+file with checked size and hashes. BitMidi and FreeMIDI do not list clear
+per-file licenses. Their results are marked "Not listed by source". The user
+must confirm permission to use each such file before Mizan downloads it. This
+confirmation is not a license. Imported library entries retain the title,
+source page, provider, artist, license status, and attribution. Mizan does not
+infer a MIDI file license from the age of its composition. There are no reliable semantic
 verse/chorus labels or validated meter-accuracy claims; no pedal modelling, imperfect learned
 piano isolation, heuristic velocities (not measured performance MIDI velocity), and
 no validated real-music benchmark set. Long audio is not capped

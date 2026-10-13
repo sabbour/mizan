@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Windows.AppLifecycle;
+using Microsoft.Windows.Storage.Pickers;
 using Windows.UI;
 using WinRT.Interop;
 using Windows.ApplicationModel.Activation;
@@ -70,6 +71,22 @@ public sealed class MainWindow : Window
             {
                 try
                 {
+                    using var request = JsonDocument.Parse(args.WebMessageAsJson);
+                    var root = request.RootElement;
+                    if (root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("method", out var method)
+                        && method.ValueKind == JsonValueKind.String
+                        && method.GetString() == "browse_ffmpeg_path"
+                        && root.TryGetProperty("args", out var requestArgs)
+                        && requestArgs.ValueKind == JsonValueKind.Array
+                        && requestArgs.GetArrayLength() == 0
+                        && root.TryGetProperty("id", out var id)
+                        && id.ValueKind == JsonValueKind.Number
+                        && id.TryGetInt32(out var requestId))
+                    {
+                        await BrowseFfmpegPathAsync(requestId);
+                        return;
+                    }
                     await _worker.SendAsync(args.WebMessageAsJson);
                 }
                 catch (Exception)
@@ -100,6 +117,38 @@ public sealed class MainWindow : Window
         catch (Exception error)
         {
             ShowError(error.Message);
+        }
+    }
+
+    private async Task BrowseFfmpegPathAsync(int id)
+    {
+        try
+        {
+            var picker = new FileOpenPicker(_appWindow.Id);
+            picker.FileTypeFilter.Add(".exe");
+            picker.CommitButtonText = "Select FFmpeg";
+            var file = await picker.PickSingleFileAsync();
+            _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                id,
+                ok = true,
+                result = new { ok = true, path = file?.Path },
+            }));
+        }
+        catch (Exception error)
+        {
+            ShellLog.Write($"FFmpeg file picker failed: {error.Message}");
+            _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                id,
+                ok = false,
+                error = new
+                {
+                    code = "native_picker_unavailable",
+                    message = "Could not open the Windows file picker. Enter the full path to ffmpeg.exe instead.",
+                    fix = "Enter the full path to ffmpeg.exe instead.",
+                },
+            }));
         }
     }
 

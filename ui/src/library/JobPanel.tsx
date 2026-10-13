@@ -10,6 +10,11 @@ const ORDINAL = new Intl.PluralRules('en', { type: 'ordinal' })
 const SUFFIX: Record<string, string> = { one: 'st', two: 'nd', few: 'rd', other: 'th' }
 const nth = (n: number) => `${n}${SUFFIX[ORDINAL.select(n)]}`
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1)
+const CLOUD_PROVIDER_NAMES: Record<string, string> = {
+  azure: 'Azure',
+  gcp: 'Google Cloud',
+  aws: 'AWS',
+}
 
 export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
   const panel = useRef<HTMLElement>(null)
@@ -71,6 +76,9 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
     ? Math.max(0, (clockTime - Date.parse(j.stageStartedAt)) / 1000) : null
   const stepPercent = jobStagePercent(j)
   const decodingHeadline = decodingErrorHeadline(j.decodingErrors?.count)
+  const cloudProviderName = j.cloudProviderName
+    ?? CLOUD_PROVIDER_NAMES[j.cloudProvider ?? 'azure']
+    ?? j.cloudProvider
   const { ahead, place } = jobQueuePosition(j, jobs)
   const wait = ahead.reduce((t, q) => t + (q.eta?.seconds ?? 0), 0)
 
@@ -115,8 +123,8 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
           <p className="jp-lead">{lead}</p>
           <p className="jp-sub num">{sub}</p>
           <p className="jp-elapsed">{jobExecutionLabel(j)}</p>
-          {j.processingMode === 'cloud' && <p className="dim">HT-Demucs and MuScriptor use Azure GPU processing. Audio preparation and score processing run on this PC.</p>}
-          {j.processingMode === 'cloud' && j.status === 'cancelled' && <p className="dim">Cancelled in Mizan. Azure stop requests are best-effort; check the Azure execution if processing or charges continue.</p>}
+          {j.processingMode === 'cloud' && <p className="dim">HT-Demucs and MuScriptor use {cloudProviderName} GPU processing. Audio preparation and score processing run on this PC.</p>}
+          {j.processingMode === 'cloud' && j.status === 'cancelled' && <p className="dim">Cancelled in Mizan. {cloudProviderName} stop requests are best-effort; check the remote execution if processing or charges continue.</p>}
           {j.status === 'running' && jobElapsed != null && (
             <p className="jp-elapsed num">
               {j.attemptQueuedAt ? 'Total elapsed' : j.startedAt ? 'Run elapsed' : 'Since queued'} {took(jobElapsed)}
@@ -129,7 +137,7 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
           )}
           {j.processingMode === 'cloud' && (
             <p className="jp-elapsed num">
-              Azure round trip {j.cloudElapsedSeconds != null ? `${took(j.cloudElapsedSeconds)} (included in total)` :
+              {cloudProviderName} round trip {j.cloudElapsedSeconds != null ? `${took(j.cloudElapsedSeconds)} (included in total)` :
                 j.status === 'running' ? 'available after processing' : 'not recorded'}
             </p>
           )}
@@ -152,7 +160,9 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
               </button>
             )}
           </div>
-          {actionError?.id === j.id && <p className="jp-error" role="alert">{actionError.message}</p>}
+          {actionError?.id === j.id && <p className="jp-error" role="alert">
+            {j.processingMode === 'cloud' ? `${cloudProviderName}: ` : ''}{actionError.message}
+          </p>}
         </section>
 
         {decodingHeadline && (
@@ -165,7 +175,7 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
         {j.status === 'failed' && (
           <div className="jp-error" role="alert">
             <p>
-              <strong>{j.errorMessage ?? 'This job failed.'}</strong>
+              <strong>{j.processingMode === 'cloud' ? `${cloudProviderName}: ` : ''}{j.errorMessage ?? 'This job failed.'}</strong>
             </p>
             {j.fix && <p>{j.fix}</p>}
           </div>
@@ -269,7 +279,7 @@ function FoundSoFar({ job: j }: { job: QueueJob }) {
           )}
         </dl>
       )}
-      {f?.stems && <Listen stems={f.stems} />}
+      {f?.stems && <Listen key={j.id} stems={f.stems} />}
     </section>
   )
 }
@@ -280,38 +290,72 @@ function Listen({ stems }: { stems: NonNullable<Found['stems']> }) {
   const kinds = (['mix', 'piano', 'drums'] as const).filter((k) => stems[k])
   const [pick, setPick] = useState<(typeof kinds)[number]>(kinds.includes('piano') ? 'piano' : kinds[0])
   const [playing, setPlaying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const audio = useRef<HTMLAudioElement>(null)
+  const position = useRef(0)
+  const resume = useRef(false)
+  const selected = kinds.includes(pick) ? pick : kinds[0]
+  const play = (a: HTMLAudioElement) => {
+    setError(null)
+    void a.play().catch((reason: unknown) => {
+      if (audio.current !== a) return
+      setPlaying(false)
+      setError(reason instanceof Error ? reason.message : 'Could not play this recording. Try again.')
+    })
+  }
+
+  useEffect(() => {
+    const player = audio.current
+    return () => {
+      resume.current = false
+      player?.pause()
+    }
+  }, [])
 
   const choose = (k: typeof pick) => {
+    if (k === selected) return
     const a = audio.current
-    const at = a?.currentTime ?? 0
+    position.current = a?.currentTime ?? 0
+    resume.current = playing
+    a?.pause()
+    setError(null)
     setPick(k)
-    if (a) {
-      a.src = stems[k]!
-      a.currentTime = at
-      if (playing) void a.play()
-    }
   }
   const toggle = () => {
     const a = audio.current
     if (!a) return
-    if (a.paused) void a.play()
+    resume.current = false
+    if (a.paused) play(a)
     else a.pause()
   }
   if (!kinds.length) return null
   return (
     <div className="jp-listen jp-reveal">
-      <button className="jp-play" onClick={toggle} aria-label={playing ? 'Pause' : `Play ${STEM_LABEL[pick].toLowerCase()}`}>
+      <button className="jp-play" onClick={toggle} aria-label={playing ? 'Pause' : `Play ${STEM_LABEL[selected].toLowerCase()}`}>
         {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
       </button>
       <div className="jp-seg" role="radiogroup" aria-label="Listen to">
         {kinds.map((k) => (
-          <button key={k} role="radio" aria-checked={pick === k} onClick={() => choose(k)}>
+          <button key={k} role="radio" aria-checked={selected === k} onClick={() => choose(k)}>
             {STEM_LABEL[k]}
           </button>
         ))}
       </div>
-      <audio ref={audio} src={stems[pick]} preload="none" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+      <audio ref={audio} src={stems[selected]} preload="metadata"
+        onLoadedMetadata={(event) => {
+          const a = event.currentTarget
+          if (position.current > 0 && Number.isFinite(a.duration)) {
+            a.currentTime = Math.min(position.current, a.duration)
+          }
+          position.current = 0
+          if (resume.current) {
+            resume.current = false
+            play(a)
+          }
+        }}
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)}
+        onError={() => { setPlaying(false); setError('Could not load this recording. Try again.') }} />
+      {error && <p className="jp-error" role="alert">{error}</p>}
     </div>
   )
 }

@@ -13,8 +13,8 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 from .artifacts import ArtifactServer
-from .errors import (InvalidSearch, MizanError, PipelineNotReady, YoutubeMusicSearchFailed,
-                     YoutubeSearchFailed)
+from .errors import (FFmpegUnavailable, InvalidSearch, MizanError, PipelineNotReady,
+                     YoutubeMusicSearchFailed, YoutubeSearchFailed)
 from .jobs import ALL_STAGES, Job, JobRunner, JobStore
 from .library import public_entry
 from .paths import app_dir
@@ -34,9 +34,10 @@ FIXES = {
     "video_unavailable": "Check the video is public, or sign in to YouTube in your browser.",
     "download_failed": "Check your connection and try the link again.",
     "unsupported_media": "Try a finished, public YouTube video with audio.",
+    "ffmpeg_unavailable": "Download FFmpeg, extract it, then choose bin\\ffmpeg.exe in Song analysis settings.",
     "insufficient_disk": "Free disk space, then retry the job.",
     "model_failed": "Retry the job. If it fails again, restart Mizan.",
-    "cloud_failed": "Review the Azure error details and correct the reported issue before retrying Cloud processing.",
+    "cloud_failed": "Review the Cloud error details and correct the reported issue before retrying.",
     "invalid_folder_name": "Use a unique name between 1 and 60 characters.",
     "folder_name_exists": "Choose a different folder name.",
     "folder_not_found": "Refresh the library and try again.",
@@ -46,12 +47,24 @@ FIXES = {
 }
 
 
+def _cloud_provider_name(provider: str | None) -> str:
+    from .cloud import PROVIDER_NAMES
+    if provider is None:
+        return PROVIDER_NAMES["azure"]
+    return PROVIDER_NAMES.get(provider, f"Unknown Cloud provider ({provider})")
+
+
 def public_job(job: Job) -> dict[str, Any]:
+    details = job.get("details") or {}
+    provider = details.get("cloudProvider")
     result = {
         "id": job["id"], "videoId": job["video_id"], "url": job["url"],
         "instrument": job["instrument"], "transcriptionModel": job.get("transcription_model", "muscriptor-small"),
         "stage": job["stage"], "status": job["status"],
         "progress": job["progress"], "errorCode": job["error_code"],
+        **({"cloudProvider": provider,
+            "cloudProviderName": _cloud_provider_name(provider)}
+           if details.get("processingMode") == "cloud" else {}),
         "errorMessage": job["error_message"], "createdAt": job["created_at"],
         "updatedAt": job["updated_at"],
     }
@@ -90,11 +103,15 @@ def queue_job(job: Job, order: int | None = None) -> dict[str, Any]:
     stage_index = names.index(job["stage"]) if job["stage"] in names else 0
     overall = 1.0 if job["status"] == "done" else (stage_index + job["progress"]) / len(names)
     details = job.get("details") or {}
+    provider = details.get("cloudProvider")
     return {
         "id": job["id"], "kind": job["kind"], "songId": job["song_id"],
         "url": job["url"], "title": job["title"], "thumbnail": job["thumbnail"],
         "status": job["status"], "stage": job["stage"], "progress": round(overall, 6),
         "processingMode": details.get("processingMode", "local"),
+        **({"cloudProvider": provider,
+            "cloudProviderName": _cloud_provider_name(provider)}
+           if details.get("processingMode") == "cloud" else {}),
         "attemptQueuedAt": details.get("attemptQueuedAt"),
         "elapsedSeconds": details.get("elapsedSeconds"),
         "cloudElapsedSeconds": details.get("cloudElapsedSeconds"),
@@ -159,11 +176,13 @@ def response(action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         return {"ok": False, "error": {"code": error.code, "message": str(error)}}
 
 
-def cloud_setup_response(operation: str, total: int, action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-    from .cloud import track_setup
+def cloud_setup_response(operation: str, total: int, action: Callable[[str], dict[str, Any]],
+                         provider: str | None = None) -> dict[str, Any]:
+    from .cloud import resolve_provider, track_setup
     def tracked():
-        with track_setup(operation, total):
-            return action()
+        selected = resolve_provider(provider)
+        with track_setup(operation, total, provider=selected):
+            return action(selected)
     return response(tracked)
 
 
@@ -182,75 +201,117 @@ class Api:
         self._midi_results: dict[str, dict[str, Any]] = {}
         self._usage = UsageSampler()
 
-    def cloud_status(self, request_id: str | None = None) -> dict[str, Any]:
-        from .cloud import panel_status
-        return response(lambda: panel_status(request_id))
+    def cloud_providers(self) -> dict[str, Any]:
+        from .cloud import provider_selection
+        return response(lambda: {"ok": True, **provider_selection()})
 
-    def cancel_cloud_status(self, request_id: str) -> dict[str, Any]:
-        from .cloud import cancel_panel_status
-        return response(lambda: {"ok": True, **cancel_panel_status(request_id)})
+    def cloud_settings(self, provider: str | None = None) -> dict[str, Any]:
+        from .cloud import TARGET_FIELDS, load_provider_settings, resolve_provider
+        def read():
+            selected = resolve_provider(provider)
+            settings = load_provider_settings(selected)
+            public = {key: settings[key] for key in TARGET_FIELDS[selected]
+                      if key in settings and key != "userObjectId"}
+            return {"ok": True, "provider": selected, "settings": public}
+        return response(read)
 
-    def cloud_setup_progress(self) -> dict[str, Any]:
-        from .cloud import setup_progress
-        return {"ok": True, **setup_progress()}
+    def select_cloud_provider(self, provider: str) -> dict[str, Any]:
+        from .cloud import select_provider
+        return response(lambda: select_provider(provider))
 
-    def cloud_readiness_progress(self, request_id: str) -> dict[str, Any]:
-        from .cloud import readiness_progress
-        return response(lambda: {"ok": True, **readiness_progress(request_id)})
+    def cloud_status(self, request_id: str | None = None,
+                     provider: str | None = None) -> dict[str, Any]:
+        from .cloud import panel_status, resolve_provider
+        return response(lambda: panel_status(request_id, provider=resolve_provider(provider)))
 
-    def cancel_cloud_setup(self) -> dict[str, Any]:
-        from .cloud import cancel_setup
-        return response(lambda: {"ok": True, **cancel_setup()})
+    def cancel_cloud_status(self, request_id: str,
+                            provider: str | None = None) -> dict[str, Any]:
+        from .cloud import cancel_panel_status, resolve_provider
+        return response(lambda: {"ok": True, **cancel_panel_status(
+            request_id, provider=resolve_provider(provider))})
 
-    def list_cloud_subscriptions(self) -> dict[str, Any]:
+    def cloud_setup_progress(self, provider: str | None = None) -> dict[str, Any]:
+        from .cloud import resolve_provider, setup_progress
+        return response(lambda: {"ok": True, **setup_progress(provider=resolve_provider(provider))})
+
+    def cloud_readiness_progress(self, request_id: str, provider: str | None = None) -> dict[str, Any]:
+        from .cloud import readiness_progress, resolve_provider
+        return response(lambda: {"ok": True, **readiness_progress(
+            request_id, provider=resolve_provider(provider))})
+
+    def cancel_cloud_setup(self, provider: str | None = None) -> dict[str, Any]:
+        from .cloud import cancel_setup, resolve_provider
+        return response(lambda: {"ok": True, **cancel_setup(provider=resolve_provider(provider))})
+
+    def list_cloud_subscriptions(self, provider: str | None = None,
+                                 profile: str | None = None,
+                                 region: str | None = None) -> dict[str, Any]:
         from .cloud import list_subscriptions
-        return cloud_setup_response("subscriptions", 2,
-                                    lambda: {"ok": True, "subscriptions": list_subscriptions()})
+        options = {key: value for key, value in (("profile", profile), ("region", region))
+                   if value is not None}
+        return cloud_setup_response(
+            "subscriptions", 2,
+            lambda selected: {"ok": True,
+                              "subscriptions": list_subscriptions(provider=selected, **options)},
+            provider)
 
     def list_subscriptions(self) -> dict[str, Any]:
-        return self.list_cloud_subscriptions()
+        return self.list_cloud_subscriptions("azure")
 
     def azure_subscriptions(self) -> dict[str, Any]:
         from .cloud import list_subscriptions
-        return cloud_setup_response("subscriptions", 2, lambda: {"ok": True, "subscriptions": [
+        return cloud_setup_response("subscriptions", 2, lambda selected: {"ok": True, "subscriptions": [
             {"id": item["subscriptionId"], "name": item["displayName"],
              "tenantId": item["tenantId"]}
-            for item in list_subscriptions() if item["state"] == "Enabled"
-        ]})
+            for item in list_subscriptions(provider=selected) if item["state"] == "Enabled"
+        ]}, "azure")
 
-    def configure_cloud(self, config: dict) -> dict[str, Any]:
+    def configure_cloud(self, config: dict, provider: str | None = None) -> dict[str, Any]:
         from .cloud import configure
-        return cloud_setup_response("configuration", 2, lambda: configure(config))
+        selected = provider if provider is not None else (
+            config.get("provider") if isinstance(config, dict) else None)
+        return cloud_setup_response("configuration", 2,
+                                    lambda pinned: configure(config, provider=pinned), selected)
 
-    def prepare_cloud(self, config: dict, consent: bool = False) -> dict[str, Any]:
+    def prepare_cloud(self, config: dict, consent: bool = False,
+                      provider: str | None = None) -> dict[str, Any]:
         from .cloud import prepare
-        return cloud_setup_response("provision", 10, lambda: prepare(config, consent))
+        selected = provider if provider is not None else (
+            config.get("provider") if isinstance(config, dict) else None)
+        return cloud_setup_response("provision", 10,
+                                    lambda pinned: prepare(config, consent, provider=pinned), selected)
 
-    def enable_cloud_logging(self, consent: bool = False) -> dict[str, Any]:
+    def enable_cloud_logging(self, consent: bool = False,
+                             provider: str | None = None) -> dict[str, Any]:
         from .cloud import enable_log_analytics
-        return cloud_setup_response("logging", 2, lambda: enable_log_analytics(consent))
+        return cloud_setup_response("logging", 2,
+                                    lambda pinned: enable_log_analytics(consent, provider=pinned), provider)
 
-    def import_cloud_image(self, sourceImage: str) -> dict[str, Any]:
+    def import_cloud_image(self, sourceImage: str, provider: str | None = None) -> dict[str, Any]:
         from .cloud import import_cloud_image
-        return cloud_setup_response("import", 2, lambda: import_cloud_image(sourceImage))
+        return cloud_setup_response("import", 2,
+                                    lambda pinned: import_cloud_image(sourceImage, provider=pinned), provider)
 
-    def build_cloud_image(self) -> dict[str, Any]:
+    def build_cloud_image(self, provider: str | None = None) -> dict[str, Any]:
         from .cloud import build_cloud_image
-        return cloud_setup_response("build", 4, build_cloud_image)
+        return cloud_setup_response("build", 4,
+                                    lambda pinned: build_cloud_image(provider=pinned), provider)
 
-    def build_cloud_worker(self) -> dict[str, Any]:
+    def build_cloud_worker(self, provider: str | None = None) -> dict[str, Any]:
         from .cloud import build_cloud_image
-        def build():
-            result = build_cloud_image()
-            return {"ok": True, "image": result["image"], "digest": result["digest"]}
-        return cloud_setup_response("build", 4, build)
+        def build(pinned):
+            result = build_cloud_image(provider=pinned)
+            return {"ok": True, "provider": result["provider"],
+                    "image": result["image"], "digest": result["digest"]}
+        return cloud_setup_response("build", 4, build, provider)
 
-    def finish_cloud(self, image: str, use_saved_token: bool = False) -> dict[str, Any]:
+    def finish_cloud(self, image: str, use_saved_token: bool = False,
+                     provider: str | None = None) -> dict[str, Any]:
         from .cloud import CloudError, finish
         from .hf_credentials import get_hf_token
-        def create():
+        def create(pinned):
             if type(use_saved_token) is not bool:
-                raise CloudError("Approve sending the saved Hugging Face token to Azure.")
+                raise CloudError("Approve sending the saved Hugging Face token to the Cloud provider.")
             def token_provider():
                 if not use_saved_token:
                     return None
@@ -263,16 +324,35 @@ class Api:
                     raise CloudError(
                         "No Hugging Face token is saved. Save one in Song analysis settings, then retry.")
                 return token
-            return finish(image, hf_token_provider=token_provider)
-        return cloud_setup_response("job", 4, create)
+            return finish(image, hf_token_provider=token_provider, provider=pinned)
+        return cloud_setup_response("job", 4, create, provider)
 
-    def set_processing_mode(self, mode: str) -> dict[str, Any]:
+    def set_processing_mode(self, mode: str, provider: str | None = None) -> dict[str, Any]:
         from .cloud import set_mode
-        return response(lambda: set_mode(mode))
+        return response(lambda: set_mode(mode, provider=provider))
 
-    def clear_cloud(self) -> dict[str, Any]:
+    def clear_cloud(self, provider: str | None = None) -> dict[str, Any]:
         from .cloud import clear
-        return response(clear)
+        return response(lambda: clear(provider))
+
+    def ffmpeg_status(self) -> dict[str, Any]:
+        from .engine.media import ffmpeg_status
+        return response(lambda: {"ok": True, **ffmpeg_status()})
+
+    def set_ffmpeg_path(self, path: str) -> dict[str, Any]:
+        from .engine.media import ffmpeg_status, validate_ffmpeg_executable
+
+        def save():
+            if type(path) is not str:
+                raise FFmpegUnavailable("Enter the full path to ffmpeg.exe.")
+            if path == "":
+                self._runner.store.set_ffmpeg_path(None)
+            else:
+                executable = validate_ffmpeg_executable(path, require_absolute=True)
+                self._runner.store.set_ffmpeg_path(executable)
+            return {"ok": True, **ffmpeg_status()}
+
+        return response(save)
 
     def get_transcription_model(self) -> dict[str, Any]:
         return response(lambda: {"ok": True, "model": self._runner.store.get_transcription_model()})
@@ -419,7 +499,7 @@ class Api:
             self._midi_results.update((result["id"], result) for result in results)
             if len(self._midi_results) > 200:
                 self._midi_results = dict(list(self._midi_results.items())[-200:])
-        private = {"url", "identifier", "fileName", "size", "hashes", "_licenseUrl"}
+        private = {"url", "identifier", "fileName", "size", "hashes", "_licenseUrl", "_downloadPath"}
         return [{key: value for key, value in result.items() if key not in private} for result in results]
 
     def search_midi_commons(self, query: str) -> dict[str, Any]:
@@ -441,24 +521,40 @@ class Api:
             return {"ok": True, "results": self._remember_midi_results(search_archive(query))}
         return response(search)
 
-    def import_midi_result(self, result_id: str) -> dict[str, Any]:
+    def search_midi_bitmidi(self, query: str) -> dict[str, Any]:
+        def search():
+            from .midi_search import search_bitmidi
+            return {"ok": True, "results": self._remember_midi_results(search_bitmidi(query))}
+        return response(search)
+
+    def search_midi_freemidi(self, query: str) -> dict[str, Any]:
+        def search():
+            from .midi_search import search_freemidi
+            return {"ok": True, "results": self._remember_midi_results(search_freemidi(query))}
+        return response(search)
+
+    def import_midi_result(self, result_id: str, allow_unknown_license: bool = False) -> dict[str, Any]:
         def import_result():
             from .imports import import_score
             from .midi_search import download_midi
             from .errors import InvalidFile
             import base64
 
+            if type(allow_unknown_license) is not bool:
+                raise InvalidFile("Permission confirmation must be true or false.")
             with self._midi_result_lock:
                 result = self._midi_results.get(result_id) if isinstance(result_id, str) else None
             if result is None:
                 raise InvalidFile("Search for this MIDI again before importing it.")
+            if result.get("provider") in ("bitmidi", "freemidi") and allow_unknown_license is not True:
+                raise InvalidFile("Confirm that you have permission to use this file before importing it.")
             data = download_midi(result)
             entry = import_score(
                 f"{result['title']}.mid", base64.b64encode(data).decode("ascii"),
                 self._library, self._runner.pipeline_version,
                 {"title": result["title"], "artist": result.get("artist"),
                  "sourceUrl": result["sourceUrl"], "license": result["license"],
-                 "attribution": result.get("attribution")},
+                 "attribution": result.get("attribution"), "provider": result["source"]},
             )
             return {"ok": True, "entry": public_entry(entry, self._runner.pipeline_version)}
         return response(import_result)
@@ -497,7 +593,39 @@ class Api:
             shutil.rmtree(directory, ignore_errors=True)
 
     def _queue_job(self, job: Job) -> dict:
-        return queue_job(job, self._runner.store.queue_order(job["id"]))
+        result = queue_job(job, self._runner.store.queue_order(job["id"]))
+        details = job.get("details") or {}
+        found = dict(details.get("found") or {})
+        artifacts = details.get("artifacts") or details.get("previewArtifacts") or {}
+        if not found and artifacts.get("analysis"):
+            try:
+                song = json.loads(Path(artifacts["analysis"]).read_text(encoding="utf-8"))
+                if not isinstance(song, dict):
+                    raise ValueError("Saved analysis is not a song.")
+                key = song.get("key")
+                if isinstance(key, dict) and key.get("tonic") and key.get("mode"):
+                    found["key"] = f"{key['tonic']} {key['mode']}"
+                tempo = song.get("bpm")
+                if type(tempo) in (int, float) and math.isfinite(tempo) and tempo > 0:
+                    found["tempo"] = tempo
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not read job preview facts for %s: %s", job["id"], exc)
+                result["warnings"] = [*result["warnings"],
+                                      "Saved key and tempo could not be loaded. Open the song for details."]
+        stems = {}
+        for name in ("mix", "piano", "drums"):
+            path = artifacts.get(name)
+            if not path or not Path(path).is_file():
+                continue
+            try:
+                stems[name] = self._artifact_url(path)
+            except FileNotFoundError:
+                # Finalization moves live files into the saved cache; the next poll uses those paths.
+                logger.debug("Job preview moved during finalization: %s", path)
+        if stems:
+            found["stems"] = stems
+        result["found"] = found or None
+        return result
 
     def add_link(self, url: str) -> dict[str, Any]:
         def add():
