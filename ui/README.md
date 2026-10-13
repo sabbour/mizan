@@ -32,9 +32,14 @@ To lint the interface, run:
 npm run lint
 ```
 
-The browser preview uses sample data. It does not connect to the Python host.
+By default, the browser preview uses sample data, not the Python host.
 Run the native Windows shell to test the host bridge and real library data.
 See the [repository README](../README.md) for host setup and test commands.
+
+Open `/?midi=live` on the Vite server to search real public MIDI sources.
+This mode supports search only; use the installed app to import a result.
+It uses the Python environment in `host\.venv`. Set `MIZAN_DEV_MIDI_PYTHON`
+to use a different Python executable. It does not access the real song library.
 
 ## Job audio and practice tracks
 
@@ -56,15 +61,21 @@ node tests\playback.mjs --job-preview
 
 ## Guitar and bass practice
 
-Course includes 80 exercises each for guitar and four-string bass.
+Course includes 85 catalog lessons each for guitar and four-string bass.
 Each instrument has 25 course exercises across five levels and 55 studies
-across 11 genres. Guitar uses E2–A2–D3–G3–B3–E4 tuning.
+across 11 genres, plus five original studies inspired by well-known players.
+These studies teach playing techniques; they are not song transcriptions.
+Scales includes 15 families in all 12 keys, with three patterns for each scale:
+an ascending and descending run, broken thirds, and three-note sequences.
+Guitar uses E2–A2–D3–G3–B3–E4 tuning.
 Bass uses E1–A1–D2–G2 tuning.
 Lessons use their own saved practice positions, apart from the song catalog.
 
 Guitar and bass parts offer a score, tab, and a 3D fretboard with tab.
 The model sits above a compact tab strip with several bars and rhythm marks.
-The view offers fretboard and whole-instrument framing.
+The single playing view frames the neck and pickup area. Upcoming strings and
+frets pulse, the current note glows, and a short flash by the pickup marks each
+pluck. An `O` marks an open string: play it without pressing a fret.
 Tab and 3D positions are estimated from pitch and standard
 tuning; they are not a record of the original player's fingering.
 Changing views does not restart playback or change the mixer.

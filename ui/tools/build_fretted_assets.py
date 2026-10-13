@@ -13,21 +13,14 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "public" / "models"
-STYLES = [
-    "Realistic", "HandPaintedAnime", "Stylized3D", "NeonRhythm",
-    "TechnicalLearning", "ToyDiorama", "Watercolor", "VintageConcert",
-]
+STYLES = ["Realistic", "ClayStudyModel", "NeonRhythm", "TechnicalBlueprint"]
 BODY_DOME = 0.0055
 PITCH_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"]
 VARIANT_TINTS = {
     "Realistic": (1.0, 1.0, 1.0),
-    "HandPaintedAnime": (1.04, 0.97, 0.91),
-    "Stylized3D": (0.92, 1.0, 1.08),
+    "ClayStudyModel": (1.04, 0.97, 0.91),
     "NeonRhythm": (0.48, 0.72, 1.12),
-    "TechnicalLearning": (0.66, 0.82, 0.96),
-    "ToyDiorama": (1.08, 0.88, 0.66),
-    "Watercolor": (0.88, 0.94, 1.08),
-    "VintageConcert": (1.08, 0.9, 0.72),
+    "TechnicalBlueprint": (0.66, 0.82, 0.96),
 }
 
 

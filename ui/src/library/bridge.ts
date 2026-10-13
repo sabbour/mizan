@@ -319,6 +319,29 @@ export class HostError extends Error {
   }
 }
 
+export const liveMidiPreview = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get('midi') === 'live'
+
+async function searchLiveMidi(query: string, provider: MidiSearchResult['provider'], startAt = 0) {
+  let reply: Reply<{ results: MidiSearchResult[]; nextStart: number | null }>
+  try {
+    const response = await fetch('/__dev/midi-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, query, startAt }),
+    })
+    reply = await response.json() as Reply<{ results: MidiSearchResult[]; nextStart: number | null }>
+  } catch {
+    throw new HostError({
+      code: 'midi_search_failed',
+      message: 'Live MIDI search is unavailable right now.',
+      fix: 'Check that the Vite dev server and Python environment are running, then retry.',
+    })
+  }
+  if (!reply.ok) throw new HostError(reply.error)
+  return reply
+}
+
 type Api = Record<string, (...args: unknown[]) => Promise<unknown>>
 type WebViewReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: Fail['error'] }
 export type OpenedMidiFile = { name: string; dataBase64: string }
@@ -463,15 +486,17 @@ export const host = {
     call<{ results: YouTubeResult[] }>('search_youtube_music', query).then((r) => r.results),
   popularSongs: (refresh = false) => call<PopularChart>('popular_songs', refresh),
   searchMidiCommons: (query: string) =>
-    call<{ results: MidiSearchResult[] }>('search_midi_commons', query).then((r) => r.results),
+    (liveMidiPreview ? searchLiveMidi(query, 'commons') : call<{ results: MidiSearchResult[] }>('search_midi_commons', query)).then((r) => r.results),
   searchMidiMutopia: (query: string, startAt = 0) =>
-    call<{ results: MidiSearchResult[]; nextStart: number | null }>('search_midi_mutopia', query, startAt),
+    liveMidiPreview
+      ? searchLiveMidi(query, 'mutopia', startAt)
+      : call<{ results: MidiSearchResult[]; nextStart: number | null }>('search_midi_mutopia', query, startAt),
   searchMidiArchive: (query: string) =>
-    call<{ results: MidiSearchResult[] }>('search_midi_archive', query).then((r) => r.results),
+    (liveMidiPreview ? searchLiveMidi(query, 'archive') : call<{ results: MidiSearchResult[] }>('search_midi_archive', query)).then((r) => r.results),
   searchMidiBitMidi: (query: string) =>
-    call<{ results: MidiSearchResult[] }>('search_midi_bitmidi', query).then((r) => r.results),
+    (liveMidiPreview ? searchLiveMidi(query, 'bitmidi') : call<{ results: MidiSearchResult[] }>('search_midi_bitmidi', query)).then((r) => r.results),
   searchMidiFreeMidi: (query: string) =>
-    call<{ results: MidiSearchResult[] }>('search_midi_freemidi', query).then((r) => r.results),
+    (liveMidiPreview ? searchLiveMidi(query, 'freemidi') : call<{ results: MidiSearchResult[] }>('search_midi_freemidi', query)).then((r) => r.results),
   importMidiResult: (resultId: string, allowUnknownLicense = false) =>
     call<{ entry: Entry }>('import_midi_result', resultId, allowUnknownLicense).then((r) => r.entry),
   addLink: (url: string) => call<{ job: QueueJob }>('add_link', url).then((r) => r.job),

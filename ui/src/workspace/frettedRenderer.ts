@@ -3,7 +3,7 @@ import {
   positionForStringFret, visualStatePriority,
   type FrettedInstrumentConfig, type FrettedPosition, type FrettedTabNote, type FrettedVisualState,
 } from './fretboard'
-import type { FrettedStyle, FrettedViewMode } from './frettedStyles'
+import type { FrettedStyle } from './frettedStyles'
 import { styleIndex } from './frettedStyles'
 
 type Item = {
@@ -30,10 +30,16 @@ export type FrettedMarker = {
 export type FrettedStringLabel = { string: number; name: string; x: number; y: number }
 export type FrettedFretLabel = { fret: number; x: number; y: number }
 export type FrettedVibration = { string: number; fret: number; amplitude: number; activeStartX: number }
+export type FrettedStringCue = { string: number; fret: number; state: 'playback' | 'upcoming' }
+export type FrettedPluck = {
+  index: number; string: number; conventionalStringNumber: number; name: string; x: number; y: number
+}
 export type FrettedFrame = {
   markers: FrettedMarker[]
   stringLabels: FrettedStringLabel[]
   fretLabels: FrettedFretLabel[]
+  stringCues: FrettedStringCue[]
+  plucks: FrettedPluck[]
   vibrations: FrettedVibration[]
   triangles: number
 }
@@ -80,7 +86,6 @@ uniform float uState;
 varying vec3 vNormal;
 varying vec3 vPosition;
 varying vec2 vUv;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec3 srgbToLinear(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
@@ -128,21 +133,12 @@ void main() {
   vec3 color = diffuse + environment + specular;
   if (uStyle > 0.5 && uStyle < 1.5) {
     float band = floor((0.35 + 0.65 * (keyDiffuse * 0.75 + fillDiffuse * 0.25)) * 4.0) / 4.0;
-    color = base * mix(0.58, 1.12, band);
+    color = base * mix(0.58, 1.12, band) * vec3(1.04, 0.97, 0.88);
   } else if (uStyle > 1.5 && uStyle < 2.5) {
-    color = pow(color, vec3(0.9)) * vec3(0.95, 1.02, 1.08);
-  } else if (uStyle > 2.5 && uStyle < 3.5) {
     color = color * 0.42 + vec3(0.12, 0.19, 0.4) + uEmissive;
-  } else if (uStyle > 3.5 && uStyle < 4.5) {
+  } else if (uStyle > 2.5 && uStyle < 3.5) {
     color = mix(color, vec3(0.22, 0.42, 0.59), 0.42);
     color *= 0.84 + 0.16 * keyDiffuse;
-  } else if (uStyle > 4.5 && uStyle < 5.5) {
-    color = pow(color, vec3(0.88)) * vec3(1.08, 0.91, 0.7);
-  } else if (uStyle > 5.5 && uStyle < 6.5) {
-    color = mix(color, vec3(0.87, 0.85, 0.81), 0.2);
-    color *= 0.93 + hash(floor(vPosition.xy * 700.0)) * 0.08;
-  } else if (uStyle > 6.5) {
-    color = color * vec3(1.12, 0.92, 0.72) + vec3(0.035, 0.016, 0.0);
   }
   color += uEmissive;
   color = mix(color, uStateColor, clamp(uState, 0.0, 0.82));
@@ -151,13 +147,9 @@ void main() {
 
 const STYLE_TONES: Record<FrettedStyle, [number, number, number]> = {
   Realistic: [0.16, 0.48, 0.95],
-  HandPaintedAnime: [0.15, 0.54, 0.91],
-  Stylized3D: [0.13, 0.53, 0.93],
+  ClayStudyModel: [0.15, 0.54, 0.91],
   NeonRhythm: [0.18, 0.9, 1],
-  TechnicalLearning: [0.05, 0.32, 0.72],
-  ToyDiorama: [0.1, 0.62, 0.96],
-  Watercolor: [0.18, 0.49, 0.82],
-  VintageConcert: [0.32, 0.45, 0.78],
+  TechnicalBlueprint: [0.05, 0.32, 0.72],
 }
 
 const FEEDBACK_COLOR: Record<FrettedVisualState, [number, number, number]> = {
@@ -209,6 +201,7 @@ export class FrettedRenderer {
   private readonly config: FrettedInstrumentConfig
   private viewProjection = IDENTITY
   private cameraPosition: [number, number, number] = [0, 0, 2.15]
+  private readonly pluckPoints = new Map<number, [number, number, number]>()
 
   constructor(gl: WebGLRenderingContext, asset: Asset, config: FrettedInstrumentConfig, images: (ImageBitmap | null)[]) {
     this.gl = gl
@@ -227,6 +220,7 @@ export class FrettedRenderer {
     for (let index = 0; index < asset.json.nodes.length; index++)
       if (asset.json.nodes[index].extras?.lodLevel === 1 || asset.json.nodes[index].extras?.lodLevel === 2)
         this.visit(asset, index, IDENTITY, variantNames)
+    this.findPluckPoints()
   }
 
   private makeProgram(vertex: string, fragment: string): WebGLProgram {
@@ -338,12 +332,54 @@ export class FrettedRenderer {
     return typeof value === 'number' && node.name.startsWith('String_') ? value : undefined
   }
 
-  private pose(mode: FrettedViewMode, handedness: 'right' | 'left', width: number, height: number) {
+  private worldVertex(item: Item, offset: number): [number, number, number] {
+    const [x, y, z] = item.data.subarray(offset, offset + 3)
+    const frame = item.frame
+    return [
+      frame[0] * x + frame[4] * y + frame[8] * z + frame[12],
+      frame[1] * x + frame[5] * y + frame[9] * z + frame[13],
+      frame[2] * x + frame[6] * y + frame[10] * z + frame[14],
+    ]
+  }
+
+  private stringPointAtX(string: number, x: number): [number, number, number] | undefined {
+    const item = this.items.find((candidate) => candidate.string === string)
+    if (!item) return
+    let nearest = Infinity
+    const points: [number, number, number][] = []
+    for (let offset = 0; offset < item.data.length; offset += 8) {
+      const point = this.worldVertex(item, offset)
+      const distance = Math.abs(point[0] - x)
+      if (distance < nearest - 1e-5) { nearest = distance; points.length = 0 }
+      if (distance <= nearest + 1e-5) points.push(point)
+    }
+    if (!points.length) return
+    return [0, 1, 2].map((axis) => points.reduce((sum, point) => sum + point[axis], 0) / points.length) as [number, number, number]
+  }
+
+  private findPluckPoints() {
+    const pickupName = this.config.id === 'guitar' ? 'Pickup_Middle' : 'Pickup_Neck'
+    const pickup = this.items.find((item) => item.name === pickupName)
+    if (!pickup) return
+    let minX = Infinity, maxX = -Infinity
+    for (let offset = 0; offset < pickup.data.length; offset += 8) {
+      const x = this.worldVertex(pickup, offset)[0]
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+    }
+    const pickupX = (minX + maxX) / 2
+    for (const string of this.config.strings) {
+      const point = this.stringPointAtX(string.string, pickupX)
+      if (point) this.pluckPoints.set(string.string, point)
+    }
+  }
+
+  private pose(handedness: 'right' | 'left', width: number, height: number) {
     const aspect = Math.max(0.5, width / Math.max(1, height))
-    const margin = mode === 'whole' ? 0.08 : 0.035
-    const targetX = this.config.scaleLength * (mode === 'whole' ? 0.46 : 0.64)
-    const spanX = mode === 'whole' ? this.config.scaleLength + 0.37 : this.config.scaleLength * 0.76
-    const halfHeight = Math.max((spanX / 2 + margin) / aspect, mode === 'whole' ? 0.22 : 0.09)
+    const margin = 0.035
+    const targetX = this.config.scaleLength * 0.46
+    const spanX = this.config.scaleLength + 0.16
+    const halfHeight = Math.max((spanX / 2 + margin) / aspect, 0.09)
     const halfWidth = halfHeight * aspect
     const projection = orthographic(halfWidth, halfHeight, 0.01, 5, false)
     this.cameraPosition = [targetX - 0.42, 0.32, 2.15]
@@ -374,39 +410,84 @@ export class FrettedRenderer {
     width: number,
     height: number,
     style: FrettedStyle,
-    mode: FrettedViewMode,
     time: number,
     plan: readonly FrettedTabNote[],
     beat: number,
-    secondsAtBeat: (beat: number) => number,
+    secondsPerBeat: number,
+    playing: boolean,
+    countingIn: boolean,
+    loop: { start: number; end: number } | null,
     feedback: Readonly<Record<string, FrettedVisualState | undefined>> = {},
     reducedMotion = false,
     handedness: 'right' | 'left' = 'right',
   ): FrettedFrame {
     const gl = this.gl
     gl.viewport(0, 0, width, height)
-    gl.clearColor(style === 'NeonRhythm' ? 0.055 : style === 'TechnicalLearning' ? 0.92 : 0.96,
-      style === 'NeonRhythm' ? 0.075 : style === 'TechnicalLearning' ? 0.95 : 0.94, style === 'NeonRhythm' ? 0.12 : 0.93, 1)
+    gl.clearColor(style === 'NeonRhythm' ? 0.055 : style === 'TechnicalBlueprint' ? 0.92 : 0.96,
+      style === 'NeonRhythm' ? 0.075 : style === 'TechnicalBlueprint' ? 0.95 : 0.94, style === 'NeonRhythm' ? 0.12 : 0.93, 1)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     gl.enable(gl.DEPTH_TEST)
     gl.enable(gl.CULL_FACE)
     gl.frontFace(handedness === 'right' ? gl.CW : gl.CCW)
     gl.useProgram(this.program)
-    const lod = mode === 'whole' ? width < 520 ? 2 : width < 920 ? 1 : 0 : width < 520 ? 1 : 0
-    this.pose(mode, handedness, width, height)
+    const lod = width < 520 ? 1 : 0
+    this.pose(handedness, width, height)
     const drawItems = this.items.filter((item) =>
       item.name === 'Body_Mesh' ? lod === 0 :
-        item.name === 'Body_Mesh_LOD1' ? lod === 1 :
-          item.name === 'Body_Mesh_LOD2' ? lod === 2 : item.lod === 0)
+        item.name === 'Body_Mesh_LOD1' ? lod === 1 : item.lod === 0)
     const triangles = drawItems.reduce((sum, item) => sum + item.indices.length / 3, 0)
-    const activeNotes = plan.filter((note) => note.position && note.startBeat <= beat + 1e-8 && beat < note.startBeat + note.beats - 1e-8)
-    const nextNotes = plan.filter((note) => note.position && note.startBeat > beat && note.startBeat - beat <= 0.75)
+    const activeNotes = countingIn ? [] : plan.filter((note) =>
+      note.position && note.startBeat <= beat + 1e-8 && beat < note.startBeat + note.beats - 1e-8)
+    const distanceTo = (note: FrettedTabNote) => {
+      if (!note.position) return Infinity
+      if (loop) {
+        if (note.startBeat >= loop.end) return Infinity
+        if (note.startBeat >= beat - 1e-8) return Math.max(0, note.startBeat - beat)
+        if (countingIn || beat < loop.start || note.startBeat < loop.start) return Infinity
+        return loop.end - beat + note.startBeat - loop.start
+      }
+      return countingIn ? note.startBeat - beat : note.startBeat > beat + 1e-8 ? note.startBeat - beat : Infinity
+    }
+    const nextNotes = plan.filter((note) => note.position && distanceTo(note) >= -1e-8 && distanceTo(note) <= 1)
     const byString = new Map<number, FrettedTabNote>()
     for (const note of activeNotes) if (note.position) {
       const previous = byString.get(note.position.string)
       if (!previous || previous.startBeat < note.startBeat) byString.set(note.position.string, note)
     }
+    const upcomingByString = new Map<number, { note: FrettedTabNote; distance: number }>()
+    for (const note of nextNotes) if (note.position) {
+      const distance = distanceTo(note)
+      const previous = upcomingByString.get(note.position.string)
+      if (!previous || previous.distance > distance) upcomingByString.set(note.position.string, { note, distance })
+    }
+    const stringCues: FrettedStringCue[] = []
+    for (const [string, note] of byString) if (note.position)
+      stringCues.push({ string, fret: note.position.fret, state: 'playback' })
+    for (const [string, upcoming] of upcomingByString)
+      if (!byString.has(string) && upcoming.note.position)
+        stringCues.push({ string, fret: upcoming.note.position.fret, state: 'upcoming' })
     const vibrations: FrettedVibration[] = []
+    const plucks: FrettedPluck[] = []
+    if (playing && !countingIn) {
+      const recentByString = new Map<number, { note: FrettedTabNote; age: number }>()
+      for (const note of plan) if (note.position &&
+        (!loop || note.startBeat < loop.end && (note.startBeat >= loop.start || beat < loop.start)) &&
+        note.startBeat <= beat + 1e-8) {
+        const age = Math.max(0, (beat - note.startBeat) * secondsPerBeat)
+        const previous = recentByString.get(note.position.string)
+        if (age < 0.45 && (!previous || previous.note.startBeat < note.startBeat))
+          recentByString.set(note.position.string, { note, age })
+      }
+      for (const { note } of recentByString.values()) {
+        const position = note.position!
+        const point = this.pluckPoints.get(position.string)
+        if (!point) continue
+        const [x, y] = this.projected([point[0], point[1], point[2] + 0.006], width, height)
+        const string = this.config.strings[position.string - 1]
+        plucks.push({ index: note.index, string: position.string,
+          conventionalStringNumber: string.conventionalStringNumber, name: string.name, x, y })
+      }
+    }
     const stateColor: [number, number, number] = STYLE_TONES[style]
     const stateFor = (item: Item) => {
       const key = item.string ? `String_${item.string}` : item.name
@@ -416,15 +497,16 @@ export class FrettedRenderer {
     const program = this.program
     for (const item of drawItems) {
       const stringNote = item.string ? byString.get(item.string) : undefined
+      const upcomingNote = item.string ? upcomingByString.get(item.string)?.note : undefined
       const noteState = stringNote?.position
         ? feedback[`Position_S${stringNote.position.string}_F${stringNote.position.fret}`] : undefined
       const stringState = feedback[item.string ? `String_${item.string}` : item.name]
-      const isVibrating = !!stringNote?.position && !reducedMotion
-      const age = stringNote ? Math.max(0, secondsAtBeat(beat) - secondsAtBeat(stringNote.startBeat)) : 0
+      const isVibrating = !!stringNote?.position && playing && !countingIn && !reducedMotion
+      const age = stringNote ? Math.max(0, (beat - stringNote.startBeat) * secondsPerBeat) : 0
       const amplitude = isVibrating ? 0.002 * Math.exp(-age * 2.6) : 0
       const activeStartX = stringNote?.position
         ? this.config.scaleLength - stringNote.position.fretDistanceFromNut : this.config.scaleLength
-      if (item.string && stringNote?.position)
+      if (item.string && stringNote?.position && isVibrating)
         vibrations.push({ string: item.string, fret: stringNote.position.fret, amplitude, activeStartX })
       const itemIndex = this.items.indexOf(item)
       const selectedMaterial = item.materials[styleIndex(style)] ?? item.materials[0]
@@ -449,9 +531,13 @@ export class FrettedRenderer {
       gl.uniform1f(this.locations.uClearcoat, item.clearcoats[styleIndex(style)] ?? 0)
       gl.uniform1f(this.locations.uStyle, styleIndex(style))
       const explicitState = noteState ?? stringState
-      const noteTint = explicitState ? FEEDBACK_COLOR[explicitState] : stateFor(item)
+      const noteTint = explicitState ? FEEDBACK_COLOR[explicitState] :
+        stringNote ? stateColor : upcomingNote ? FEEDBACK_COLOR.upcoming : stateFor(item)
       gl.uniform3fv(this.locations.uStateColor, noteTint)
-      gl.uniform1f(this.locations.uState, stringNote || explicitState ? 0.28 : 0)
+      const pulse = 0.5 + 0.5 * Math.sin(time / 150)
+      const amount = explicitState ? 0.54 : stringNote ? 0.86 :
+        upcomingNote ? reducedMotion || !playing ? 0.7 : 0.18 + 0.58 * pulse : 0
+      gl.uniform1f(this.locations.uState, amount)
       const baseTex = selectedMaterial.baseTex
       gl.uniform1f(this.locations.uHasTexture, baseTex >= 0 ? 1 : 0)
       if (baseTex >= 0 && this.textures[baseTex]) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.textures[baseTex]) }
@@ -463,9 +549,9 @@ export class FrettedRenderer {
       state === 'playback' ? 5.5 : state === 'upcoming' ? visualStatePriority('upcoming') : visualStatePriority(state)
     const addMarker = (note: FrettedTabNote, state: FrettedMarker['state']) => {
       if (!note.position) return
-      const y = this.config.strings.length === 1 ? 0 : 0.018 - (note.position.string - 1) * (0.036 / (this.config.strings.length - 1))
       const x = note.position.fretboardCoordinate
-      const [px, py] = this.projected([x, y, 0.058], width, height)
+      const point = this.stringPointAtX(note.position.string, x)
+      const [px, py] = this.projected(point ? [point[0], point[1], point[2] + 0.006] : [x, 0, 0.058], width, height)
       const positionState = feedback[`Position_S${note.position.string}_F${note.position.fret}`]
       const resolved = positionState && visualStatePriority(positionState) > markerRank(state) ? positionState : state
       const existing = markers.find((marker) => marker.position.string === note.position!.string && marker.position.fret === note.position!.fret)
@@ -474,7 +560,7 @@ export class FrettedRenderer {
         if (existing.index < 0 && note.index >= 0) existing.index = note.index
       } else {
         markers.push({ index: note.index, x: px, y: py, anchorX: px, anchorY: py,
-          label: note.position.fret ? String(note.position.fret) : '0',
+          label: note.position.fret ? String(note.position.fret) : 'O',
           state: resolved, position: note.position })
       }
     }
@@ -523,7 +609,7 @@ export class FrettedRenderer {
         fretLabels.push({ fret, x: px, y: py })
     }
     fretLabels.sort((a, b) => a.fret - b.fret)
-    return { markers, stringLabels, fretLabels, vibrations, triangles }
+    return { markers, stringLabels, fretLabels, stringCues, plucks, vibrations, triangles }
   }
 
   dispose() {

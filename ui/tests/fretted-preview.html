@@ -18,6 +18,8 @@
       import { GuitarView } from '/src/workspace/GuitarView.tsx'
       import { BassView } from '/src/workspace/BassView.tsx'
       import { buildSong } from '/src/workspace/song.ts'
+      import '/src/index.css'
+      import '/src/workspace/workspace.css'
 
       const query = new URLSearchParams(location.search)
       const instrument = query.get('instrument') === 'bass' ? 'bass' : 'guitar'
@@ -31,7 +33,6 @@
       const props = {
         song, track, trackId: id, beat: 0, playing: false, onPick() {},
         handedness: query.get('handedness') === 'left' ? 'left' : 'right',
-        viewMode: query.get('mode') === 'whole' ? 'whole' : 'fretboard',
       }
       const View = instrument === 'bass' ? BassView : GuitarView
       createRoot(document.getElementById('root')).render(React.createElement('main', null,

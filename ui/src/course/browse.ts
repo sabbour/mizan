@@ -8,16 +8,18 @@ import { artistOf } from './inspired'
 export type CourseInstrument = 'drums' | 'piano' | 'guitar' | 'bass'
 export type DrumShelf = 'course' | 'inspired' | 'genre'
 export type PianoShelf = 'genre' | 'inspired' | 'progression' | 'scale'
-export type FrettedShelf = 'course' | 'genre'
+export type FrettedShelf = 'course' | 'genre' | 'inspired' | 'scale'
 export type CourseBrowse = {
   instrument: CourseInstrument; shelf: DrumShelf; genre: string; drumArtist: string
   pianoShelf: PianoShelf; pianoGenre: string; pianoKey: { pitch: number; mode: KeyMode }; pianoScale: string; pianoArtist: string
-  guitarShelf: FrettedShelf; guitarGenre: string; bassShelf: FrettedShelf; bassGenre: string
+  guitarShelf: FrettedShelf; guitarGenre: string; guitarArtist: string; guitarKey: { pitch: number }; guitarScale: string
+  bassShelf: FrettedShelf; bassGenre: string; bassArtist: string; bassKey: { pitch: number }; bassScale: string
 }
 
 export const DEFAULT_BROWSE: CourseBrowse = {
   instrument: 'drums', shelf: 'course', genre: 'Rock', drumArtist: '', pianoArtist: '', pianoShelf: 'genre', pianoGenre: 'Rock', pianoKey: { pitch: 0, mode: 'major' }, pianoScale: 'major',
-  guitarShelf: 'course', guitarGenre: 'Rock', bassShelf: 'course', bassGenre: 'Rock',
+  guitarShelf: 'course', guitarGenre: 'Rock', guitarArtist: '', guitarKey: { pitch: 0 }, guitarScale: 'major',
+  bassShelf: 'course', bassGenre: 'Rock', bassArtist: '', bassKey: { pitch: 0 }, bassScale: 'major',
 }
 
 /** The browse position that shows a lesson, so Back returns to the list (and key) it was opened from. */
@@ -27,8 +29,18 @@ export function browseTo(id: string, current: CourseBrowse): CourseBrowse {
     ...current,
     instrument: fretted.instrument,
     ...(fretted.instrument === 'guitar'
-      ? { guitarShelf: fretted.kind === 'genre' ? 'genre' as const : 'course' as const, ...(fretted.genre ? { guitarGenre: fretted.genre } : {}) }
-      : { bassShelf: fretted.kind === 'genre' ? 'genre' as const : 'course' as const, ...(fretted.genre ? { bassGenre: fretted.genre } : {}) }),
+      ? {
+        guitarShelf: fretted.kind,
+        ...(fretted.genre ? { guitarGenre: fretted.genre } : {}),
+        ...(fretted.artist ? { guitarArtist: fretted.artist } : {}),
+        ...(fretted.family && fretted.tonic !== undefined ? { guitarKey: { pitch: fretted.tonic }, guitarScale: fretted.family } : {}),
+      }
+      : {
+        bassShelf: fretted.kind,
+        ...(fretted.genre ? { bassGenre: fretted.genre } : {}),
+        ...(fretted.artist ? { bassArtist: fretted.artist } : {}),
+        ...(fretted.family && fretted.tonic !== undefined ? { bassKey: { pitch: fretted.tonic }, bassScale: fretted.family } : {}),
+      }),
   }
   const piano = pianoLessonById(id)
   if (piano) {

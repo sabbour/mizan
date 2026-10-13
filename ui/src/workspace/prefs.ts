@@ -6,9 +6,12 @@ import type { PracticeView } from './PracticeViewPicker'
 
 export type KitType = 'acoustic' | 'electronic'
 export const KIT_TYPES: KitType[] = ['electronic', 'acoustic']
-/** Looks apply to either kit and draw its full geometry. `ClayStudyModel` is shown as "Hand-painted clay". */
+/** Shared 3D looks keep the full instrument geometry. `ClayStudyModel` is shown as "Hand-painted clay". */
 export const LOOKS = ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint'] as const
 export type Look = (typeof LOOKS)[number]
+export const LOOK_LABEL: Record<Look, string> = {
+  Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
+}
 /** A kit and its look, stored together, e.g. `electronic:Realistic`. */
 export type KitStyle = `${KitType}:${Look}`
 export const KIT_STYLES: KitStyle[] = KIT_TYPES.flatMap((kit) => LOOKS.map((look) => `${kit}:${look}` as KitStyle))

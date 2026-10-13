@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { Engine, Transport } from './engine'
 
 /** Calls `onFrame` every animation frame with the engine's transport. */
-export function useFrame(engine: Engine, onFrame: (t: Transport) => void): void {
+export function useFrame(engine: Engine | null, onFrame: (t: Transport) => void): void {
   const cb = useRef(onFrame)
   useEffect(() => {
     cb.current = onFrame
   })
   useEffect(() => {
+    if (!engine) return
     let id = 0
     const loop = () => {
       // The next frame is booked first, so one failing frame cannot stop every later one.
