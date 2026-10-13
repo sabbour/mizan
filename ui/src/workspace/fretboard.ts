@@ -1,5 +1,6 @@
 import { barAt, measures } from './meter'
 import type { MelodyNote, Song, Track } from './song'
+import { LOOKS, type Look } from './prefs'
 
 export type FrettedString = {
   string: number
@@ -17,7 +18,7 @@ export type FrettedInstrumentConfig = {
   scaleLength: number
   frets: number
   strings: readonly FrettedString[]
-  styles: readonly string[]
+  styles: readonly Look[]
 }
 
 export const GUITAR: FrettedInstrumentConfig = {
@@ -34,7 +35,7 @@ export const GUITAR: FrettedInstrumentConfig = {
     { string: 5, conventionalStringNumber: 2, name: 'B', openPitch: 'B3', midi: 59, gaugeInches: 0.013 },
     { string: 6, conventionalStringNumber: 1, name: 'High E', openPitch: 'E4', midi: 64, gaugeInches: 0.01 },
   ],
-  styles: ['Realistic', 'HandPaintedAnime', 'Stylized3D', 'NeonRhythm', 'TechnicalLearning', 'ToyDiorama', 'Watercolor', 'VintageConcert'],
+  styles: LOOKS,
 }
 
 export const BASS: FrettedInstrumentConfig = {
@@ -49,7 +50,7 @@ export const BASS: FrettedInstrumentConfig = {
     { string: 3, conventionalStringNumber: 2, name: 'D', openPitch: 'D2', midi: 38, gaugeInches: 0.065 },
     { string: 4, conventionalStringNumber: 1, name: 'G', openPitch: 'G2', midi: 43, gaugeInches: 0.045 },
   ],
-  styles: ['Realistic', 'HandPaintedAnime', 'Stylized3D', 'NeonRhythm', 'TechnicalLearning', 'ToyDiorama', 'Watercolor', 'VintageConcert'],
+  styles: LOOKS,
 }
 
 export type FrettedPosition = {

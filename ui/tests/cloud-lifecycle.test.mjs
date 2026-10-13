@@ -2,10 +2,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { webcrypto } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 import test from 'node:test'
 import ts from '../node_modules/typescript/lib/typescript.js'
+import { createServer } from 'vite'
 
 const require = createRequire(import.meta.url)
 const sourceRoot = fileURLToPath(new URL('../src/library/', import.meta.url))
@@ -38,7 +41,7 @@ const openSettings = (view, section = 'Analysis processing') => {
   showSettingsSection(view, section)
 }
 
-function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = true } = {}) {
+function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = true, liveMidiPreview = false } = {}) {
   let active
   const preferences = new Map(gettingStartedSeen ? [['mizan:getting-started:seen', 'true']] : [])
   const timers = []
@@ -153,6 +156,7 @@ function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = 
         if (specifier === 'lucide-react') return new Proxy({}, { get: (_target, key) => key })
         if (specifier === './bridge') return {
           host, HostError, IMPORTABLE: /\.(mid|midi|musicxml|xml|mxl)$/i,
+          liveMidiPreview,
           onMidiFileOpened(listener) {
             midiListeners.add(listener)
             return () => midiListeners.delete(listener)
@@ -1741,6 +1745,153 @@ test('MIDI search includes both additional providers and isolates a failure for 
   assert.equal(calls.filter((provider) => provider === 'freemidi').length, 2)
   assert.equal(nodes(view.tree, (node) => node.type === 'li' && node.props.className === 'midi-result').length, 5)
   view.unmount()
+})
+
+test('live MIDI preview is opt-in and read-only; dev search validates requests and reports Python failures', async () => {
+  const bridgeFile = fileURLToPath(new URL('../src/library/bridge.ts', import.meta.url))
+  const fixture = [{
+    id: 'freemidi:1', provider: 'freemidi', dedupeKey: 'freemidi:1', source: 'FreeMIDI',
+    title: 'Smells Like Teen Spirit', artist: 'Nirvana', license: 'Not listed by source',
+    licenseUrl: null, attribution: 'Artist listed: Nirvana',
+    sourceUrl: 'https://freemidi.org/download3-26749-smells-like-teen-spirit-nirvana',
+  }]
+  const loadBridge = ({ dev, search = '', nativeApi = null, fetchImpl }) => {
+    const calls = []
+    const mockHost = {
+      search_midi_freemidi: async (query) => {
+        calls.push(['mock', query])
+        return { ok: true, results: fixture }
+      },
+    }
+    const source = readFileSync(bridgeFile, 'utf8')
+      .replaceAll('import.meta.env', `({ DEV: ${dev} })`)
+    const output = ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 },
+    }).outputText
+    const module = { exports: {} }
+    const browser = {
+      location: { search },
+      __mizanNativeShell: !!nativeApi,
+      pywebview: nativeApi ? { api: nativeApi } : undefined,
+      addEventListener() {},
+    }
+    vm.runInNewContext(output, {
+      module, exports: module.exports, window: browser, URLSearchParams,
+      setTimeout(callback) { callback(); return 1 },
+      clearTimeout() {},
+      fetch: fetchImpl,
+      require(specifier) {
+        if (specifier === './mock') return { mockHost }
+        return require(specifier)
+      },
+    }, { filename: bridgeFile })
+    return { bridge: module.exports, calls }
+  }
+
+  const noFetch = () => { throw new Error('Unexpected live MIDI request') }
+  const mock = loadBridge({ dev: true, fetchImpl: noFetch })
+  assert.equal(mock.bridge.liveMidiPreview, false)
+  assert.deepEqual(await mock.bridge.host.searchMidiFreeMidi('smells like teen'), fixture)
+  assert.deepEqual(mock.calls, [['mock', 'smells like teen']])
+
+  const liveCalls = []
+  const live = loadBridge({
+    dev: true,
+    search: '?midi=live',
+    fetchImpl: async (url, init) => {
+      liveCalls.push([url, JSON.parse(init.body)])
+      return { json: async () => ({ ok: true, results: fixture, nextStart: null }) }
+    },
+  })
+  assert.equal(live.bridge.liveMidiPreview, true)
+  assert.deepEqual(await live.bridge.host.searchMidiFreeMidi('smells like teen'), fixture)
+  assert.equal(liveCalls[0][0], '/__dev/midi-search')
+  assert.equal(liveCalls[0][1].provider, 'freemidi')
+
+  const nativeCalls = []
+  const production = loadBridge({
+    dev: false,
+    search: '?midi=live',
+    fetchImpl: noFetch,
+    nativeApi: {
+      search_midi_freemidi: async (query) => {
+        nativeCalls.push(query)
+        return { ok: true, results: fixture }
+      },
+    },
+  })
+  assert.equal(production.bridge.liveMidiPreview, false)
+  assert.deepEqual(await production.bridge.host.searchMidiFreeMidi('smells like teen'), fixture)
+  assert.deepEqual(nativeCalls, ['smells like teen'])
+
+  const searchHost = {
+    searchMidiCommons: async () => [],
+    searchMidiMutopia: async () => ({ results: [], nextStart: null }),
+    searchMidiArchive: async () => [],
+    searchMidiBitMidi: async () => [],
+    searchMidiFreeMidi: async () => fixture,
+  }
+  const liveUi = harness(searchHost, { liveMidiPreview: true })
+  const liveView = liveUi.render(liveUi.load('Library.tsx').MidiSearch, {
+    query: 'smells like teen', onImport() { assert.fail('Live results must not be importable') },
+  })
+  liveUi.runTimers()
+  await liveView.settle()
+  assert.ok(text(liveView.tree).includes('Search only; import files in the installed app.'))
+  assert.equal(button(liveView.tree, 'Search only')?.props.disabled, true)
+  liveView.unmount()
+
+  const normalUi = harness(searchHost)
+  const normalView = normalUi.render(normalUi.load('Library.tsx').MidiSearch, {
+    query: 'smells like teen', onImport() {},
+  })
+  normalUi.runTimers()
+  await normalView.settle()
+  assert.equal(button(normalView.tree, 'Import')?.props.disabled, false)
+  normalView.unmount()
+
+  const uiRoot = fileURLToPath(new URL('..', import.meta.url))
+  const missingPython = resolve(uiRoot, 'tests', `missing-python-${process.pid}.exe`)
+  assert.equal(existsSync(missingPython), false)
+  const previousPython = process.env.MIZAN_DEV_MIDI_PYTHON
+  let server
+  try {
+    process.env.MIZAN_DEV_MIDI_PYTHON = missingPython
+    server = await createServer({
+      configFile: resolve(uiRoot, 'vite.config.ts'),
+      root: uiRoot,
+      logLevel: 'silent',
+      server: { host: '127.0.0.1', port: 0 },
+    })
+    await server.listen()
+    const address = server.httpServer.address()
+    assert.ok(address && typeof address !== 'string')
+    const logs = []
+    server.config.logger.error = (message, options) => logs.push({ message, options })
+    const endpoint = `http://127.0.0.1:${address.port}/__dev/midi-search`
+    const post = (body) => fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+    })
+    const invalidProvider = await post(JSON.stringify({ provider: 'other', query: 'x', startAt: 0 }))
+    assert.equal(invalidProvider.status, 400)
+    const oversized = await post('x'.repeat(4097))
+    assert.equal(oversized.status, 413)
+    const invalidStart = await post(JSON.stringify({ provider: 'mutopia', query: 'x', startAt: 3 }))
+    assert.equal(invalidStart.status, 400)
+    const failedSearch = await post(JSON.stringify({ provider: 'freemidi', query: 'x', startAt: 0 }))
+    const failure = await failedSearch.json()
+    assert.equal(failedSearch.status, 200)
+    assert.equal(failure.ok, false)
+    assert.equal(failure.error.code, 'midi_search_failed')
+    assert.equal('results' in failure, false)
+    assert.equal(logs.length, 1)
+    assert.equal(logs[0].message, 'Live MIDI search failed.')
+    assert.ok(logs[0].options.error instanceof Error)
+  } finally {
+    if (server) await server.close()
+    if (previousPython === undefined) delete process.env.MIZAN_DEV_MIDI_PYTHON
+    else process.env.MIZAN_DEV_MIDI_PYTHON = previousPython
+  }
 })
 
 test('unknown-license MIDI import requires permission for each offered file', async () => {

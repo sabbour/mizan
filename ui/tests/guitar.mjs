@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 
 const modelPath = (name) => fileURLToPath(new URL(`../public/models/${name}`, import.meta.url))
+const FRETTED_LOOKS = ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint']
 
 function readGlb(path) {
   const bytes = readFileSync(path)
@@ -135,10 +136,15 @@ function assertAsset(file, kind, config, expected) {
   assert.equal(json.buffers.length, 1)
   assert.ok(!json.buffers[0].uri && json.images.every((image) => !image.uri && image.bufferView !== undefined),
     `${kind}: model and textures are self-contained`)
-  assert.deepEqual(json.extensions.KHR_materials_variants.variants.map((variant) => variant.name), [
-    'Realistic', 'HandPaintedAnime', 'Stylized3D', 'NeonRhythm',
-    'TechnicalLearning', 'ToyDiorama', 'Watercolor', 'VintageConcert',
-  ])
+  assert.deepEqual(json.extensions.KHR_materials_variants.variants.map((variant) => variant.name), FRETTED_LOOKS)
+  const variantIndices = FRETTED_LOOKS.map((_look, index) => index)
+  for (const mesh of json.meshes) for (const primitive of mesh.primitives) {
+    const mappings = primitive.extensions?.KHR_materials_variants?.mappings ?? []
+    assert.deepEqual(mappings.flatMap((mapping) => mapping.variants).sort((a, b) => a - b), variantIndices,
+      `${kind}: every primitive maps all shared appearances exactly once`)
+    assert.ok(mappings.every((mapping) => mapping.material < json.materials.length),
+      `${kind}: every appearance maps to a material`)
+  }
   for (const image of json.images) {
     const view = json.bufferViews[image.bufferView]
     const offset = view.byteOffset ?? 0
@@ -152,6 +158,7 @@ function assertAsset(file, kind, config, expected) {
   const root = byName[kind === 'guitar' ? 'ElectricGuitar' : 'ElectricBass']
   assert.notEqual(root, undefined)
   const rootExtras = json.nodes[root].extras
+  assert.deepEqual(rootExtras.stylePresets, FRETTED_LOOKS)
   assert.equal(rootExtras.instrument, kind)
   assert.equal(rootExtras.scaleLength, config.scaleLength)
   assert.equal(rootExtras.playableFrets, config.frets)
@@ -256,7 +263,11 @@ try {
     GUITAR, BASS, mapFrettedNote, positionsForMidi, planFrettedTab,
     identifiesInstrument, measureAtBeat, notesByMeasure, positionForStringFret,
   } = await vite.ssrLoadModule('/src/workspace/fretboard.ts')
+  const { LOOKS } = await vite.ssrLoadModule('/src/workspace/prefs.ts')
   const { buildSong } = await vite.ssrLoadModule('/src/workspace/song.ts')
+  assert.deepEqual(LOOKS, FRETTED_LOOKS)
+  assert.deepEqual(GUITAR.styles, LOOKS)
+  assert.deepEqual(BASS.styles, LOOKS)
   assert.equal(GUITAR.scaleLength, 0.6477)
   assert.equal(GUITAR.frets, 22)
   assert.deepEqual(GUITAR.strings.map((string) => string.midi), [40, 45, 50, 55, 59, 64])

@@ -144,6 +144,9 @@ try {
     }
     for (const [width, height] of [[1440, 900], [617, 900]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+      await call('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: width === 617 ? 'reduce' : 'no-preference' }],
+      })
       if (artifacts) await evaluate(`window.__mizanFrettedShot = (name) => {
         window.mizanFrettedShot(name + '-${width}');
         return new Promise((resolve) => setTimeout(resolve, 500));

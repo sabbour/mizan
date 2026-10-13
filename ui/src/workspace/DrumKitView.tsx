@@ -5,7 +5,7 @@ import { HAT_LABEL, KIT_PIECES, kitStrike, type HatState, type KitPiece } from '
 import { barStart, measures, pulseBeats } from './meter'
 import type { Song } from './song'
 import type { Sticking } from './sticking'
-import { KIT_TYPES, LOOKS, splitKitStyle, type KitStyle, type KitType, type Look } from './prefs'
+import { KIT_TYPES, LOOKS, LOOK_LABEL, splitKitStyle, type KitStyle, type KitType, type Look } from './prefs'
 import { loadKit, preparedFor, type Prepared, type Target } from './kitAsset'
 import { KitRenderer, stageBackground } from './kitRenderer'
 import { feedbackAt, type Strike } from './kitFeedback'
@@ -21,10 +21,6 @@ type Props = {
 }
 
 const KIT_LABEL: Record<KitType, string> = { electronic: 'Electronic', acoustic: 'Acoustic' }
-const LOOK_LABEL: Record<Look, string> = {
-  Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
-}
-
 const perspective = (fov: number, aspect: number, near: number, far: number) => {
   const f = 1 / Math.tan(fov / 2)
   const m = new Float32Array(16)

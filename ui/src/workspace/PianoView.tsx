@@ -3,7 +3,7 @@ import type { Engine } from './engine'
 import { useFrame, useReducedMotion } from './hooks'
 import { barStart, measures, pulseBeats } from './meter'
 import { keyLetter, noteName, type PianoNote, type Song } from './song'
-import { LOOKS, type Look } from './prefs'
+import { LOOKS, LOOK_LABEL, type Look } from './prefs'
 import type { KeyTarget } from './kitAsset'
 import { KitRenderer, stageBackground, type Feedback } from './kitRenderer'
 import { feedbackAt, HAND_GLOW, type Strike } from './kitFeedback'
@@ -19,9 +19,6 @@ type Props = {
   letters?: boolean
 }
 
-const LOOK_LABEL: Record<Look, string> = {
-  Realistic: 'Realistic', ClayStudyModel: 'Hand-painted clay', NeonRhythm: 'Neon rhythm', TechnicalBlueprint: 'Technical blueprint',
-}
 const PEDAL_LABEL: Record<number, string> = { 64: 'Sustain pedal', 66: 'Sostenuto pedal', 67: 'Soft pedal' }
 /** The look chosen in this session; a view choice only, never stored. */
 const session: { look?: Look } = {}

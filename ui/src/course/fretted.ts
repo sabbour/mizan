@@ -1,8 +1,10 @@
 import type { BarMeter, MelodyNote, Song } from '../workspace/song'
 import { BASS, GUITAR, type FrettedInstrumentConfig } from '../workspace/fretboard'
+import { SCALE_FAMILIES, scaleTonic } from './pianoTonal'
+import { inspiredOrder } from './inspired'
 
 export type FrettedInstrument = 'guitar' | 'bass'
-export type FrettedLessonKind = 'course' | 'genre'
+export type FrettedLessonKind = 'course' | 'genre' | 'inspired' | 'scale'
 type Event = readonly [midi: number, beat: number, beats?: number, velocity?: number]
 
 export type FrettedLesson = {
@@ -10,6 +12,10 @@ export type FrettedLesson = {
   instrument: FrettedInstrument
   kind: FrettedLessonKind
   genre?: string
+  artist?: string
+  family?: string
+  tonic?: number
+  variant?: string
   level: number
   title: string
   goal: string
@@ -34,6 +40,13 @@ const shuffle = (pitches: number[]): Event[] =>
   pitches.map((midi, index) => [midi, Math.floor(index / 2) + index % 2 * 2 / 3, index % 2 ? 1 / 3 : 2 / 3])
 const chord = (pitches: number[], beat: number, duration = 1): Event[] =>
   pitches.map((midi) => [midi, beat, duration])
+const byBar = (pitches: number[], step = 0.5): Event[][] =>
+  Array.from({ length: 4 }, (_, bar) => pitches.flatMap((midi, index) => {
+    const beat = index * step
+    return beat >= bar * 4 && beat < (bar + 1) * 4
+      ? [[midi, beat - bar * 4, step] as Event]
+      : []
+  }))
 
 export const GUITAR_LESSONS: FrettedLesson[] = [
   exercise({
@@ -745,6 +758,138 @@ const BASS_COURSE_ADDITIONS: FrettedLesson[] = [
   }),
 ]
 
+const GUITAR_INSPIRED: FrettedLesson[] = [
+  exercise({
+    id: 'guitar-inspired-jimi-hendrix', instrument: 'guitar', kind: 'inspired', artist: 'Jimi Hendrix', level: 1,
+    title: 'Syncopated double-stop answers',
+    goal: 'Practise original two-note answers that leave space around a syncopated chord pulse.',
+    meter, tempo: { start: 56, target: 84 }, bars: 4,
+    steps: ['Play each paired note together as a compact double stop.', 'Keep the short answers behind the steady quarter-note pulse.', 'Leave the written gaps quiet; this is an original technique study, not a song transcription.'],
+    events: [
+      [...chord([55, 62], 0, 1), ...chord([57, 64], 2.5, 0.5)],
+      [...chord([59, 65], 0.5, 0.5), ...chord([57, 64], 2, 1)],
+      [...chord([55, 62], 0, 1), ...chord([60, 67], 1.5, 0.5), ...chord([57, 64], 3, 0.5)],
+      [...chord([59, 65], 0, 0.5), ...chord([57, 64], 2, 1)],
+    ],
+  }),
+  exercise({
+    id: 'guitar-inspired-nile-rodgers', instrument: 'guitar', kind: 'inspired', artist: 'Nile Rodgers', level: 1,
+    title: 'Clipped offbeat chord cuts',
+    goal: 'Build a light, even offbeat strum from short chord stabs and clean rests.',
+    meter, tempo: { start: 60, target: 92 }, bars: 4,
+    steps: ['Count “1 & 2 & 3 & 4 &” and strike only the written offbeats.', 'Keep each chord short and use a small, relaxed strumming motion.', 'Do not fill the spaces with extra strokes; this is an original rhythm study.'],
+    events: Array.from({ length: 4 }, () =>
+      [0.5, 1.5, 2.5, 3.5].flatMap((beat, index) => chord([[55, 59, 62], [57, 60, 64], [52, 59, 64], [55, 60, 64]][index], beat, 0.5))),
+  }),
+  exercise({
+    id: 'guitar-inspired-eddie-van-halen', instrument: 'guitar', kind: 'inspired', artist: 'Eddie Van Halen', level: 1,
+    title: 'Tapped high-note call and answer',
+    goal: 'Alternate a quick high-register tapping figure with a lower-register response.',
+    meter, tempo: { start: 52, target: 80 }, bars: 4,
+    steps: ['Tap the short upper-register pairs evenly, then answer with the lower notes.', 'Keep each phrase relaxed and separated by its written rest.', 'The pitches form a new exercise and do not reproduce a recorded passage.'],
+    events: [
+      notes(...sequence([72, 76, 79, 76, 72, 67, 64, 67], 0.5)),
+      notes(...sequence([74, 77, 81, 77, 74, 69, 65, 69], 0.5)),
+      notes(...sequence([76, 79, 83, 79, 76, 71, 67, 71], 0.5)),
+      notes(...sequence([72, 76, 79, 76, 72, 67, 64, 60], 0.5)),
+    ],
+  }),
+  exercise({
+    id: 'guitar-inspired-mark-knopfler', instrument: 'guitar', kind: 'inspired', artist: 'Mark Knopfler', level: 1,
+    title: 'Alternating bass and picked melody',
+    goal: 'Coordinate a steady low-note pulse with a separate, lightly picked upper melody.',
+    meter, tempo: { start: 52, target: 78 }, bars: 4,
+    steps: ['Play the low note on beats 1 and 3 with the thumb.', 'Use the fingers for the shorter upper answers between those beats.', 'Keep the two parts distinct and let each rest remain silent.'],
+    events: [
+      notes([43, 0, 1], [60, 1, 0.5], [64, 1.5, 0.5], [47, 2, 1], [62, 3, 0.5], [67, 3.5, 0.5]),
+      notes([40, 0, 1], [59, 1, 0.5], [64, 1.5, 0.5], [45, 2, 1], [60, 3, 0.5], [67, 3.5, 0.5]),
+      notes([43, 0, 1], [62, 1, 0.5], [67, 1.5, 0.5], [47, 2, 1], [64, 3, 0.5], [69, 3.5, 0.5]),
+      notes([40, 0, 1], [59, 1, 0.5], [62, 1.5, 0.5], [43, 2, 1], [60, 3, 1]),
+    ],
+  }),
+  exercise({
+    id: 'guitar-inspired-tom-morello', instrument: 'guitar', kind: 'inspired', artist: 'Tom Morello', level: 1,
+    title: 'Pedal-tone rhythm breaks',
+    goal: 'Keep a repeated low anchor steady while contrasting it with syncopated rests and short answers.',
+    meter, tempo: { start: 56, target: 84 }, bars: 4,
+    steps: ['Use a firm, even attack for each low anchor note.', 'Make the higher answer notes short and sharply separated.', 'Count through every gap; this original study focuses on rhythmic contrast, not effects.'],
+    events: [
+      notes([40, 0, 0.5], [40, 1, 0.5], [55, 1.5, 0.5], [40, 2, 1], [59, 3.5, 0.5]),
+      notes([40, 0, 0.5], [52, 0.5, 0.5], [40, 2, 0.5], [57, 2.5, 0.5], [40, 3, 0.5]),
+      notes([40, 0, 1], [55, 1.5, 0.5], [40, 2, 0.5], [59, 3, 0.5], [40, 3.5, 0.5]),
+      notes([40, 0, 0.5], [52, 1, 0.5], [40, 2, 1], [55, 3.5, 0.5]),
+    ],
+  }),
+]
+
+const BASS_INSPIRED: FrettedLesson[] = [
+  exercise({
+    id: 'bass-inspired-james-jamerson', instrument: 'bass', kind: 'inspired', artist: 'James Jamerson', level: 1,
+    title: 'Syncopated roots with chromatic approaches',
+    goal: 'Hold a moving root line together with short passing notes that lead into each new harmony.',
+    meter, tempo: { start: 52, target: 80 }, bars: 4,
+    steps: ['Keep the quarter-note pulse audible under the shorter approach notes.', 'Use the half-step notes as brief links into the next root.', 'Play this original line evenly; it is not a transcription of a recording.'],
+    events: [
+      notes([28, 0, 1], [35, 1, 0.5], [31, 1.5, 0.5], [33, 2, 1], [35, 3, 0.5], [34, 3.5, 0.5]),
+      notes([35, 0, 1], [40, 1, 0.5], [38, 1.5, 0.5], [36, 2, 1], [33, 3, 0.5], [32, 3.5, 0.5]),
+      notes([33, 0, 1], [40, 1, 0.5], [38, 1.5, 0.5], [31, 2, 1], [35, 3, 0.5], [34, 3.5, 0.5]),
+      notes([35, 0, 1], [33, 1, 1], [31, 2, 1], [28, 3, 1]),
+    ],
+  }),
+  exercise({
+    id: 'bass-inspired-bootsy-collins', instrument: 'bass', kind: 'inspired', artist: 'Bootsy Collins', level: 1,
+    title: 'Funk syncopation with open space',
+    goal: 'Contrast short offbeat notes with rests so the groove has room to breathe.',
+    meter, tempo: { start: 56, target: 88 }, bars: 4,
+    steps: ['Count sixteenth-note subdivisions while keeping the written eighth-note attacks clear.', 'Shorten each note before a rest; do not sustain across the gap.', 'Keep the accents playful but even in this original funk study.'],
+    events: [
+      notes([28, 0, 0.5], [35, 1.5, 0.5], [40, 2.5, 0.5], [31, 3.5, 0.5]),
+      notes([28, 0, 0.5], [31, 0.5, 0.5], [35, 2, 0.5], [40, 3, 0.5]),
+      notes([33, 0, 1], [40, 1.5, 0.5], [38, 2.5, 0.5], [35, 3.5, 0.5]),
+      notes([28, 0, 0.5], [35, 1, 0.5], [40, 2, 0.5], [31, 3, 0.5], [28, 3.5, 0.5]),
+    ],
+  }),
+  exercise({
+    id: 'bass-inspired-flea', instrument: 'bass', kind: 'inspired', artist: 'Flea', level: 1,
+    title: 'Octave jumps over an eighth-note pulse',
+    goal: 'Move between a grounded root and its octave while keeping a bright, driving pulse.',
+    meter, tempo: { start: 56, target: 84 }, bars: 4,
+    steps: ['Keep the eighth-note subdivision even through each register change.', 'Use a firm attack on the octave answer, then return cleanly to the root.', 'Relax the plucking hand as the phrase repeats.'],
+    events: [
+      notes(...sequence([28, 40, 28, 35, 28, 40, 31, 43], 0.5)),
+      notes(...sequence([33, 45, 33, 40, 33, 45, 35, 47], 0.5)),
+      notes(...sequence([28, 40, 35, 47, 31, 43, 35, 47], 0.5)),
+      notes(...sequence([33, 45, 40, 52, 35, 47, 33, 45], 0.5)),
+    ],
+  }),
+  exercise({
+    id: 'bass-inspired-carol-kaye', instrument: 'bass', kind: 'inspired', artist: 'Carol Kaye', level: 1,
+    title: 'Steady roots with a singing answer',
+    goal: 'Pair a clear quarter-note foundation with a small melodic answer at the end of each bar.',
+    meter, tempo: { start: 52, target: 76 }, bars: 4,
+    steps: ['Let the first two beats establish the bar before adding the answer.', 'Play the upper notes smoothly, with equal time between them.', 'Return to the next root without rushing the end of the phrase.'],
+    events: [
+      notes([28, 0, 1], [28, 1, 1], [35, 2, 0.5], [38, 2.5, 0.5], [40, 3, 1]),
+      notes([33, 0, 1], [33, 1, 1], [40, 2, 0.5], [43, 2.5, 0.5], [45, 3, 1]),
+      notes([31, 0, 1], [31, 1, 1], [38, 2, 0.5], [40, 2.5, 0.5], [43, 3, 1]),
+      notes([28, 0, 1], [28, 1, 1], [35, 2, 0.5], [38, 2.5, 0.5], [28, 3, 1]),
+    ],
+  }),
+  exercise({
+    id: 'bass-inspired-jaco-pastorius', instrument: 'bass', kind: 'inspired', artist: 'Jaco Pastorius', level: 1,
+    title: 'Upper-register melodic contour',
+    goal: 'Shape a lyrical bass melody with held tones, short turns and a clear return to the low register.',
+    meter, tempo: { start: 50, target: 76 }, bars: 4,
+    steps: ['Give the longer notes room to ring without covering the next attack.', 'Keep the short upper-register turns light and connected.', 'Finish with a measured return to the opening pitch.'],
+    events: [
+      notes([43, 0, 1.5], [47, 1.5, 0.5], [50, 2, 1], [52, 3, 1]),
+      notes([55, 0, 1], [52, 1, 0.5], [50, 1.5, 0.5], [47, 2, 1], [45, 3, 1]),
+      notes([43, 0, 0.5], [47, 0.5, 0.5], [50, 1, 1], [55, 2, 1.5], [52, 3.5, 0.5]),
+      notes([50, 0, 1], [47, 1, 1], [45, 2, 1], [43, 3, 1]),
+    ],
+  }),
+]
+
 type BeatEvent = readonly [beat: number, duration: number]
 const rhythm = (...events: BeatEvent[]) => events
 type FrettedGenreRecipe = {
@@ -887,6 +1032,8 @@ const genreLesson = (instrument: FrettedInstrument, recipe: FrettedGenreRecipe, 
 
 GUITAR_LESSONS.push(...GUITAR_COURSE_ADDITIONS)
 BASS_LESSONS.push(...BASS_COURSE_ADDITIONS)
+GUITAR_LESSONS.push(...GUITAR_INSPIRED)
+BASS_LESSONS.push(...BASS_INSPIRED)
 for (const instrument of ['guitar', 'bass'] as const) {
   const lessons = instrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
   for (const recipe of FRETTED_GENRE_RECIPES)
@@ -900,13 +1047,101 @@ export const FRETTED_LEVELS = ['String and fret basics', 'Open and fretted notes
 export const FRETTED_CONFIG: Record<FrettedInstrument, FrettedInstrumentConfig> = { guitar: GUITAR, bass: BASS }
 export const guitarLessonById = (id: string) => GUITAR_LESSONS.find((lesson) => lesson.id === id)
 export const bassLessonById = (id: string) => BASS_LESSONS.find((lesson) => lesson.id === id)
-export const frettedLessonById = (id: string) => FRETTED_LESSONS.find((lesson) => lesson.id === id)
-export const frettedLessonList = (lesson: FrettedLesson) => FRETTED_LESSONS.filter((item) =>
-  item.instrument === lesson.instrument && item.kind === lesson.kind && (item.kind === 'course' || item.genre === lesson.genre))
-  .toSorted((a, b) => a.level - b.level)
+const tonalSlug = (name: string) => name[0].toLowerCase() + (name[1] === '#' ? '-sharp' : name[1] === 'b' ? '-flat' : '')
+const scaleVariants = [
+  { id: 'run', name: 'One-octave run' },
+  { id: 'thirds', name: 'Broken thirds' },
+  { id: 'sequence', name: 'Three-note sequences' },
+] as const
+const madeScales = new Map<string, FrettedLesson[]>()
+
+/** The selected scale in an instrument-friendly register; fingering is suggested by pitch, not written. */
+export function frettedScaleLessons(instrument: FrettedInstrument, pitch: number, familyId: string): FrettedLesson[] {
+  const family = SCALE_FAMILIES.find((item) => item.id === familyId)
+  if (!family) return []
+  const cacheKey = `${instrument}:${pitch}:${familyId}`
+  const cached = madeScales.get(cacheKey)
+  if (cached) return cached
+  const tonic = scaleTonic(pitch, familyId)
+  const root = (instrument === 'guitar' ? 48 : 36) + pitch
+  const up = [...family.up.map((step) => root + step), root + 12]
+  const downSteps = family.down ?? family.up
+  const down = [root + 12, ...downSteps.slice(1).toReversed().map((step) => root + step), root]
+  const ascendingDegrees = family.up.map((step) => root + step)
+  const ascendingThirds = [...ascendingDegrees, ...ascendingDegrees.slice(0, 2).map((note) => note + 12)]
+  const descendingThirds = [
+    ...down,
+    ...downSteps.slice(1).toReversed().slice(0, 2).map((step) => root + step - 12),
+  ]
+  const groups = (line: number[], size: number) => {
+    const count = Math.min(4, Math.max(0, line.length - size + 1))
+    return Array.from({ length: count }, (_, index) =>
+      line.slice(Math.floor(index * (line.length - size + 1) / count), Math.floor(index * (line.length - size + 1) / count) + size)).flat()
+  }
+  const pairBudget = 16
+  const upCount = Math.min(family.up.length, pairBudget / 2)
+  const downCount = Math.min(family.up.length + 1, pairBudget - upCount)
+  const sampledPairs = (line: number[], count: number) => Array.from({ length: count }, (_, index) => {
+    const start = count === 1 ? 0 : Math.round(index * (line.length - 3) / (count - 1))
+    return [line[start], line[start + 2]]
+  })
+  const variants = [
+    [...up, ...down.slice(1)],
+    [...sampledPairs(ascendingThirds, upCount).flat(), ...sampledPairs(descendingThirds, downCount).flat()],
+    [...groups(up, 3), ...groups(down, 3).slice(3)],
+  ]
+  const lessons = scaleVariants.map((variant, index) => {
+    const pitches = variants[index]
+    return exercise({
+      id: `${instrument}-scale-${tonalSlug(tonic)}-${familyId}-${variant.id}`,
+      instrument, kind: 'scale', family: familyId, tonic: pitch, variant: variant.id, level: index + 1,
+      title: `${tonic} ${family.name}: ${variant.name}`,
+      goal: index === 0
+        ? `Play the ${tonic} ${family.name.toLowerCase()} scale one octave up and down in the written direction. ${family.note}.`
+        : `Practise ${variant.name.toLowerCase()} using notes from the ${tonic} ${family.name.toLowerCase()} scale.`,
+      meter, tempo: family.tempo, bars: 4,
+      steps: [
+        index === 0 ? 'Play each note evenly, ascending to the octave and returning to the tonic.' : `Follow the written ${variant.name.toLowerCase()} pattern; every pitch belongs to the selected scale.`,
+        index === 0 && family.down
+          ? 'Going up, use the raised sixth and seventh; coming down, use the natural-minor sixth and seventh.'
+          : 'Use the suggested tab as a position guide; choose fingering that feels comfortable for your hand.',
+        'Play slowly first, then increase the tempo only when the changes stay even.',
+      ],
+      events: byBar(pitches),
+    })
+  })
+  madeScales.set(cacheKey, lessons)
+  return lessons
+}
+
+export function frettedLessonById(id: string): FrettedLesson | undefined {
+  const lesson = FRETTED_LESSONS.find((item) => item.id === id)
+  if (lesson) return lesson
+  for (const instrument of ['guitar', 'bass'] as const)
+    for (const family of SCALE_FAMILIES)
+      for (let pitch = 0; pitch < 12; pitch++) {
+        const prefix = `${instrument}-scale-${tonalSlug(scaleTonic(pitch, family.id))}-${family.id}-`
+        if (id.startsWith(prefix)) {
+          const match = frettedScaleLessons(instrument, pitch, family.id).find((item) => item.id === id)
+          if (match) return match
+        }
+      }
+  return undefined
+}
+
+export const frettedLessonList = (lesson: FrettedLesson) => {
+  if (lesson.kind === 'scale') return frettedScaleLessons(lesson.instrument, lesson.tonic!, lesson.family!)
+  const same = FRETTED_LESSONS.filter((item) => item.instrument === lesson.instrument && item.kind === lesson.kind &&
+    (item.kind === 'genre' ? item.genre === lesson.genre : item.kind !== 'inspired' || item.artist === lesson.artist))
+  return lesson.kind === 'inspired' ? inspiredOrder(same) : same.toSorted((a, b) => a.level - b.level)
+}
 export const frettedGenres = (_instrument: FrettedInstrument) => [...FRETTED_GENRES]
-export const frettedLessonNote = (lesson: FrettedLesson) =>
-  `${lesson.instrument === 'guitar' ? 'Guitar' : 'Bass'} ${lesson.kind === 'genre' ? `${lesson.genre} study` : 'course'} · Level ${lesson.level}`
+export const frettedLessonNote = (lesson: FrettedLesson) => {
+  const instrument = lesson.instrument === 'guitar' ? 'Guitar' : 'Bass'
+  const category = lesson.kind === 'genre' ? `${lesson.genre} study` : lesson.kind === 'inspired' ? `Inspired by ${lesson.artist}`
+    : lesson.kind === 'scale' ? `${scaleTonic(lesson.tonic!, lesson.family!)} ${SCALE_FAMILIES.find((family) => family.id === lesson.family)?.name} scale` : 'course'
+  return `${instrument} ${category} · Level ${lesson.level}`
+}
 
 export function frettedLessonSong(lesson: FrettedLesson): Song {
   const barMap: BarMeter[] = Array.from({ length: lesson.bars }, (_, index) => ({

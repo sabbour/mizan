@@ -62,7 +62,7 @@ function FrettedPractice({ song, track, engine, instrument, view }: {
     countingIn: transport.countingIn, onPick: (beat: number) => engine.seek(beat) }
   if (view === 'tab') return <Tab {...props} />
   const PhysicalView = instrument === 'guitar' ? GuitarView : BassView
-  return <PhysicalView {...props} handedness={handedness} onHandednessChange={(value) => {
+  return <PhysicalView {...props} engine={engine} handedness={handedness} onHandednessChange={(value) => {
     setHandedness(value)
     savePref('frettedHandedness', value)
   }} />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ArrowUp, AudioLines, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Play, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
-import { host, HostError, IMPORTABLE, onMidiFileOpened, toBase64, type CloudProvider, type CloudProviderInfo, type CloudReadinessProgress, type CloudStatus, type Entry, type FfmpegStatus, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { host, HostError, IMPORTABLE, liveMidiPreview, onMidiFileOpened, toBase64, type CloudProvider, type CloudProviderInfo, type CloudReadinessProgress, type CloudStatus, type Entry, type FfmpegStatus, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
 import { foldSearchText } from './searchText'
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
@@ -2037,10 +2037,12 @@ function MidiSearch({ query, onImport }: {
     <section className="youtube-results midi-results" aria-label="Public MIDI results"
       aria-busy={waiting || mutopia.moreLoading}>
       <h2 className="lib-h2">Public MIDI <span className="dim num">{results.length || ''}</span></h2>
-      <p className="youtube-help">
-        Commons, Mutopia, and Internet Archive results need a confirmed per-file license.
-        BitMidi and FreeMIDI may not list one; import those files only if you have permission to use them.
-      </p>
+      {liveMidiPreview
+        ? <p className="youtube-help">Live preview searches real public MIDI sources. Search only; import files in the installed app.</p>
+        : <p className="youtube-help">
+            Commons, Mutopia, and Internet Archive results need a confirmed per-file license.
+            BitMidi and FreeMIDI may not list one; import those files only if you have permission to use them.
+          </p>}
       <ul className="provider-status-list" aria-label="MIDI search sources">
         {providers.map(({ id, label, state }) => {
           const error = state.page?.error
@@ -2087,7 +2089,9 @@ function MidiSearch({ query, onImport }: {
                     </div>
                   ))}
                 </div>
-                <button className="btn" onClick={() => onImport(result.primary)}>Import</button>
+                <button className="btn" disabled={liveMidiPreview} onClick={() => onImport(result.primary)}>
+                  {liveMidiPreview ? 'Search only' : 'Import'}
+                </button>
               </li>
             ))}
           </ol>

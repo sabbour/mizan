@@ -9,10 +9,12 @@ const vite = await createServer({ server: { middlewareMode: true }, appType: 'cu
 try {
   const {
     BASS_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, FRETTED_LESSONS, GUITAR_LESSONS,
-    bassLessonById, frettedGenres, frettedLessonById, frettedLessonList, frettedLessonNote, frettedLessonSong, guitarLessonById,
+    bassLessonById, frettedGenres, frettedLessonById, frettedLessonList, frettedLessonNote, frettedLessonSong, frettedScaleLessons,
+    guitarLessonById,
   } = await vite.ssrLoadModule('/src/course/fretted.ts')
   const { CourseSection, FrettedLessonPanel } = await vite.ssrLoadModule('/src/course/Course.tsx')
   const { browseTo, DEFAULT_BROWSE } = await vite.ssrLoadModule('/src/course/browse.ts')
+  const { SCALE_FAMILIES, scaleTonic } = await vite.ssrLoadModule('/src/course/pianoTonal.ts')
   const { freshPosition, lessonPosition, saveLessonPosition } = await vite.ssrLoadModule('/src/course/state.ts')
   const { planFrettedTab, positionsForMidi } = await vite.ssrLoadModule('/src/workspace/fretboard.ts')
   const { songBeats } = await vite.ssrLoadModule('/src/workspace/meter.ts')
@@ -38,17 +40,20 @@ try {
   assert.equal(FRETTED_CONFIG.guitar.frets, 22)
   assert.deepEqual(FRETTED_CONFIG.bass.strings.map((string) => string.openPitch), ['E1', 'A1', 'D2', 'G2'])
   assert.equal(FRETTED_CONFIG.bass.frets, 20)
-  assert.equal(GUITAR_LESSONS.length, 80)
-  assert.equal(BASS_LESSONS.length, 80)
+  assert.equal(GUITAR_LESSONS.length, 85)
+  assert.equal(BASS_LESSONS.length, 85)
   const notationDurations = [1 / 3, 1 / 2, 2 / 3, 1, 3 / 2, 2]
   for (const instrument of ['guitar', 'bass']) {
     const lessons = instrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
     const course = lessons.filter((lesson) => lesson.kind === 'course')
     const genres = lessons.filter((lesson) => lesson.kind === 'genre')
+    const inspired = lessons.filter((lesson) => lesson.kind === 'inspired')
     assert.equal(course.length, 25, `${instrument}: five progressive lessons at each of five levels`)
     assert.deepEqual(Array.from({ length: 5 }, (_, index) => course.filter((lesson) => lesson.level === index + 1).length),
       [5, 5, 5, 5, 5], `${instrument}: each course level has five lessons`)
     assert.equal(genres.length, 55, `${instrument}: five studies for each of eleven genres`)
+    assert.equal(inspired.length, 5, `${instrument}: five distinct original artist technique studies`)
+    assert.equal(new Set(inspired.map((lesson) => lesson.artist)).size, 5, `${instrument}: artist shelf has five distinct players`)
     assert.deepEqual(frettedGenres(instrument), FRETTED_GENRES, `${instrument}: shared genre list`)
     for (const genre of FRETTED_GENRES) {
       const studies = genres.filter((lesson) => lesson.genre === genre)
@@ -78,8 +83,9 @@ try {
       assert.deepEqual(song.instrumentNotes[instrument].map((note) => note.trackId), Array(lesson.notes.length).fill(instrument))
       const filtered = frettedLessonList(lesson)
       assert.ok(filtered.every((item) => item.instrument === instrument && item.kind === lesson.kind &&
-        (lesson.kind === 'course' || item.genre === lesson.genre)), `${where}: instrument, course and genre filters`)
-      assert.equal(filtered.length, lesson.kind === 'course' ? 25 : 5, `${where}: the correct lesson list is shown`)
+        (lesson.kind === 'course' || lesson.kind === 'genre' && item.genre === lesson.genre ||
+          lesson.kind === 'inspired' && item.artist === lesson.artist)), `${where}: instrument, shelf and filter routing`)
+      assert.equal(filtered.length, lesson.kind === 'course' ? 25 : lesson.kind === 'genre' ? 5 : 1, `${where}: the correct lesson list is shown`)
       assert.ok(filtered.includes(lesson), `${where}: Previous/Next list includes the lesson`)
       for (const note of lesson.notes) {
         assert.ok(Number.isInteger(note.midi) && positionsForMidi(note.midi, config).length > 0, `${where}: pitch ${note.midi} fits the instrument tuning and fret range`)
@@ -107,6 +113,65 @@ try {
       }
     }
   }
+  const scaleIds = []
+  for (const instrument of ['guitar', 'bass']) {
+    for (const family of SCALE_FAMILIES) for (let pitch = 0; pitch < 12; pitch++) {
+      const tonic = scaleTonic(pitch, family.id)
+      const root = (instrument === 'guitar' ? 48 : 36) + pitch
+      const lessons = frettedScaleLessons(instrument, pitch, family.id)
+      assert.equal(lessons.length, 3, `${instrument}: ${tonic} ${family.name} has three playable patterns`)
+      assert.deepEqual(lessons.map((lesson) => lesson.variant), ['run', 'thirds', 'sequence'])
+      assert.strictEqual(frettedScaleLessons(instrument, pitch, family.id), lessons, `${instrument}: ${tonic} ${family.id} keeps its lesson list stable`)
+      const run = lessons[0]
+      const descending = family.down ?? family.up
+      const expected = [
+        ...family.up.map((step) => root + step), root + 12,
+        ...descending.slice(1).toReversed().map((step) => root + step), root,
+      ]
+      assert.deepEqual(run.notes.map((note) => note.midi), expected, `${instrument}: ${tonic} ${family.id} ascends and descends with its scale intervals`)
+      assert.equal(run.notes.filter((note) => note.startBeat < expected.length / 2).length, expected.length)
+      if (family.id === 'melodic-minor') {
+        const downPitches = run.notes.map((note) => note.midi).slice(family.up.length + 1)
+        assert.deepEqual(downPitches, [root + 10, root + 8, root + 7, root + 5, root + 3, root + 2, root],
+          `${instrument}: melodic minor uses the natural minor descent`)
+      }
+      for (const lesson of lessons) {
+        scaleIds.push(lesson.id)
+        assert.strictEqual(frettedLessonById(lesson.id), lesson, `${lesson.id}: lesson route preserves identity`)
+        const lessonList = frettedLessonList(lesson)
+        assert.deepEqual(lessonList.map((item) => item.id), lessons.map((item) => item.id),
+          `${lesson.id}: previous and next stay within the selected key and family`)
+        assert.strictEqual(lessonList[lesson.level - 1], lesson, `${lesson.id}: navigation list preserves identity`)
+        assert.ok(lesson.goal.length > 30 && lesson.steps.length >= 3, `${lesson.id}: instructions are useful`)
+        assert.ok(lesson.notes.length >= 8, `${lesson.id}: has enough note material`)
+        const tab = planFrettedTab(lesson.notes, FRETTED_CONFIG[instrument])
+        assert.equal(tab.length, lesson.notes.length)
+        assert.ok(tab.every((item) => item.position && !item.reason), `${lesson.id}: every note maps to suggested tab`)
+        const onsets = new Map()
+        for (const item of tab) {
+          const strings = onsets.get(item.startBeat) ?? []
+          strings.push(item.position.string)
+          onsets.set(item.startBeat, strings)
+        }
+        for (const [beat, strings] of onsets)
+          assert.equal(new Set(strings).size, strings.length, `${lesson.id}: simultaneous notes at ${beat} use separate strings`)
+        for (const [string, sameString] of Map.groupBy(tab, (item) => item.position.string)) {
+          const ordered = sameString.toSorted((a, b) => a.startBeat - b.startBeat)
+          ordered.forEach((item, index) => assert.ok(index === 0 || ordered[index - 1].startBeat + ordered[index - 1].beats <= item.startBeat + 1e-9,
+            `${lesson.id}: string ${string} is free before beat ${item.startBeat}`))
+        }
+      }
+    }
+  }
+  assert.equal(new Set([...ids, ...scaleIds]).size, ids.length + scaleIds.length, 'all static and generated scale IDs are unique')
+  assert.deepEqual(frettedScaleLessons('guitar', 0, 'major')[1].notes.map((note) => note.midi), [
+    48, 52, 50, 53, 52, 55, 53, 57, 55, 59, 57, 60, 59, 62,
+    60, 57, 59, 55, 57, 53, 55, 52, 53, 50, 52, 48, 50, 47, 48, 45,
+  ], 'C-major broken thirds are scale notes two degrees apart in both directions')
+  assert.deepEqual(frettedScaleLessons('guitar', 0, 'major-pentatonic')[1].notes.map((note) => note.midi), [
+    48, 52, 50, 55, 52, 57, 55, 60, 57, 62,
+    60, 55, 57, 52, 55, 50, 52, 48, 50, 45, 48, 43,
+  ], 'C-major pentatonic broken thirds skip its pentatonic degrees in both directions')
   const tabPositions = (lesson) => planFrettedTab(lesson.notes, FRETTED_CONFIG[lesson.instrument])
   assert.deepEqual(tabPositions(guitarLessonById('guitar-open-strings')).slice(0, 6).map(({ position }) =>
     [position.conventionalStringNumber, position.fret]), [[6, 0], [5, 0], [4, 0], [3, 0], [2, 0], [1, 0]],
@@ -205,7 +270,11 @@ try {
     getItem: (key) => savedValues.get(key) ?? null,
     setItem: (key, value) => savedValues.set(key, value),
   }
-  for (const lesson of [guitarLessonById('guitar-open-chord-rhythm'), bassLessonById('bass-root-fifth-octave')]) {
+  for (const lesson of [
+    guitarLessonById('guitar-open-chord-rhythm'), bassLessonById('bass-root-fifth-octave'),
+    guitarLessonById('guitar-inspired-nile-rodgers'), bassLessonById('bass-inspired-jaco-pastorius'),
+    frettedScaleLessons('guitar', 6, 'melodic-minor')[0], frettedScaleLessons('bass', 9, 'blues')[0],
+  ]) {
     const fresh = freshPosition(lesson)
     assert.equal(fresh.trackId, lesson.instrument)
     assert.deepEqual(fresh.loop, { startBar: 1, endBar: lesson.bars })
@@ -225,6 +294,18 @@ try {
   assert.equal(browseTo('guitar-open-strings', genreBrowse).guitarShelf, 'course', 'course lessons return to their level list')
   assert.equal(browseTo('guitar-open-strings', genreBrowse).guitarGenre, 'Blues', 'the prior Guitar genre remains selected')
   assert.equal(chosen.instrument, 'guitar', 'the pre-practice browse state remains available for Back')
+  const guitarInspired = guitarLessonById('guitar-inspired-nile-rodgers')
+  const guitarInspiredBrowse = browseTo(guitarInspired.id, chosen)
+  assert.equal(guitarInspiredBrowse.guitarShelf, 'inspired', 'inspired lessons return to the Inspired shelf')
+  assert.equal(guitarInspiredBrowse.guitarArtist, 'Nile Rodgers', 'Back restores the selected artist')
+  const bassScale = frettedScaleLessons('bass', 6, 'melodic-minor')[0]
+  const bassScaleBrowse = browseTo(bassScale.id, chosen)
+  assert.equal(bassScaleBrowse.instrument, 'bass', 'a bass scale selects Bass on open')
+  assert.equal(bassScaleBrowse.bassShelf, 'scale', 'bass scale returns to the Scales shelf')
+  assert.deepEqual(bassScaleBrowse.bassKey, { pitch: 6 }, 'Back restores the bass tonic')
+  assert.equal(bassScaleBrowse.bassScale, 'melodic-minor', 'Back restores the bass scale family')
+  assert.equal(bassScaleBrowse.guitarKey.pitch, chosen.guitarKey.pitch, 'bass scale routing preserves the independent guitar key')
+  assert.equal(bassScaleBrowse.guitarScale, chosen.guitarScale, 'bass scale routing preserves the independent guitar family')
 
   const guitarMarkup = renderToStaticMarkup(createElement(CourseSection, {
     browse: { ...DEFAULT_BROWSE, instrument: 'guitar', guitarShelf: 'genre', guitarGenre: 'Rock' },
@@ -238,6 +319,26 @@ try {
   assert.match(guitarMarkup, /Rock: Set the pulse/)
   assert.match(guitarMarkup, /Rock: Play root-fifth shapes/)
   assert.doesNotMatch(guitarMarkup, /Blues: a two-note shuffle|Pop: C to G chord changes/)
+  const inspiredMarkup = renderToStaticMarkup(createElement(CourseSection, {
+    browse: { ...DEFAULT_BROWSE, instrument: 'guitar', guitarShelf: 'inspired', guitarArtist: 'Nile Rodgers' },
+    onBrowse: () => {}, onLesson: () => {},
+  }))
+  assert.match(inspiredMarkup, /data-fretted-shelf="inspired"/)
+  assert.match(inspiredMarkup, /data-genre="Nile Rodgers"/)
+  assert.match(inspiredMarkup, /Inspired by Nile Rodgers/)
+  assert.match(inspiredMarkup, /Clipped offbeat chord cuts/)
+  const scaleMarkup = renderToStaticMarkup(createElement(CourseSection, {
+    browse: { ...DEFAULT_BROWSE, instrument: 'bass', bassShelf: 'scale', bassKey: { pitch: 6 }, bassScale: 'melodic-minor' },
+    onBrowse: () => {}, onLesson: () => {},
+  }))
+  assert.match(scaleMarkup, /data-fretted-shelf="scale"/)
+  assert.match(scaleMarkup, /F# melodic minor/i)
+  assert.match(scaleMarkup, /One-octave run/)
+  assert.match(scaleMarkup, /Broken thirds/)
+  assert.match(scaleMarkup, /Three-note sequences/)
+  assert.equal((scaleMarkup.match(/<option value="\d+"/g) ?? []).length, 12, 'the fretted scale picker offers all twelve tonics')
+  for (const family of SCALE_FAMILIES)
+    assert.match(scaleMarkup, new RegExp(`<option value="${family.id}"`), `scale picker offers ${family.name}`)
   const bassMarkup = renderToStaticMarkup(createElement(CourseSection, {
     browse: { ...DEFAULT_BROWSE, instrument: 'bass', bassShelf: 'course' },
     onBrowse: () => {}, onLesson: () => {},
@@ -254,6 +355,11 @@ try {
   assert.match(panel, /does not listen for played notes/)
   assert.match(panel, /No previous lesson/)
   assert.match(panel, /Next lesson: First notes on E and A/)
+  const scalePanel = renderToStaticMarkup(createElement(FrettedLessonPanel, {
+    lesson: frettedScaleLessons('guitar', 0, 'major')[1], onLesson: () => {},
+  }))
+  assert.match(scalePanel, /Previous lesson: C Major \(Ionian\): One-octave run/)
+  assert.match(scalePanel, /Next lesson: C Major \(Ionian\): Three-note sequences/)
   console.log(`Guitar and bass course checks passed (${GUITAR_LESSONS.length} guitar, ${BASS_LESSONS.length} bass lessons).`)
 } finally {
   await vite.close()
