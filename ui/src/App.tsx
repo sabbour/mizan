@@ -189,6 +189,13 @@ export default function App() {
             setOpenRevision((revision) => revision + 1)
             setView({ kind: 'song', opened: { ...updated, song: fromHost(updated.song) } })
           }}
+          onSaveInstrument={async (trackId, gmProgram) => {
+            const songId = opened.entry.id
+            const updated = await host.changeScoreTrackInstrument(songId, trackId, gmProgram)
+            const refreshed = { ...updated, song: fromHost(updated.song) }
+            setView((current) => current.kind === 'song' && current.opened.entry.id === songId
+              ? { kind: 'song', opened: refreshed } : current)
+          }}
           onBack={back}
           analysisNotice={decodingHeadline || hasAnalysisStatus ? (
             <aside className="analysis-notice" aria-label={decodingHeadline ? 'Transcription warning' : 'Analysis status'}>

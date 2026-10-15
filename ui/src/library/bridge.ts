@@ -520,6 +520,8 @@ export const host = {
   remove: (id: string) => call('delete_song', id),
   deleteScoreTrack: (songId: string, trackId: string) =>
     call<Opened>('delete_score_track', songId, trackId),
+  changeScoreTrackInstrument: (songId: string, trackId: string, gmProgram: number) =>
+    call<Opened>('change_score_track_instrument', songId, trackId, gmProgram),
   reprocess: (id: string) => call<{ job: QueueJob }>('reprocess_song', id).then((r) => r.job),
   linkRecording: (id: string, url: string) => call<{ job: QueueJob }>('link_recording', id, url).then((r) => r.job),
   setTiming: (id: string, timing: { offset: number; tempoScale: number }) =>

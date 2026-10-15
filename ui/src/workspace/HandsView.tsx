@@ -19,6 +19,7 @@ type Props = {
 // The hand colours of the score letters and the 3D piano: blue left, orange right.
 const RIGHT = '#a64800'
 const LEFT = '#1b5cb5'
+const UNASSIGNED = '#757575'
 const rgb = (colour: Vec3, alpha = 1) => `rgb(${colour.map((value) => Math.round(value * 255)).join(' ')} / ${alpha})`
 /** Mix a hex colour toward a lit tint, `amount` 0..1. */
 const mix = (hex: string, tint: Vec3, amount: number) => {
@@ -37,9 +38,10 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
   const section = useRef<HTMLElement>(null)
   const notes = song.piano
   // Written fingering when the music has it (lessons); otherwise suggestions from note spacing, labelled as such.
+  const handAssignments = notes.length > 0 && notes.every((note) => note.hand != null)
   const written = useMemo(() => notes.some((note) => note.finger), [notes])
   const fingers = useMemo(() => written
-    ? new Map(notes.filter((note) => note.finger).map((note) => [note, { hand: note.hand, finger: note.finger! } as Finger]))
+    ? new Map(notes.filter((note) => note.finger && note.hand).map((note) => [note, { hand: note.hand!, finger: note.finger! } as Finger]))
     : suggestFingers(notes), [notes, written])
   const ordered = useMemo(() => [...notes].sort((a, b) => a.startBeat - b.startBeat), [notes])
   // Each key's strikes for the shared feedback: the same approach glow and hit pulse as the 3D piano and kit.
@@ -49,7 +51,10 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
       const target: KeyTarget = `key:${keyOf(note.midi)}`
       const list = map.get(target) ?? []
       const last = list.at(-1)
-      if (last && Math.abs(last.beat - note.startBeat) < 1e-9) { if (last.hand !== note.hand) last.hand = 'both' }
+      if (last && Math.abs(last.beat - note.startBeat) < 1e-9) {
+        if (last.hand && note.hand && last.hand !== note.hand) last.hand = 'both'
+        else last.hand ??= note.hand
+      }
       else list.push({ beat: note.startBeat, velocity: note.velocity ?? 0.7, specified: true, hand: note.hand })
       map.set(target, list)
     }
@@ -166,7 +171,10 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
     const fill = (key: number, rest: string) => {
       const hit = pressed.get(key)
       const f = lit(key)
-      if (hit) return f && f.pulse > 0.02 ? mix(hit.note.hand === 'left' ? LEFT : RIGHT, [1, 1, 1], Math.min(0.4, f.pulse * 0.4)) : hit.note.hand === 'left' ? LEFT : RIGHT
+      if (hit) {
+        const colour = hit.note.hand === 'left' ? LEFT : hit.note.hand === 'right' ? RIGHT : UNASSIGNED
+        return f && f.pulse > 0.02 ? mix(colour, [1, 1, 1], Math.min(0.4, f.pulse * 0.4)) : colour
+      }
       return f && f.upcoming > 0.02 ? mix(rest, f.upcomingTint, Math.min(0.6, f.upcoming * 0.6)) : rest
     }
     // The hit pulse also glows around its key, in the hand's colour, fading with the pulse.
@@ -246,7 +254,7 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
     }
     // Illustrative hand spans above the keys, labelled so hands never rely on colour alone.
     for (const hand of ['left', 'right'] as const) {
-      const keys = [...pressed].filter(([, value]) => value.note.hand === hand || (hand === 'right' && value.note.hand !== 'left'))
+      const keys = [...pressed].filter(([, value]) => value.note.hand === hand)
         .map(([key]) => xOf.get(key)).filter((box) => box !== undefined)
       if (!keys.length) continue
       const from = Math.min(...keys.map((box) => box.x))
@@ -265,26 +273,30 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
 
     const atPlayhead = [...pressed].sort(([a], [b]) => a - b)
     const summary = `${sounding ? '' : 'paused:'}${atPlayhead
-      .map(([, { note, finger }]) => `${noteName(note.midi)}${note.hand === 'left' ? ' L' : ' R'}${finger ? finger.finger : ''}`).join(', ')}`
+      .map(([, { note, finger }]) => `${noteName(note.midi)}${note.hand === 'left' ? ' L' : note.hand === 'right' ? ' R' : ''}${finger ? finger.finger : ''}`).join(', ')}`
     if (summary !== lastActive.current && section.current) {
       lastActive.current = summary
       section.current.dataset.active = summary
       // Readable on demand by assistive technology, without announcing every change while playing.
       const notes = atPlayhead.map(([, { note, finger }]) =>
-        `${noteName(note.midi)}, ${note.hand === 'left' ? 'left' : 'right'} hand${finger ? `, finger ${finger.finger}` : ''}`).join('; ')
+        `${noteName(note.midi)}${note.hand ? `, ${note.hand} hand` : ''}${finger ? `, finger ${finger.finger}` : ''}`).join('; ')
       if (described.current) described.current.textContent = !notes ? 'No notes at the playhead.'
         : sounding ? `Sounding now: ${notes}.` : `Paused. Notes to play at the playhead: ${notes}.`
     }
   })
 
   return (
-    <section ref={section} className="practice-view practice-hands" aria-label={`Hands and keys: the notes at the playhead, by hand, with ${written ? 'written' : 'suggested'} finger numbers`}>
+    <section ref={section} className="practice-view practice-hands" aria-label={handAssignments
+      ? `Hands and keys: the notes at the playhead, by hand, with ${written ? 'written' : 'suggested'} finger numbers`
+      : 'Keyboard: the notes at the playhead'}>
       <canvas ref={canvas} className="practice-canvas" aria-hidden="true" />
       <p ref={described} className="visually-hidden">No notes at the playhead.</p>
       <p className="practice-legend">
-        <span className="legend-key legend-right" aria-hidden="true" /> right hand
-        <span className="legend-key legend-left" aria-hidden="true" /> left hand
-        <span className="practice-note">{!fingering ? 'Finger numbers are off.' : written ? 'Finger numbers are the written fingering.' : 'Finger numbers are suggestions from note spacing, not detected fingering.'}</span>
+        {handAssignments ? <>
+          <span className="legend-key legend-right" aria-hidden="true" /> right hand
+          <span className="legend-key legend-left" aria-hidden="true" /> left hand
+        </> : <span className="practice-note">Hand assignments were not recorded.</span>}
+        {handAssignments && <span className="practice-note">{!fingering ? 'Finger numbers are off.' : written ? 'Finger numbers are the written fingering.' : 'Finger numbers are suggestions from note spacing, not detected fingering.'}</span>}
       </p>
     </section>
   )

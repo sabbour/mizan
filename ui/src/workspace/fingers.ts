@@ -17,7 +17,7 @@ export function suggestFingers(notes: readonly PianoNote[]): Map<PianoNote, Fing
   for (const hand of ['right', 'left'] as const) {
     const groups = new Map<number, PianoNote[]>()
     for (const note of notes) {
-      if ((note.hand === 'left') !== (hand === 'left')) continue
+      if (!note.hand || note.hand !== hand) continue
       groups.set(note.startBeat, [...(groups.get(note.startBeat) ?? []), note])
     }
     // The thumb's key; a five-finger position covers about a sixth above (right) or below (left) it.

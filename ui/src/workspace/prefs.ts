@@ -36,6 +36,12 @@ export type PracticePrefs = {
   guitarView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
   bassView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
   frettedHandedness?: 'right' | 'left'
+  frettedView?: 'guide' | 'mirror'
+  frettedLook?: Look
+  frettedNames?: boolean
+  frettedGuides?: boolean
+  /** Show the 3D hands, with their short wrists, on every instrument; on unless the player turned them off. */
+  hands?: boolean
 }
 
 const KEY = 'mizan:practice'
@@ -81,6 +87,19 @@ function read(warn: boolean): PracticePrefs {
   if ('frettedHandedness' in saved) {
     if (saved.frettedHandedness === 'right' || saved.frettedHandedness === 'left') prefs.frettedHandedness = saved.frettedHandedness
     else if (warn) console.warn('Ignoring the saved guitar or bass alignment; it is not left-handed or right-handed.', saved.frettedHandedness)
+  }
+  if ('frettedView' in saved) {
+    if (saved.frettedView === 'guide' || saved.frettedView === 'mirror') prefs.frettedView = saved.frettedView
+    else if (warn) console.warn('Ignoring the saved guitar or bass view; it is not Finger guide or 3D mirror.', saved.frettedView)
+  }
+  if ('frettedLook' in saved) {
+    if ((LOOKS as readonly unknown[]).includes(saved.frettedLook)) prefs.frettedLook = saved.frettedLook as Look
+    else if (warn) console.warn('Ignoring the saved guitar or bass look; it is not one of the offered looks.', saved.frettedLook)
+  }
+  for (const key of ['frettedNames', 'frettedGuides', 'hands'] as const) {
+    if (!(key in saved)) continue
+    if (typeof saved[key] === 'boolean') prefs[key] = saved[key]
+    else if (warn) console.warn(`Ignoring the saved ${key} preference; it is not on or off.`, saved[key])
   }
   if ('kitStyle' in saved) {
     if (KIT_STYLES.includes(saved.kitStyle as KitStyle)) prefs.kitStyle = saved.kitStyle as KitStyle

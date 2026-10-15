@@ -1,18 +1,22 @@
 import type { BarMeter, MelodyNote, Song } from '../workspace/song'
-import { BASS, GUITAR, type FrettedInstrumentConfig } from '../workspace/fretboard'
+import { BASS, GUITAR, positionsForMidi, type FrettedInstrumentConfig, type FrettedPosition } from '../workspace/fretboard'
 import { SCALE_FAMILIES, scaleTonic } from './pianoTonal'
 import { inspiredOrder } from './inspired'
+import { BASS_SONG_STUDIES, GUITAR_SONG_STUDIES, type FrettedSongStudy } from './frettedInspired'
+import { FRETTED_GENRE_PHRASES, type FrettedGenrePhraseSet } from './frettedGenrePhrases'
 
 export type FrettedInstrument = 'guitar' | 'bass'
 export type FrettedLessonKind = 'course' | 'genre' | 'inspired' | 'scale'
-type Event = readonly [midi: number, beat: number, beats?: number, velocity?: number]
+type Event = readonly [midi: number, beat: number, beats?: number, velocity?: number, string?: number, fret?: number]
 
 export type FrettedLesson = {
   id: string
   instrument: FrettedInstrument
   kind: FrettedLessonKind
   genre?: string
+  gmProgram?: number
   artist?: string
+  track?: string
   family?: string
   tonic?: number
   variant?: string
@@ -29,8 +33,9 @@ export type FrettedLesson = {
 type LessonDraft = Omit<FrettedLesson, 'notes'> & { events: Event[][] }
 const meter = { numerator: 4, denominator: 4 }
 const exercise = (draft: LessonDraft): FrettedLesson => ({
-  ...draft, notes: draft.events.flatMap((bar, index) => bar.map(([midi, beat, beats = 0.5, velocity = 0.78]) => ({
+  ...draft, notes: draft.events.flatMap((bar, index) => bar.map(([midi, beat, beats = 0.5, velocity = 0.78, string, fret]) => ({
     trackId: draft.instrument, midi, startBeat: index * 4 + beat, beats, velocity,
+    ...(string !== undefined && fret !== undefined ? { string, fret } : {}),
   }))),
 })
 const notes = (...events: Event[]) => events
@@ -40,6 +45,11 @@ const shuffle = (pitches: number[]): Event[] =>
   pitches.map((midi, index) => [midi, Math.floor(index / 2) + index % 2 * 2 / 3, index % 2 ? 1 / 3 : 2 / 3])
 const chord = (pitches: number[], beat: number, duration = 1): Event[] =>
   pitches.map((midi) => [midi, beat, duration])
+const inspiredSongLesson = (study: FrettedSongStudy): FrettedLesson => exercise({
+  id: study.id, instrument: study.instrument, kind: 'inspired', artist: study.artist, track: study.track, level: study.level,
+  title: `${study.track}: ${study.focus}`, goal: study.goal, meter,
+  tempo: { start: study.tempo[0], target: study.tempo[1] }, bars: 4, steps: study.steps, events: study.events,
+})
 const byBar = (pitches: number[], step = 0.5): Event[][] =>
   Array.from({ length: 4 }, (_, bar) => pitches.flatMap((midi, index) => {
     const beat = index * step
@@ -890,6 +900,8 @@ const BASS_INSPIRED: FrettedLesson[] = [
   }),
 ]
 
+const FRETTED_SONG_STUDIES = [...GUITAR_SONG_STUDIES, ...BASS_SONG_STUDIES].map(inspiredSongLesson)
+
 type BeatEvent = readonly [beat: number, duration: number]
 const rhythm = (...events: BeatEvent[]) => events
 type FrettedGenreRecipe = {
@@ -976,73 +988,82 @@ const FRETTED_GENRE_RECIPES: FrettedGenreRecipe[] = [
 
 export const FRETTED_GENRES = FRETTED_GENRE_RECIPES.map(({ genre }) => genre)
 
-const scalePitch = (root: number, intervals: number[], degree: number) =>
-  root + intervals[degree % intervals.length] + Math.floor(degree / intervals.length) * 12
+const compactGuitarChordPositions = (midis: readonly number[]): FrettedPosition[] => {
+  const candidates = midis.map((midi) => positionsForMidi(midi, GUITAR))
+  let best: FrettedPosition[] = []
+  let bestScore = Number.POSITIVE_INFINITY
+  const search = (index: number, usedStrings: Set<number>, selected: FrettedPosition[]) => {
+    if (index === candidates.length) {
+      const frets = selected.map((position) => position.fret)
+      const span = Math.max(...frets) - Math.min(...frets)
+      const score = span * 1000 + Math.max(...frets) * 10 + frets.reduce((sum, fret) => sum + fret, 0)
+      if (score < bestScore) {
+        best = [...selected]
+        bestScore = score
+      }
+      return
+    }
+    for (const position of candidates[index]) {
+      if (usedStrings.has(position.string)) continue
+      usedStrings.add(position.string)
+      selected.push(position)
+      search(index + 1, usedStrings, selected)
+      selected.pop()
+      usedStrings.delete(position.string)
+    }
+  }
+  search(0, new Set(), [])
+  return best
+}
 
-const genreLesson = (instrument: FrettedInstrument, recipe: FrettedGenreRecipe, level: number): FrettedLesson => {
-  const guitar = instrument === 'guitar'
-  const root = recipe.guitarRoot - (guitar ? 0 : 12)
-  const third = recipe.intervals.findIndex((interval) => interval === 3 || interval === 4)
-  const fifth = recipe.intervals.indexOf(7)
-  const pulse = guitar ? recipe.guitarPulse : recipe.bassPulse
-  const answer = guitar ? recipe.guitarAnswer : recipe.bassAnswer
-  const chordRoots = [0, 3, 4, 0]
-  const events = Array.from({ length: 4 }, (_, bar) => {
-    const beats = level === 1 ? pulse : level === 2 ? answer
-      : level === 3 ? (bar % 2 ? pulse : answer)
-        : level === 4 ? (bar % 2 ? answer : pulse)
-          : (bar < 2 ? pulse : answer)
-    const chordRoot = scalePitch(root, recipe.intervals, chordRoots[bar])
-    return beats.flatMap(([beat, duration], index) => {
-      if (guitar && level === 4) return chord([chordRoot, chordRoot + 7], beat, duration)
-      const roles = level === 1 ? [0, fifth, 0, fifth]
-        : level === 2 ? [0, third, fifth, third, 0, fifth]
-          : level === 3 ? [0, 1, 2, 3, 4, 3, 2, 1]
-            : level === 4 ? [chordRoots[bar], chordRoots[bar] + fifth, chordRoots[bar], chordRoots[bar] + fifth]
-              : bar < 2 ? [0, fifth, third, fifth, 0] : bar === 2 ? [third, 2, fifth, 3, 2, 1] : [fifth, third, 1, 0]
-      const degree = roles[index % roles.length]
-      const midi = level === 4
-        ? chordRoot + (index % 2 ? 7 : 0)
-        : scalePitch(root, recipe.intervals, degree)
-      return [[midi, beat, duration, beat % 2 === 0 ? 0.82 : 0.68] as Event]
-    })
-  })
-  const title = level === 1 ? 'Set the pulse' : level === 2 ? 'Add chord tones' : level === 3 ? 'Play a scale answer'
-    : level === 4 ? guitar ? 'Play root-fifth shapes' : 'Move through the roots' : 'Shape a four-bar phrase'
-  const goal = level === 1
-    ? `Keep a steady ${recipe.feel.toLowerCase()} with root notes and a fifth.`
-    : level === 2 ? `Add a third and fifth while you keep the ${recipe.genre} rhythm.`
-      : level === 3 ? `Use a short scale phrase to answer the ${recipe.genre} pulse.`
-        : level === 4 ? guitar ? `Play root-fifth shapes in a four-bar ${recipe.genre} pattern.` : `Change the roots and fifths through a four-bar ${recipe.genre} line.`
-          : `Join the ${recipe.genre} groove and a scale answer in one four-bar study.`
-  const steps = level === 1
-    ? [`${recipe.count}`, 'Play the root and fifth in the written rhythm.', 'Keep each note length as shown.']
-    : level === 2 ? [`${recipe.count}`, 'Use the root, third and fifth in the written order.', 'Keep the rhythm steady through each pitch change.']
-      : level === 3 ? [`${recipe.count}`, 'Follow the written scale notes as a short answer.', 'Keep the phrase in time before you raise the tempo.']
-        : level === 4 ? [`${recipe.count}`, guitar ? 'Play each root-fifth shape together.' : 'Alternate each written root with its fifth.',
-          'Change the shape or root at each new bar.']
-          : [`${recipe.count}`, 'Use the main pulse in bars 1 and 2.', 'Change to the written answer in bars 3 and 4.']
-  const tempoTarget = recipe.target + (level - 1) * 3
+const genreLesson = (instrument: FrettedInstrument, set: FrettedGenrePhraseSet, level: number, id?: string): FrettedLesson => {
+  const phrase = set[instrument][level - 1]
+  const root = set.roots[instrument]
+  const form = [0, 1, 0, 1, 2, 3, 0, 3]
+  const events = form.map((bar) => phrase.bars[bar].flatMap(([pitch, beat, duration, velocity]) =>
+    (typeof pitch === 'number' ? [pitch] : pitch).map((offset, index, offsets) => {
+      const midi = root + offset
+      const position = instrument === 'guitar' && offsets.length > 1
+        ? compactGuitarChordPositions(offsets.map((note) => root + note))[index]
+        : undefined
+      return [midi, beat, duration, velocity, position?.string, position?.fret] as Event
+    })))
+  const tempoTarget = phrase.target
   return exercise({
-    id: `${instrument}-${recipe.slug}-level-${level}`, instrument, kind: 'genre', genre: recipe.genre, level,
-    title: `${recipe.genre}: ${title}`, goal, meter, tempo: { start: tempoTarget - 24, target: tempoTarget },
-    bars: 4, steps, events,
+    id: id ?? `${instrument}-${set.slug}-level-${level}`, instrument, kind: 'genre', genre: set.genre, level,
+    gmProgram: set.gmProgram[instrument],
+    title: `${set.genre}: ${phrase.title}`,
+    goal: `Play ${phrase.focus}. Return to its two-bar hook after the answer, then let the final turnaround lead into the next repeat.`,
+    meter, tempo: { start: Math.floor(tempoTarget * 0.72), target: tempoTarget },
+    bars: form.length,
+    steps: [
+      `Count four beats in each bar; ${set.count[instrument]}`,
+      `Repeat the two-bar ${phrase.title.toLowerCase()} hook and keep its rests as written.`,
+      'Keep the contrasting answer and final turnaround in time for the next repeat.',
+    ],
+    events,
   })
 }
 
 GUITAR_LESSONS.push(...GUITAR_COURSE_ADDITIONS)
 BASS_LESSONS.push(...BASS_COURSE_ADDITIONS)
-GUITAR_LESSONS.push(...GUITAR_INSPIRED)
-BASS_LESSONS.push(...BASS_INSPIRED)
+GUITAR_LESSONS.push(...GUITAR_INSPIRED, ...FRETTED_SONG_STUDIES.filter((lesson) => lesson.instrument === 'guitar'))
+BASS_LESSONS.push(...BASS_INSPIRED, ...FRETTED_SONG_STUDIES.filter((lesson) => lesson.instrument === 'bass'))
 for (const instrument of ['guitar', 'bass'] as const) {
   const lessons = instrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
-  for (const recipe of FRETTED_GENRE_RECIPES)
+  for (const set of FRETTED_GENRE_PHRASES)
     for (let level = 1; level <= 5; level++)
-      if (!lessons.some((lesson) => lesson.kind === 'genre' && lesson.genre === recipe.genre && lesson.level === level))
-        lessons.push(genreLesson(instrument, recipe, level))
+      {
+        const index = lessons.findIndex((lesson) => lesson.kind === 'genre' && lesson.genre === set.genre && lesson.level === level)
+        const lesson = genreLesson(instrument, set, level, index >= 0 ? lessons[index].id : undefined)
+        if (index >= 0) lessons[index] = lesson
+        else lessons.push(lesson)
+      }
 }
 
 export const FRETTED_LESSONS = [...GUITAR_LESSONS, ...BASS_LESSONS]
+// Retain saved study IDs, but do not offer substitute song riffs in the course browser.
+export const FRETTED_BROWSE_LESSONS = FRETTED_LESSONS.filter((lesson) => lesson.kind !== 'inspired')
 export const FRETTED_LEVELS = ['String and fret basics', 'Open and fretted notes', 'String changes and picking', 'Chords and patterns', 'Phrases and grooves']
 export const FRETTED_CONFIG: Record<FrettedInstrument, FrettedInstrumentConfig> = { guitar: GUITAR, bass: BASS }
 export const guitarLessonById = (id: string) => GUITAR_LESSONS.find((lesson) => lesson.id === id)
@@ -1152,7 +1173,8 @@ export function frettedLessonSong(lesson: FrettedLesson): Song {
     title: `Lesson: ${lesson.title}`, source: 'course',
     tracks: [{
       id: lesson.instrument, instrument: 'other', name: lesson.instrument === 'guitar' ? 'Electric guitar' : 'Electric bass',
-      detail: 'Original fretted-instrument lesson', gmProgram: lesson.instrument === 'guitar' ? 27 : 33,
+      detail: 'Original fretted-instrument lesson',
+      gmProgram: lesson.kind === 'genre' ? lesson.gmProgram : lesson.instrument === 'guitar' ? 27 : 33,
     }],
     bpm: lesson.tempo.target, beatsPerBar: 4, beatUnit: 4, barMap, bars: lesson.bars, key: null,
     sections: [{ name: lesson.genre ?? 'Exercise', startBar: 1, bars: lesson.bars }],

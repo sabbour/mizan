@@ -70,8 +70,14 @@ class _ApiError(CloudError):
         super().__init__(self._message())
 
     def _message(self):
+        if self.status == 401:
+            return _adc_refresh_message(
+                "Google Cloud rejected the Application Default Credentials.")
         if self.status == 403:
-            return "Google Cloud denied the request. Check your credentials and required permissions."
+            return (
+                "Google Cloud denied the request. This is an access or API-permission "
+                "error, not missing credentials. Check that the authenticated account "
+                "has the required permissions and that the API is enabled.")
         if self.status == 404:
             return "Google Cloud could not find the requested resource."
         if self.status == 409:
@@ -85,22 +91,64 @@ class _ApiError(CloudError):
         return f"Google Cloud request failed with HTTP {self.status}."
 
 
+def _adc_login_message(prefix):
+    return (
+        f"{prefix} Run `gcloud auth application-default login` under the same Windows "
+        "account that runs Mizan, then retry. Browser sign-in and "
+        "`gcloud auth login` alone do not configure Application Default Credentials "
+        "for Mizan.")
+
+
+def _adc_refresh_message(prefix):
+    return (
+        f"{prefix} The credentials may have expired or been revoked. Run "
+        "`gcloud auth application-default login` under the same Windows account that "
+        "runs Mizan, then retry. Browser sign-in and `gcloud auth "
+        "login` alone do not renew Application Default Credentials for Mizan.")
+
+
 def _authorized_session():
     try:
         import google.auth
+        from google.auth.exceptions import DefaultCredentialsError, RefreshError, TransportError
         from google.auth.transport.requests import AuthorizedSession, Request
+    except ImportError:
+        logger.error("Google Cloud authentication libraries are unavailable")
+        raise CloudError(
+            "Google Cloud authentication support is unavailable in this Mizan "
+            "installation. Check the installation and retry.") from None
 
+    try:
         credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    except DefaultCredentialsError:
+        raise CloudError(_adc_login_message(
+            "Google Cloud Application Default Credentials are unavailable.")) from None
+    except RefreshError:
+        raise CloudError(_adc_refresh_message(
+            "Google Cloud Application Default Credentials could not be refreshed.")) from None
+    except TransportError:
+        raise CloudError(
+            "Could not reach Google Cloud while checking Application Default Credentials. "
+            "Check the network connection, then retry.") from None
+    except Exception as exc:
+        logger.error("Google Cloud credentials initialization failed (%s)", type(exc).__name__)
+        raise CloudError(
+            "Google Cloud credentials could not be initialized. Retry; if the problem "
+            "continues, check the Mizan logs.") from None
+
+    try:
         return AuthorizedSession(
             credentials,
             max_refresh_attempts=0,
             refresh_timeout=REQUEST_TIMEOUT,
             auth_request=Request(),
         )
-    except Exception:
+    except Exception as exc:
+        logger.error("Google Cloud authenticated session initialization failed (%s)",
+                     type(exc).__name__)
         raise CloudError(
-            "Google Cloud credentials are unavailable. Configure Application Default "
-            "Credentials and retry.") from None
+            "Google Cloud could not initialize authenticated API access. Retry; if the "
+            "problem continues, check the Mizan logs.") from None
 
 
 def _response_bytes(response, limit):
@@ -149,9 +197,29 @@ class _Rest:
         except Cancelled:
             raise
         except Exception as exc:
-            if isinstance(exc, (TimeoutError, OSError)) or "timeout" in type(exc).__name__.lower():
-                raise CloudError("Google Cloud request timed out; check the resource state before retrying.") from None
-            raise CloudError("Could not reach Google Cloud. Check network access and credentials.") from None
+            try:
+                from google.auth.exceptions import RefreshError, TransportError
+            except ImportError:
+                RefreshError = TransportError = ()
+            if isinstance(exc, RefreshError):
+                raise CloudError(_adc_refresh_message(
+                    "Google Cloud Application Default Credentials could not be refreshed.")) from None
+            if isinstance(exc, TransportError):
+                raise CloudError(
+                    "Could not reach Google Cloud while refreshing Application Default "
+                    "Credentials. Check the network connection, then retry.") from None
+            if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+                raise CloudError(
+                    "Google Cloud request timed out. Check the network connection, then "
+                    "retry.") from None
+            if isinstance(exc, OSError):
+                raise CloudError(
+                    "Could not reach Google Cloud. Check the network connection, then "
+                    "retry.") from None
+            logger.error("Google Cloud request failed unexpectedly (%s)", type(exc).__name__)
+            raise CloudError(
+                "Google Cloud request failed unexpectedly. Retry; if the "
+                "problem continues, check the Mizan logs.") from None
         if 300 <= response.status_code < 400:
             response.close()
             raise CloudError("Google Cloud unexpectedly redirected an authenticated request.")
@@ -669,6 +737,11 @@ def list_subscriptions():
             raise CloudError("Google Cloud returned too many project pages to list safely.")
         return projects
     except _ApiError as exc:
+        if exc.status == 403:
+            raise CloudError(
+                "Google Cloud denied project listing. This is an access or API-permission "
+                "error, not missing credentials. Check Cloud Resource Manager API access "
+                "and that this account can view projects, then refresh.") from None
         raise _api_error(exc) from None
     finally:
         rest.close()

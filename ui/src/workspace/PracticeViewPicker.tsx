@@ -1,15 +1,22 @@
 export type PracticeView = 'score' | 'hands' | 'kit' | 'keyboard' | 'tab' | 'fretboard'
 export type PracticeInstrument = 'piano' | 'drums' | 'guitar' | 'bass'
 
-type Props = { instrument: PracticeInstrument; value: PracticeView; onChange: (view: PracticeView) => void }
+type Props = {
+  instrument: PracticeInstrument
+  value: PracticeView
+  onChange: (view: PracticeView) => void
+  handAssignments?: boolean
+}
 
 /** Adds a practice guide under the score for the instrument shown: a keyboard or a 3D kit. */
-export function PracticeViewPicker({ instrument, value, onChange }: Props) {
+export function PracticeViewPicker({ instrument, value, onChange, handAssignments = true }: Props) {
   const options: { id: PracticeView; label: string; hint: string }[] = [
     { id: 'score', label: 'Score', hint: 'The score on its own' },
     ...(instrument === 'piano' ? [
-      { id: 'hands' as const, label: 'Hands & keys', hint: 'A keyboard under the score: keys sounding now, by hand, with suggested fingers' },
-      { id: 'keyboard' as const, label: '3D keyboard', hint: 'A 3D piano beside the score: keys press as they play, in their hand\'s colour, with written fingers' },
+      ...(handAssignments ? [
+        { id: 'hands' as const, label: 'Hands & keys', hint: 'A keyboard under the score: keys sounding now, by hand, with suggested fingers' },
+      ] : []),
+      { id: 'keyboard' as const, label: '3D keyboard', hint: `A 3D piano beside the score: keys press as they play${handAssignments ? ', in their hand\'s colour, with written fingers' : ''}` },
     ] : instrument === 'drums' ? [
       { id: 'kit' as const, label: 'Drum kit', hint: 'A 3D kit under the score that lights each drum as it is hit' },
     ] : [

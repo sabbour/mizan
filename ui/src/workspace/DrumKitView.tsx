@@ -4,12 +4,16 @@ import { useFrame, useReducedMotion } from './hooks'
 import { HAT_LABEL, KIT_PIECES, kitStrike, type HatState, type KitPiece } from './kit'
 import { barStart, measures, pulseBeats } from './meter'
 import type { Song } from './song'
-import type { Sticking } from './sticking'
+import { stickingFor, type Sticking } from './sticking'
 import { KIT_TYPES, LOOKS, LOOK_LABEL, splitKitStyle, type KitStyle, type KitType, type Look } from './prefs'
 import { loadKit, preparedFor, type Prepared, type Target } from './kitAsset'
-import { KitRenderer, stageBackground } from './kitRenderer'
+import { KitRenderer, hatOffsetOf, stageBackground } from './kitRenderer'
 import { feedbackAt, type Strike } from './kitFeedback'
 import { fallbackScene } from './kitScene'
+import type { DrumHands, HandPlan, SurfaceMap } from './drumHands'
+import { useHandsPref } from './useHandsPref'
+
+type HandsKit = { instance: DrumHands; plan: typeof import('./drumHands')['buildHandPlan']; surfaces: typeof import('./drumHands')['kitSurfaces'] }
 
 type Props = {
   song: Song; engine: Engine
@@ -59,6 +63,12 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
   const [labels, setLabels] = useState<{ piece: KitPiece; text: string; x: number; y: number }[]>([])
   const [selected, setSelected] = useState<ReadonlySet<Target>>(new Set())
   const renderer = useRef<{ renderer: KitRenderer; size: () => [number, number] } | null>(null)
+  // The hands and sticks load only once the 3D kit is shown; without them the kit works as before.
+  const [loadedKit, setHandsKit] = useState<HandsKit | null>(null)
+  const [handsFailed, setHandsFailed] = useState(false)
+  const [handsOn, toggleHands] = useHandsPref()
+  // With Hands off nothing of the hands is drawn or posed; the models are only fetched once they are on.
+  const handsKit = handsOn ? loadedKit : null
   const latest = useRef({ selected, look })
   const lastSignature = useRef('')
   latest.current = { selected, look }
@@ -90,6 +100,18 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     const used = KIT_PIECES.filter(({ piece }) => strikes.has(piece))
     return { strikes, hats, states, unspecified: [...unspecified], used }
   }, [song.drums, sticking])
+  useEffect(() => {
+    if (!handsOn || loadedKit) return
+    let cancelled = false
+    import('./drumHands').then(async (module) => {
+      const assets = await module.loadHandAssets()
+      if (!cancelled) setHandsKit({ instance: new module.DrumHands(assets), plan: module.buildHandPlan, surfaces: module.kitSurfaces })
+    }).catch((error) => {
+      console.warn('The drumming hands could not be loaded; showing the kit without them.', error)
+      if (!cancelled) setHandsFailed(true)
+    })
+    return () => { cancelled = true }
+  }, [handsOn, loadedKit])
   // The GL context and renderer live as long as the view; kit and look changes only swap what it draws.
   useEffect(() => {
     const element = canvasElement
@@ -167,13 +189,23 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     return () => { cancelled = true }
   }, [kit, look])
   const lastKit = useRef<KitType | null>(null)
+  const surfaces = useMemo<SurfaceMap | null>(() => scene && handsKit ? handsKit.surfaces(scene.prepared) : null, [scene, handsKit])
+  // The hands follow the written sticking, or the suggested right-hand lead when the sticking letters are off.
+  const handPlan = useMemo<HandPlan | null>(() => surfaces && handsKit ? handsKit.plan(song.drums, (sticking ?? stickingFor(song)).hands, surfaces) : null, [surfaces, handsKit, song, sticking])
+  useEffect(() => {
+    const current = renderer.current
+    if (!current) return
+    current.renderer.setOverlays(handsKit ? handsKit.instance.overlays : [])
+    lastSignature.current = ''
+  }, [handsKit, context, canvasElement, scene])
+  const handsShown = !!(handsKit && surfaces && handPlan)
   const camera = useRef<{ view: Float32Array; eye: number[] } | null>(null)
   useEffect(() => {
     const current = renderer.current
     if (!current || !scene) return
     // Textures are cached per kit: a scene from the other kit (even a stale one) starts afresh.
     if (lastKit.current !== scene.kit) { current.renderer.clearTextures(); lastKit.current = scene.kit }
-    current.renderer.setScene(scene.prepared, scene.look, scene.images)
+    current.renderer.setScene(scene.prepared, scene.look, scene.images, scene.kit)
     lastSignature.current = ''
   }, [scene, context])
   useEffect(() => {
@@ -188,9 +220,45 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     const across = 2 * Math.atan(Math.tan(fov / 2) * aspect)
     const fit = radius * 0.92
     const distance = fit / Math.sin(Math.min(fov, across) / 2) * 0.9
-    const direction = normalize([0, 0.62, 1])
-    const eye = center.map((value, index) => value + direction[index] * distance)
-    const view = multiply(perspective(fov, aspect, Math.max(0.05, distance - fit * 2.5), distance + fit * 4), lookAt(eye, center))
+    let direction = normalize([0, 0.62, 1])
+    let target: number[] = center
+    let eye = center.map((value, index) => value + direction[index] * distance)
+    let view = multiply(perspective(fov, aspect, Math.max(0.05, distance - fit * 2.5), distance + fit * 4), lookAt(eye, center))
+    if (surfaces) {
+      // With hands shown, frame the playing surfaces closely (kit about 70% of the stage width) so the hands read at size.
+      const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity]
+      for (const surface of surfaces.values()) {
+        low[0] = Math.min(low[0], surface.x - surface.radius); high[0] = Math.max(high[0], surface.x + surface.radius)
+        low[1] = Math.min(low[1], surface.y); high[1] = Math.max(high[1], surface.y)
+        low[2] = Math.min(low[2], surface.z - surface.radius); high[2] = Math.max(high[2], surface.z + surface.radius)
+      }
+      // The whole kit stays in view: down to the bottom of the kick drum.
+      for (const item of scene.prepared.items) if (item.target === 'kick') for (let i = 0; i < item.data.length; i += 12) {
+        const f = item.frame, x = item.data[i], y = item.data[i + 1], z = item.data[i + 2]
+        low[1] = Math.min(low[1], f[1] * x + f[5] * y + f[9] * z + f[13])
+      }
+      low[1] -= 0.02; high[1] += 0.1; high[2] += 0.12
+      target = [0, 1, 2].map((k) => (low[k] + high[k]) / 2)
+      // A lower viewpoint shows less of the kit's depth, so the kit can be drawn wider in a short, wide stage.
+      direction = normalize([0, 0.38, 1])
+      const corners: number[][] = []
+      for (const x of [low[0], high[0]]) for (const y of [low[1], high[1]]) for (const z of [low[2], high[2]]) corners.push([x, y, z])
+      const fitted = (away: number) => {
+        const origin = target.map((value, index) => value + direction[index] * away)
+        const matrix = multiply(perspective(fov, aspect, Math.max(0.05, away - 2), away + 4), lookAt(origin, target))
+        let extentX = 0, extentY = 0
+        for (const [x, y, z] of corners) {
+          const w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15]
+          extentX = Math.max(extentX, Math.abs((matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) / w))
+          extentY = Math.max(extentY, Math.abs((matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) / w))
+        }
+        return { origin, matrix, ok: extentX <= 0.84 && extentY <= 0.98 }
+      }
+      let near = 0.3, far = 8
+      for (let step = 0; step < 30; step++) { const middle = (near + far) / 2; if (fitted(middle).ok) far = middle; else near = middle }
+      const result = fitted(far)
+      eye = result.origin; view = result.matrix
+    }
     current.renderer.view = view
     current.renderer.eye = eye
     camera.current = { view, eye }
@@ -203,11 +271,14 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     for (const { piece, label } of height < 220 ? [] : plan.used) {
       const at = scene.prepared.anchors.get(piece)
       if (!at) continue
-      const anchor = project(at[0], at[1] + 0.12, at[2])
+      // A narrow stage keeps labels close to their own pad: less lift and smaller nudges.
+      const compact = width < 700, step = compact ? 11 : 17
+      const anchor = project(at[0], at[1] + (compact ? 0.03 : 0.12), at[2])
+      if (compact) anchor.y += 10
       const half = label.length * 3.3 + 8
-      const clash = () => placed.some((other) => Math.abs(other.x - anchor.x) < half + other.text.length * 3.3 + 8 && Math.abs(other.y - anchor.y) < 17)
-      for (let tries = 0; tries < 6 && clash() && anchor.y - 17 > 18; tries++) anchor.y -= 17
-      for (let tries = 0; tries < 8 && clash(); tries++) anchor.y += 17
+      const clash = () => placed.some((other) => Math.abs(other.x - anchor.x) < half + other.text.length * 3.3 + 8 && Math.abs(other.y - anchor.y) < step)
+      for (let tries = 0; tries < 6 && clash() && anchor.y - step > 18; tries++) anchor.y -= step
+      for (let tries = 0; tries < 8 && clash(); tries++) anchor.y += step
       // The label sits 16px above its anchor and is about 20px tall: keep it inside the stage.
       anchor.y = Math.max(38, Math.min(height - 4, anchor.y))
       placed.push({ piece, text: label, x: anchor.x, y: anchor.y })
@@ -221,7 +292,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
       return project(mean[0], mean[1], mean[2])
     }
     lastSignature.current = ''
-  }, [scene, generation, context, plan])
+  }, [scene, generation, context, plan, surfaces])
 
   useFrame(engine, (t) => {
     const current = renderer.current
@@ -241,7 +312,20 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
     }
     const hat = (t.playing ? last(plan.hats)?.state : undefined) ?? 'closed'
     const { selected: chosen } = latest.current
-    const signature = `${hat}|${[...chosen].join(',')}|${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${Math.round(Math.min(f.since, 3) * 30)}`).join(',')}`
+    // The hands and sticks are posed from the same clock; a moving pose redraws the frame, a still one does not.
+    let handsSignature = ''
+    if (handsKit && surfaces && handPlan && scene && current && !failure) {
+      handsKit.instance.update(handPlan, surfaces, {
+        beat: t.beat, playing: t.playing, countingIn: t.countingIn, countBeat: t.countBeat, reduced,
+        countLength: bar ? Math.round(bar.beats / pulseBeats(bar)) : 4,
+        secondsPerBeat: 60 / Math.max(1, engine.getEffectiveQuarterBpm()),
+        loop: loop ? { start: barStart(song, loop.startBar - 1), end: barStart(song, loop.endBar) } : null,
+        hatOffset: hatOffsetOf(scene.prepared, hat),
+      }, true)
+      const { left, right } = handsKit.instance.state
+      handsSignature = [left, right].map((stick) => `${stick.piece}:${Math.round(stick.tip[0] * 1000)}:${Math.round(stick.tip[1] * 1000)}:${Math.round(stick.tip[2] * 1000)}`).join('|')
+    }
+    const signature = `${handsSignature}#${hat}|${[...chosen].join(',')}|${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${Math.round(Math.min(f.since, 3) * 30)}`).join(',')}`
     if (signature === lastSignature.current) return
     lastSignature.current = signature
     if (current && !failure) {
@@ -256,13 +340,14 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
         return
       }
       // Visual tests can read the frame right after it is drawn.
-      ;(globalThis as { __mizanKitFrame?: (canvas: HTMLCanvasElement, state: { hat: string; feedback: typeof feedback }) => void }).__mizanKitFrame?.(canvas.current!, { hat, feedback })
+      ;(globalThis as { __mizanKitFrame?: (canvas: HTMLCanvasElement, state: { hat: string; feedback: typeof feedback; hands?: DrumHands['state'] }) => void }).__mizanKitFrame?.(canvas.current!, { hat, feedback, hands: handsSignature ? handsKit?.instance.state : undefined })
     }
     if (section.current) {
       const lit = [...feedback].filter(([, f]) => f.pulse > 0.05).map(([target]) => target)
       section.current.dataset.lit = lit.join(',')
       section.current.dataset.upcoming = [...feedback].filter(([, f]) => f.upcoming > 0.05).map(([target]) => target).join(',')
       section.current.dataset.hat = hat
+      section.current.dataset.sticks = handsSignature && handsKit ? (['left', 'right'] as const).map((side) => `${side}:${handsKit.instance.state[side].piece ?? '-'}`).join(',') : ''
       for (const pill of section.current.querySelectorAll<HTMLElement>('[data-piece]'))
         pill.toggleAttribute('data-lit', lit.includes(pill.dataset.piece as Target))
       const hands = new Set([...feedback.entries()].filter(([, f]) => f.pulse > 0.05 && sticking)
@@ -278,7 +363,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
   useEffect(() => { lastSignature.current = '' }, [selected])
 
   return (
-    <section ref={section} className="practice-view practice-kit" data-style={style} data-kit={kit} data-look={look}
+    <section ref={section} className="practice-view practice-kit" data-style={style} data-kit={kit} data-look={look} data-hands-shown={handsShown ? 'true' : !handsOn ? 'off' : handsFailed ? 'failed' : 'loading'}
       style={{ ['--stage-bg' as string]: `rgb(${stageBackground(look).map((x) => Math.round(x * 255)).join(' ')})` }}
       aria-label="Drum kit: pieces glow as their notes approach and light up when played">
       <div className="kit-toolbar" title="Changes only how the kit looks; the hits, sounds and playback stay the same">
@@ -306,6 +391,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
             {LOOKS.map((option) => <option key={option} value={option}>{LOOK_LABEL[option]}</option>)}
           </select>
         </label>
+        <button type="button" className="kit-toggle" data-kit-toggle="hands" aria-pressed={handsOn} onClick={toggleHands}>Hands</button>
       </div>
       <div className="practice-stage">
         <canvas ref={attachCanvas} className="practice-canvas" aria-hidden="true" hidden={!!failure} />
@@ -337,6 +423,7 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
             ? 'Lesson sticking: each note glows in its hand\'s colour as it approaches and when played, from the player\'s side. '
             : 'Suggested sticking, right-hand lead: a guide from the hits, not from the recording. ')}
           {!sticking && 'Each piece glows in its own colour as its note approaches and when played. '}
+          {!handsOn ? '' : handsFailed ? 'The hands could not be loaded, so only the kit is shown. ' : 'Hands show a suggested motion, not a recording. '}
           {song.source === 'course' ? 'Hits light briefly. Every stroke in the lesson names its kit piece and hi-hat state' : <>
             Hits light briefly. Toms and hi-hat states come from the transcription&apos;s GM drum detail
             {plan.unspecified.length

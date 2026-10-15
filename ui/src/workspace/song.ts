@@ -19,24 +19,33 @@ export type Chord = {
 
 export type Section = { name: string; startBar: number; bars: number }
 
+/** MIDI pitch-wheel position relative to the held note's initial heard pitch. */
+export type PitchBendPoint = { beat: number; semitones: number }
+
 export type PianoNote = {
   trackId?: string
   /** Equal-tempered MIDI pitch, allowing fractional semitones (60.5 = C4 +50 cents). */
   midi: number
   startBeat: number
   beats: number
-  hand: 'right' | 'left'
+  /** Discrete MIDI controller changes; beats are relative to this note's attack. */
+  pitchBends?: PitchBendPoint[]
+  hand?: 'right' | 'left'
   velocity?: number
   /** The finger that plays the note (1 thumb to 5 little finger). Only authored lessons set it; it is never guessed. */
   finger?: 1 | 2 | 3 | 4 | 5
   /** How an authored lesson spells the note, e.g. `E#` in F# major or `Cb` in Eb minor; otherwise it is spelled from the key. */
   spell?: string
+  /** Practice only, set by the playability repair: the note was moved to the other hand or to another string and fret. */
+  adjusted?: boolean
+  /** Practice only: this moment cannot be played as written, so the note is marked instead of placed. */
+  notPlayable?: boolean
 }
 /** A written pedal: sustain (64), sostenuto (66) or soft (67), held from `startBeat` for `beats`. Only authored lessons set it. */
 export type Pedal = { controller: 64 | 66 | 67; startBeat: number; beats: number }
 /** A chord name shown over the score and keyboard; it is not played. */
 export type ChordLabel = { startBeat: number; beats: number; symbol: string }
-export type MelodyNote = Omit<PianoNote, 'hand'>
+export type MelodyNote = Omit<PianoNote, 'hand'> & { hand?: PianoNote['hand']; sourceInstrument?: string }
 
 export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'snare' | 'floortom' | 'kick'
 
@@ -56,7 +65,24 @@ export type DrumHit = {
 
 /** One transcribed part. A song lists only the parts that were actually transcribed. */
 /** `creative` tracks are generated to play along with, listed apart from the transcribed ones. */
-export type Track = { id: string; instrument: Instrument; name: string; detail: string; gmProgram?: number; group?: 'creative'; /** Built from chords, so it can be read as a chord chart. Melodic parts keep their instrument's treatment. */ chordal?: boolean }
+export type Track = {
+  id: string
+  instrument: Instrument
+  name: string
+  detail: string
+  gmProgram?: number
+  group?: 'creative' | 'detected'
+  sourceInstrument?: string
+  instrumentCorrection?: {
+    gmProgram: number
+    detectedName?: string
+    detectedInstrument?: Instrument
+    detectedGmProgram?: number | null
+    sourceInstrument?: string | null
+  }
+  /** Built from chords, so it can be read as a chord chart. Melodic parts keep their instrument's treatment. */
+  chordal?: boolean
+}
 
 export type DecodingErrors = {
   count: number

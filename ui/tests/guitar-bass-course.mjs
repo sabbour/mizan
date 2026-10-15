@@ -8,7 +8,7 @@ globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
   const {
-    BASS_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, FRETTED_LESSONS, GUITAR_LESSONS,
+    BASS_LESSONS, FRETTED_BROWSE_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, FRETTED_LESSONS, GUITAR_LESSONS,
     bassLessonById, frettedGenres, frettedLessonById, frettedLessonList, frettedLessonNote, frettedLessonSong, frettedScaleLessons,
     guitarLessonById,
   } = await vite.ssrLoadModule('/src/course/fretted.ts')
@@ -40,9 +40,45 @@ try {
   assert.equal(FRETTED_CONFIG.guitar.frets, 22)
   assert.deepEqual(FRETTED_CONFIG.bass.strings.map((string) => string.openPitch), ['E1', 'A1', 'D2', 'G2'])
   assert.equal(FRETTED_CONFIG.bass.frets, 20)
-  assert.equal(GUITAR_LESSONS.length, 85)
-  assert.equal(BASS_LESSONS.length, 85)
-  const notationDurations = [1 / 3, 1 / 2, 2 / 3, 1, 3 / 2, 2]
+  assert.equal(GUITAR_LESSONS.length, 105)
+  assert.equal(BASS_LESSONS.length, 105)
+  assert.equal(FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'guitar').length, 80)
+  assert.equal(FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'bass').length, 80)
+  assert.ok(FRETTED_BROWSE_LESSONS.every((lesson) => lesson.kind !== 'inspired'),
+    'placeholder Inspired studies are withheld from browsing without deleting their legacy IDs')
+  const notationDurations = [1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 1, 3 / 2, 2]
+  const songReferences = {
+    guitar: [
+      'Purple Haze', 'Little Wing', 'Le Freak', 'Get Lucky', "Ain't Talkin' 'Bout Love", 'Panama',
+      'Money for Nothing', 'Sultans of Swing', 'Killing in the Name', 'Bulls on Parade', 'Iron Man', 'Paranoid',
+      'Whole Lotta Love', 'Black Dog', 'Back in Black', 'Highway to Hell', 'Smells Like Teen Spirit', 'Come As You Are',
+      'Enter Sandman', 'Master of Puppets',
+    ],
+    bass: [
+      "What's Going On", 'I Was Made to Love Her', "Stretchin' Out (In a Rubber Band)", "I'd Rather Be with You",
+      'Give It Away', "Can't Stop", 'The Beat Goes On', 'Wichita Lineman', 'Come On, Come Over', 'The Chicken',
+      'Another One Bites the Dust', 'Under Pressure', 'Come Together', 'Something', 'Good Times', 'Le Freak',
+      'For Whom the Bell Tolls', 'Orion', 'The Trooper', 'Run to the Hills',
+    ],
+  }
+  const songTracksByArtist = {
+    guitar: {
+      'Jimi Hendrix': ['Purple Haze', 'Little Wing'], 'Nile Rodgers': ['Le Freak', 'Get Lucky'],
+      'Eddie Van Halen': ["Ain't Talkin' 'Bout Love", 'Panama'], 'Mark Knopfler': ['Money for Nothing', 'Sultans of Swing'],
+      'Tom Morello': ['Killing in the Name', 'Bulls on Parade'], 'Tony Iommi': ['Iron Man', 'Paranoid'],
+      'Jimmy Page': ['Whole Lotta Love', 'Black Dog'], 'Angus Young': ['Back in Black', 'Highway to Hell'],
+      'Kurt Cobain': ['Smells Like Teen Spirit', 'Come As You Are'], 'James Hetfield': ['Enter Sandman', 'Master of Puppets'],
+    },
+    bass: {
+      'James Jamerson': ["What's Going On", 'I Was Made to Love Her'],
+      'Bootsy Collins': ["Stretchin' Out (In a Rubber Band)", "I'd Rather Be with You"],
+      Flea: ['Give It Away', "Can't Stop"], 'Carol Kaye': ['The Beat Goes On', 'Wichita Lineman'],
+      'Jaco Pastorius': ['Come On, Come Over', 'The Chicken'],
+      'John Deacon': ['Another One Bites the Dust', 'Under Pressure'], 'Paul McCartney': ['Come Together', 'Something'],
+      'Bernard Edwards': ['Good Times', 'Le Freak'], 'Cliff Burton': ['For Whom the Bell Tolls', 'Orion'],
+      'Steve Harris': ['The Trooper', 'Run to the Hills'],
+    },
+  }
   for (const instrument of ['guitar', 'bass']) {
     const lessons = instrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
     const course = lessons.filter((lesson) => lesson.kind === 'course')
@@ -52,16 +88,156 @@ try {
     assert.deepEqual(Array.from({ length: 5 }, (_, index) => course.filter((lesson) => lesson.level === index + 1).length),
       [5, 5, 5, 5, 5], `${instrument}: each course level has five lessons`)
     assert.equal(genres.length, 55, `${instrument}: five studies for each of eleven genres`)
-    assert.equal(inspired.length, 5, `${instrument}: five distinct original artist technique studies`)
-    assert.equal(new Set(inspired.map((lesson) => lesson.artist)).size, 5, `${instrument}: artist shelf has five distinct players`)
+    assert.equal(inspired.length, 25, `${instrument}: five original technique lessons plus twenty song-reference studies`)
+    assert.equal(new Set(inspired.map((lesson) => lesson.artist)).size, 10, `${instrument}: Inspired shelf has ten distinct players`)
+    const songStudies = inspired.filter((lesson) => lesson.track)
+    assert.equal(songStudies.length, 20, `${instrument}: twenty original studies have song references`)
+    assert.deepEqual(songStudies.map((lesson) => lesson.track).toSorted(), songReferences[instrument].toSorted(),
+      `${instrument}: song references match the requested artists and tracks`)
+    assert.deepEqual(Object.fromEntries(Map.groupBy(songStudies, (lesson) => lesson.artist)
+      .entries().map(([artist, studies]) => [artist, studies.map((lesson) => lesson.track).toSorted()])),
+    Object.fromEntries(Object.entries(songTracksByArtist[instrument]).map(([artist, tracks]) => [artist, tracks.toSorted()])),
+    `${instrument}: each song reference is grouped under the requested artist`)
+    assert.deepEqual([...new Set(inspired.map((lesson) => lesson.artist))].map((artist) =>
+      inspired.filter((lesson) => lesson.artist === artist).length).toSorted(), [2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
+    `${instrument}: each of ten artists has two song studies, and existing artists retain their original study`)
+    const signature = (lesson) => lesson.notes.map(({ midi, startBeat, beats }) => `${midi}:${startBeat}:${beats}`).join('|')
+    const existingMaterial = new Set(lessons.filter((lesson) => !lesson.track).map(signature))
+    const songMaterial = songStudies.map(signature)
+    assert.equal(new Set(songMaterial).size, songStudies.length, `${instrument}: every song study has distinct note material`)
+    for (const lesson of songStudies) {
+      assert.ok(!existingMaterial.has(signature(lesson)), `${lesson.id}: note material is distinct from all existing lessons`)
+      assert.match(lesson.steps[2], /\bloop\b/i, `${lesson.id}: third practice step has an actionable loop instruction`)
+    }
+    assert.ok(songStudies.filter((lesson) => lesson.notes.some((note) => note.beats === 0.25)).length >= 8,
+      `${instrument}: several studies use real sixteenth-note durations`)
+    assert.ok(songStudies.filter((lesson) => lesson.notes.some((note) => note.velocity >= 0.9)).length >= 16,
+      `${instrument}: accents are encoded in the authored notes`)
+    assert.ok(new Set(songStudies.map((lesson) => lesson.notes.map(({ startBeat, beats }) =>
+      `${startBeat % 4}:${beats}`).join('|'))).size >= 15, `${instrument}: song-study rhythms have broad variety`)
+    if (instrument === 'guitar') {
+      const riffChordIds = [
+        'guitar-inspired-nile-le-freak', 'guitar-inspired-nile-get-lucky', 'guitar-inspired-eddie-panama',
+        'guitar-inspired-iommi-iron-man', 'guitar-inspired-iommi-paranoid', 'guitar-inspired-angus-back-in-black',
+        'guitar-inspired-angus-highway-to-hell', 'guitar-inspired-cobain-smells-like-teen-spirit',
+        'guitar-inspired-hetfield-enter-sandman',
+      ]
+      const pitchesAt = (lesson, bar, beat) => lesson.notes
+        .filter((note) => note.startBeat === bar * 4 + beat).map((note) => note.midi).toSorted((a, b) => a - b)
+      const barPattern = (lesson, bar) => lesson.notes.filter((note) => Math.floor(note.startBeat / 4) === bar)
+        .map(({ midi, startBeat, beats, velocity }) => [midi, startBeat % 4, beats, velocity])
+      for (const id of riffChordIds) {
+        const lesson = guitarLessonById(id)
+        const hits = Map.groupBy(lesson.notes, (note) => note.startBeat)
+        assert.ok([...hits.values()].filter((notes) => notes.length >= 2).length >= 2,
+          `${id}: riff has multiple simultaneous chord hits`)
+        assert.deepEqual(barPattern(lesson, 0), barPattern(lesson, 1), `${id}: bars 1–2 establish a repeatable motif`)
+      }
+      const leFreak = guitarLessonById('guitar-inspired-nile-le-freak')
+      assert.deepEqual(pitchesAt(leFreak, 0, 0.5), [55, 59, 62], 'Le Freak study starts with a simultaneous upper triad')
+      assert.deepEqual(pitchesAt(leFreak, 1, 1.5), [52, 55, 59], 'Le Freak repeated motif includes a second upper triad')
+      assert.deepEqual(pitchesAt(leFreak, 2, 2.75), [52, 55, 59], 'Le Freak answer includes a short sixteenth-note triad cut')
+      assert.ok(leFreak.notes.filter((note) => note.startBeat === 2 * 4 + 2.75).every((note) => note.beats === 0.25),
+        'Le Freak sixteenth-note triad voices have short written durations')
+      const getLucky = guitarLessonById('guitar-inspired-nile-get-lucky')
+      assert.deepEqual(pitchesAt(getLucky, 0, 0.25), [57, 60], 'Get Lucky study starts with a simultaneous offbeat dyad')
+      assert.ok(getLucky.notes.filter((note) => note.startBeat === 0.25).every((note) => note.beats === 0.25),
+        'Get Lucky opening dyad is a short sixteenth-note cut')
+    }
     assert.deepEqual(frettedGenres(instrument), FRETTED_GENRES, `${instrument}: shared genre list`)
+    const genreBar = (lesson, bar) => lesson.notes.filter((note) => Math.floor(note.startBeat / 4) === bar)
+      .map(({ midi, startBeat, beats, velocity }) =>
+        [midi, Number((startBeat % 4).toFixed(6)), Number(beats.toFixed(6)), velocity])
+      .toSorted((a, b) => a[1] - b[1] || a[0] - b[0])
+    const genrePrograms = {
+      Rock: { guitar: 29, bass: 34 }, Blues: { guitar: 27, bass: 33 }, Reggae: { guitar: 27, bass: 33 },
+      Pop: { guitar: 27, bass: 33 }, 'Disco and dance': { guitar: 28, bass: 36 },
+      Jazz: { guitar: 27, bass: 35 }, 'Latin: bossa nova': { guitar: 24, bass: 33 },
+      Metal: { guitar: 30, bass: 34 }, 'Drum and bass': { guitar: 28, bass: 33 },
+      'R&B and soul': { guitar: 27, bass: 35 }, Funk: { guitar: 28, bass: 36 },
+    }
     for (const genre of FRETTED_GENRES) {
       const studies = genres.filter((lesson) => lesson.genre === genre)
       assert.equal(studies.length, 5, `${instrument}: ${genre} has five studies`)
       assert.deepEqual(studies.map((lesson) => lesson.level).toSorted(), [1, 2, 3, 4, 5], `${instrument}: ${genre} progresses across levels`)
+      assert.ok(studies.every((lesson) => lesson.gmProgram === genrePrograms[genre][instrument]),
+        `${instrument}: ${genre} uses its intended genre-specific GM sound`)
       assert.equal(new Set(studies.map((lesson) => lesson.notes.map(({ midi, startBeat, beats }) => `${midi}:${startBeat}:${beats}`).join('|'))).size, 5,
         `${instrument}: ${genre} studies have distinct note material`)
+      for (const lesson of studies) {
+        assert.equal(lesson.bars, 8, `${lesson.id}: authored phrase has eight bars`)
+        assert.deepEqual(genreBar(lesson, 0), genreBar(lesson, 2), `${lesson.id}: the opening two-bar hook returns`)
+        assert.deepEqual(genreBar(lesson, 1), genreBar(lesson, 3), `${lesson.id}: the second hook bar returns`)
+        assert.deepEqual(genreBar(lesson, 0), genreBar(lesson, 6), `${lesson.id}: the hook returns after the answer`)
+        assert.deepEqual(genreBar(lesson, 5), genreBar(lesson, 7), `${lesson.id}: the turnaround resolves both phrases`)
+        assert.notDeepEqual(genreBar(lesson, 0), genreBar(lesson, 4), `${lesson.id}: the answer contrasts with the hook`)
+        assert.ok(Math.max(...lesson.notes.map((note) => note.velocity)) - Math.min(...lesson.notes.map((note) => note.velocity)) >= 0.1,
+          `${lesson.id}: accents and lighter attacks are both written`)
+      }
       assert.equal(frettedLessonList(studies[0]).length, 5, `${instrument}: ${genre} lesson navigation stays in that genre`)
+    }
+    const genreStudy = (genre, level = 1) => genres.find((lesson) => lesson.genre === genre && lesson.level === level)
+    const notesAt = (lesson, bar, beat) => lesson.notes.filter((note) => note.startBeat === bar * 4 + beat)
+    const hasDuration = (lesson, duration) => lesson.notes.some((note) => Math.abs(note.beats - duration) < 1e-9)
+    if (instrument === 'guitar') {
+      const rockHook = notesAt(genreStudy('Rock'), 0, 0)
+      assert.deepEqual(rockHook.map((note) => note.midi).toSorted((a, b) => a - b), [40, 47],
+        'Rock opens with an E5 power-chord hook, not a scale fragment')
+      const shuffle = genreStudy('Blues')
+      assert.ok(notesAt(shuffle, 0, 0).every((note) => Math.abs(note.beats - 2 / 3) < 1e-9) &&
+        notesAt(shuffle, 0, 2 / 3).every((note) => Math.abs(note.beats - 1 / 3) < 1e-9),
+      'Blues uses a real long-short shuffle double-stop')
+      assert.equal(notesAt(genreStudy('Reggae'), 0, 0.5).length, 3, 'Reggae chords land together on offbeats')
+      assert.equal(notesAt(genreStudy('Reggae'), 0, 0).length, 0, 'Reggae leaves the downbeat open')
+      assert.deepEqual(notesAt(genreStudy('Pop'), 0, 0).map((note) => note.midi).toSorted((a, b) => a - b),
+        [48, 52, 55], 'Pop starts on a voiced C triad')
+      assert.equal(notesAt(genreStudy('Disco and dance'), 0, 1).length, 3, 'Disco has clipped upper-chord hits on the backbeat')
+      assert.deepEqual(notesAt(genreStudy('Jazz'), 0, 1).map((note) => note.midi).toSorted((a, b) => a - b),
+        [53, 60], 'Jazz comping starts with a D-minor guide-tone shell')
+      assert.equal(notesAt(genreStudy('Latin: bossa nova'), 0, 0).length, 1, 'Bossa alternates a bass-register root with its chord')
+      assert.equal(notesAt(genreStudy('Latin: bossa nova'), 0, 1.5).length, 3, 'Bossa chord answer lands on its syncopated offbeat')
+      assert.deepEqual(rockHook.map((note) => note.velocity > 0.85), [true, true], 'Rock power-chord accents are explicit')
+      assert.ok(genreStudy('Metal', 5).notes.some((note) => note.beats === 0.25) &&
+        genreStudy('Metal', 5).notes.some((note) => note.midi === 40 && note.beats >= 1.5),
+      'Metal combines a short burst with a breathing pedal-note resolution')
+      assert.ok(new Set(genreStudy('Drum and bass').notes.map((note) => note.startBeat)).size <= 16,
+        'Drum and bass stays sparse around its syncopated stabs')
+      assert.ok(notesAt(genreStudy('R&B and soul'), 0, 0).length >= 3 &&
+        notesAt(genreStudy('R&B and soul'), 0, 0).every((note) => note.beats >= 1.5),
+      'R&B opens with a warm, sustained chord voicing')
+      assert.ok(notesAt(genreStudy('Funk'), 0, 0).length >= 4 &&
+        genreStudy('Funk', 5).notes.some((note) => note.beats === 0.25),
+      'Funk uses clipped upper voicings and later adds sixteenth-note syncopation')
+      assert.match(genreStudy('Funk').title, /E7/)
+      assert.deepEqual(notesAt(genreStudy('Funk'), 0, 0).map((note) => note.midi % 12).toSorted((a, b) => a - b),
+        [2, 4, 8, 11], 'the Funk hook is correctly named E7, not E9 without a ninth')
+      assert.match(genreStudy('R&B and soul').goal, /warm Am chord/)
+      assert.deepEqual(notesAt(genreStudy('R&B and soul'), 0, 0).map((note) => note.midi % 12).toSorted((a, b) => a - b),
+        [0, 4, 9], 'the first R&B study teaches an Am triad without claiming a seventh')
+    } else {
+      assert.deepEqual(notesAt(genreStudy('Rock'), 0, 0).map((note) => note.midi), [28], 'Rock bass opens on a firm E root')
+      assert.ok(notesAt(genreStudy('Rock'), 0, 2).some((note) => note.midi === 35), 'Rock bass answers its root with the fifth')
+      assert.ok(genreStudy('Blues', 3).notes.some((note) => note.midi === 37), 'Blues bass uses a real A-major boogie third')
+      assert.ok(genreStudy('Reggae').notes.every((note) => [2, 3.5].includes(note.startBeat % 4)),
+        'Reggae bass keeps the one-drop pulse spacious')
+      assert.ok(notesAt(genreStudy('Pop', 2), 0, 0).some((note) => note.midi === 36) &&
+        notesAt(genreStudy('Pop', 2), 0, 2).some((note) => note.midi === 48),
+      'Pop bass uses an intentional root-to-octave answer')
+      assert.ok(notesAt(genreStudy('Disco and dance'), 0, 0).some((note) => note.midi === 33) &&
+        notesAt(genreStudy('Disco and dance'), 0, 1).some((note) => note.midi === 45),
+      'Disco bass establishes its octave hook')
+      assert.ok(genreStudy('Jazz', 4).notes.some((note) => note.startBeat % 1 === 0.5 || note.startBeat % 1 === 0.25),
+        'Jazz bass uses chromatic approach notes around its walking quarter notes')
+      assert.ok(genreStudy('Latin: bossa nova', 4).notes.some((note) => note.startBeat % 4 === 3.5),
+        'Bossa bass anticipates the next chord')
+      assert.ok(hasDuration(genreStudy('Metal', 3), 0.25), 'Metal bass uses a straight sixteenth-note gallop')
+      assert.ok(genreStudy('Drum and bass', 4).notes.some((note) => note.beats === 0.25) &&
+        genreStudy('Drum and bass', 4).notes.length < 32,
+      'Drum and bass bassline combines tight syncopation with sub-bass space')
+      assert.ok(genreStudy('R&B and soul').notes.some((note) => note.beats === 2), 'R&B bass lets the root notes breathe')
+      assert.ok(genreStudy('Funk', 4).notes.some((note) => note.beats === 0.25) &&
+        genreStudy('Funk', 4).notes.some((note) => note.velocity < 0.7),
+      'Funk bass uses clipped sixteenths with ghosted lighter attacks')
     }
     for (const lesson of lessons) {
       const where = lesson.id
@@ -70,13 +246,14 @@ try {
       const beats = songBeats(song)
       assert.ok(lesson.goal.length > 30 && lesson.steps.length >= 3, `${where}: goal and practical steps`)
       assert.ok(lesson.tempo.start < lesson.tempo.target && lesson.tempo.start / lesson.tempo.target >= 0.5, `${where}: playable starting speed`)
-      assert.equal(lesson.bars, 4, `${where}: four complete bars`)
+      assert.equal(lesson.bars, lesson.kind === 'genre' ? 8 : 4, `${where}: bars match the lesson type`)
       assert.ok(lesson.notes.length >= 8, `${where}: enough material for a real exercise`)
       assert.equal(song.source, 'course')
       assert.equal(song.bars, lesson.bars)
       assert.equal(songBeats(song), lesson.bars * 4, `${where}: measure map covers the lesson`)
       assert.equal(song.bpm, lesson.tempo.target)
-      assert.deepEqual(song.tracks.map((track) => [track.id, track.instrument, track.gmProgram]), [[instrument, 'other', instrument === 'guitar' ? 27 : 33]])
+      assert.deepEqual(song.tracks.map((track) => [track.id, track.instrument, track.gmProgram]), [[instrument, 'other',
+        lesson.kind === 'genre' ? lesson.gmProgram : instrument === 'guitar' ? 27 : 33]])
       assert.equal(song.tracks[0].group, undefined, `${where}: lesson instrument is not hidden as Creative backing`)
       assert.deepEqual(song.instrumentNotes[instrument], lesson.notes, `${where}: correct part notes reach the Song`)
       assert.ok(song.instrumentNotes[instrument].length > 0)
@@ -85,8 +262,11 @@ try {
       assert.ok(filtered.every((item) => item.instrument === instrument && item.kind === lesson.kind &&
         (lesson.kind === 'course' || lesson.kind === 'genre' && item.genre === lesson.genre ||
           lesson.kind === 'inspired' && item.artist === lesson.artist)), `${where}: instrument, shelf and filter routing`)
-      assert.equal(filtered.length, lesson.kind === 'course' ? 25 : lesson.kind === 'genre' ? 5 : 1, `${where}: the correct lesson list is shown`)
+      assert.equal(filtered.length, lesson.kind === 'course' ? 25 : lesson.kind === 'genre' ? 5
+        : lesson.kind === 'inspired' ? inspired.filter((item) => item.artist === lesson.artist).length : 1,
+      `${where}: the correct lesson list is shown`)
       assert.ok(filtered.includes(lesson), `${where}: Previous/Next list includes the lesson`)
+      assert.strictEqual(frettedLessonById(lesson.id), lesson, `${where}: route preserves lesson identity`)
       for (const note of lesson.notes) {
         assert.ok(Number.isInteger(note.midi) && positionsForMidi(note.midi, config).length > 0, `${where}: pitch ${note.midi} fits the instrument tuning and fret range`)
         assert.ok(note.startBeat >= 0 && note.beats > 0 && note.startBeat + note.beats <= beats + 1e-9, `${where}: note stays inside the lesson`)
@@ -106,6 +286,11 @@ try {
       }
       for (const [beat, strings] of onsets)
         assert.equal(new Set(strings).size, strings.length, `${where}: simultaneous notes at ${beat} use different strings`)
+      if (lesson.kind === 'genre' && instrument === 'guitar')
+        for (const [beat, sameBeat] of Map.groupBy(tab, (item) => item.startBeat)) if (sameBeat.length > 1) {
+          const frets = sameBeat.map((item) => item.position.fret)
+          assert.ok(Math.max(...frets) - Math.min(...frets) <= 5, `${where}: chord at ${beat} fits a compact fretting-hand span`)
+        }
       for (const [id, sameString] of Map.groupBy(tab, (item) => item.position.string)) {
         const ordered = sameString.toSorted((a, b) => a.startBeat - b.startBeat)
         ordered.forEach((item, index) => assert.ok(index === 0 || ordered[index - 1].startBeat + ordered[index - 1].beats <= item.startBeat + 1e-9,
@@ -184,9 +369,9 @@ try {
   'the guitar string-change lesson begins on its four written open pitches')
 
   const bluesShuffle = guitarLessonById('guitar-blues-shuffle')
-  for (let bar = 0; bar < bluesShuffle.bars; bar++) {
+  for (let bar = 0; bar < Math.min(bluesShuffle.bars, 4); bar++) {
     const onsets = bluesShuffle.notes.filter((note) => Math.floor(note.startBeat / 4) === bar)
-      .map((note) => note.startBeat - bar * 4).sort((a, b) => a - b)
+      .map((note) => note.startBeat - bar * 4).filter((beat, index, beats) => beats.indexOf(beat) === index).sort((a, b) => a - b)
     const gaps = onsets.slice(1).map((beat, index) => Math.round((beat - onsets[index]) * 3))
     assert.deepEqual(gaps, Array.from({ length: onsets.length - 1 }, (_, index) => index % 2 ? 1 : 2),
       `guitar Blues bar ${bar + 1} alternates long-short triplet gaps`)
@@ -195,15 +380,18 @@ try {
   const popChordChange = guitarLessonById('guitar-pop-chord-change')
   const chordAt = (lesson, bar, offset) => lesson.notes.filter((note) => Math.abs(note.startBeat - (bar * 4 + offset)) < 1e-9)
     .map((note) => note.midi).sort((a, b) => a - b)
-  const cMajor = [48, 52, 55, 60, 64]
-  const gMajor = [43, 47, 50, 55, 59, 67]
-  for (const bar of [0, 2]) assert.deepEqual(chordAt(popChordChange, bar, 0), cMajor, `Pop bar ${bar + 1} starts on C`)
-  for (const bar of [1, 3]) assert.deepEqual(chordAt(popChordChange, bar, 0), gMajor, `Pop bar ${bar + 1} starts on G`)
-  assert.deepEqual(chordAt(popChordChange, 0, 2.5), gMajor, 'the second Pop strum is on the & after beat 3')
-  assert.deepEqual(chordAt(popChordChange, 1, 2.5), cMajor, 'the next bar reverses the chord order')
-  assert.match(popChordChange.steps[0], /Bars 1 and 3 strum C on beat 1, then G on the “&” after beat 3; bars 2 and 4 reverse the chord order\./)
-  assert.match(popChordChange.steps[1], /second strum lands on the “&” after beat 3/)
-  assert.doesNotMatch(popChordChange.steps.join(' '), /after beat 2/)
+  const popChords = {
+    c: [48, 52, 55], g: [55, 59, 62], am: [57, 60, 64], f: [53, 57, 60],
+  }
+  for (const bar of [0, 2]) {
+    assert.deepEqual(chordAt(popChordChange, bar, 0), popChords.c, `Pop bar ${bar + 1} starts on C`)
+    assert.deepEqual(chordAt(popChordChange, bar, 2.5), popChords.g, `Pop bar ${bar + 1} answers with G`)
+  }
+  for (const bar of [1, 3]) {
+    assert.deepEqual(chordAt(popChordChange, bar, 0), popChords.am, `Pop bar ${bar + 1} moves to Am`)
+    assert.deepEqual(chordAt(popChordChange, bar, 2.5), popChords.f, `Pop bar ${bar + 1} answers with F`)
+  }
+  assert.match(popChordChange.steps[1], /two-bar .* hook/i)
 
   const gMajorScale = bassLessonById('bass-g-major-scale')
   const barPitches = (lesson, bar) => lesson.notes.filter((note) => Math.floor(note.startBeat / 4) === bar)
@@ -273,6 +461,7 @@ try {
   for (const lesson of [
     guitarLessonById('guitar-open-chord-rhythm'), bassLessonById('bass-root-fifth-octave'),
     guitarLessonById('guitar-inspired-nile-rodgers'), bassLessonById('bass-inspired-jaco-pastorius'),
+    guitarLessonById('guitar-inspired-jimi-purple-haze'), bassLessonById('bass-inspired-harris-the-trooper'),
     frettedScaleLessons('guitar', 6, 'melodic-minor')[0], frettedScaleLessons('bass', 9, 'blues')[0],
   ]) {
     const fresh = freshPosition(lesson)
@@ -298,6 +487,14 @@ try {
   const guitarInspiredBrowse = browseTo(guitarInspired.id, chosen)
   assert.equal(guitarInspiredBrowse.guitarShelf, 'inspired', 'inspired lessons return to the Inspired shelf')
   assert.equal(guitarInspiredBrowse.guitarArtist, 'Nile Rodgers', 'Back restores the selected artist')
+  const guitarSongStudy = guitarLessonById('guitar-inspired-jimi-purple-haze')
+  const guitarSongBrowse = browseTo(guitarSongStudy.id, chosen)
+  assert.equal(guitarSongBrowse.guitarShelf, 'inspired', 'song-linked guitar study returns to the Inspired shelf')
+  assert.equal(guitarSongBrowse.guitarArtist, guitarSongStudy.artist, 'Back restores the song study artist')
+  const bassSongStudy = bassLessonById('bass-inspired-harris-the-trooper')
+  const bassSongBrowse = browseTo(bassSongStudy.id, chosen)
+  assert.equal(bassSongBrowse.bassShelf, 'inspired', 'song-linked bass study returns to the Inspired shelf')
+  assert.equal(bassSongBrowse.bassArtist, bassSongStudy.artist, 'Back restores the bass song study artist')
   const bassScale = frettedScaleLessons('bass', 6, 'melodic-minor')[0]
   const bassScaleBrowse = browseTo(bassScale.id, chosen)
   assert.equal(bassScaleBrowse.instrument, 'bass', 'a bass scale selects Bass on open')
@@ -316,17 +513,31 @@ try {
   assert.match(guitarMarkup, /data-choice="bass"/)
   assert.match(guitarMarkup, /data-choice="genre"/)
   assert.match(guitarMarkup, />Genres</)
-  assert.match(guitarMarkup, /Rock: Set the pulse/)
-  assert.match(guitarMarkup, /Rock: Play root-fifth shapes/)
+  assert.match(guitarMarkup, /Rock: E5 hook/)
+  assert.match(guitarMarkup, /Rock: Muted eighth-note drive/)
+  assert.match(guitarMarkup, /Each eight-bar phrase/)
+  assert.doesNotMatch(guitarMarkup, /four-bar pattern/)
   assert.doesNotMatch(guitarMarkup, /Blues: a two-note shuffle|Pop: C to G chord changes/)
   const inspiredMarkup = renderToStaticMarkup(createElement(CourseSection, {
     browse: { ...DEFAULT_BROWSE, instrument: 'guitar', guitarShelf: 'inspired', guitarArtist: 'Nile Rodgers' },
     onBrowse: () => {}, onLesson: () => {},
   }))
-  assert.match(inspiredMarkup, /data-fretted-shelf="inspired"/)
-  assert.match(inspiredMarkup, /data-genre="Nile Rodgers"/)
-  assert.match(inspiredMarkup, /Inspired by Nile Rodgers/)
-  assert.match(inspiredMarkup, /Clipped offbeat chord cuts/)
+  assert.match(inspiredMarkup, /data-fretted-shelf="course"/)
+  assert.match(inspiredMarkup, /Guitar course/)
+  assert.doesNotMatch(inspiredMarkup, /data-choice="inspired"|Inspired|Nile Rodgers|Clipped offbeat chord cuts/)
+  const songInspiredMarkup = renderToStaticMarkup(createElement(CourseSection, {
+    browse: { ...DEFAULT_BROWSE, instrument: 'guitar', guitarShelf: 'inspired', guitarArtist: 'Jimi Hendrix' },
+    onBrowse: () => {}, onLesson: () => {},
+  }))
+  assert.match(songInspiredMarkup, /data-fretted-shelf="course"/)
+  assert.doesNotMatch(songInspiredMarkup, /data-choice="inspired"|Jimi Hendrix|Purple Haze|Song reference:/)
+  const bassSongInspiredMarkup = renderToStaticMarkup(createElement(CourseSection, {
+    browse: { ...DEFAULT_BROWSE, instrument: 'bass', bassShelf: 'inspired', bassArtist: 'Steve Harris' },
+    onBrowse: () => {}, onLesson: () => {},
+  }))
+  assert.match(bassSongInspiredMarkup, /data-fretted-shelf="course"/)
+  assert.match(bassSongInspiredMarkup, /Bass course/)
+  assert.doesNotMatch(bassSongInspiredMarkup, /data-choice="inspired"|Steve Harris|The Trooper|Song reference:/)
   const scaleMarkup = renderToStaticMarkup(createElement(CourseSection, {
     browse: { ...DEFAULT_BROWSE, instrument: 'bass', bassShelf: 'scale', bassKey: { pitch: 6 }, bassScale: 'melodic-minor' },
     onBrowse: () => {}, onLesson: () => {},
@@ -360,6 +571,39 @@ try {
   }))
   assert.match(scalePanel, /Previous lesson: C Major \(Ionian\): One-octave run/)
   assert.match(scalePanel, /Next lesson: C Major \(Ionian\): Three-note sequences/)
+  const songPanel = renderToStaticMarkup(createElement(FrettedLessonPanel, {
+    lesson: guitarSongStudy, onLesson: () => {},
+  }))
+  assert.match(songPanel, /Song reference: Purple Haze/)
+  assert.match(songPanel, /Original riff study/)
+  assert.match(songPanel, /Previous lesson: Syncopated double-stop answers/)
+  assert.match(songPanel, /Next lesson: Little Wing: Low anchors with a high call-and-answer line/)
+  const bassSongPanel = renderToStaticMarkup(createElement(FrettedLessonPanel, {
+    lesson: bassSongStudy, onLesson: () => {},
+  }))
+  assert.match(bassSongPanel, /Song reference: The Trooper/)
+  assert.match(bassSongPanel, /Original riff study/)
+  assert.match(bassSongPanel, /No previous lesson/)
+  assert.match(bassSongPanel, /Next lesson: Run to the Hills: Eighth-note plus two-sixteenth gallops with wide root jumps/)
+  const trooper = bassLessonById('bass-inspired-harris-the-trooper')
+  const runToTheHills = bassLessonById('bass-inspired-harris-run-to-the-hills')
+  const bassBar = (lesson, bar) => lesson.notes.filter((note) => Math.floor(note.startBeat / 4) === bar)
+    .map(({ startBeat, beats }) => [startBeat % 4, beats])
+  assert.match(trooper.steps[0], /eighth note followed by two sixteenth notes: long-short-short/)
+  assert.doesNotMatch(trooper.steps[0], /long-short-long/)
+  assert.deepEqual(bassBar(trooper, 0).slice(0, 3), [[0, 0.5], [0.5, 0.25], [0.75, 0.25]],
+    'The Trooper opening figure is an eighth followed by two sixteenths, not a triplet')
+  assert.match(runToTheHills.steps[0], /one eighth note followed by two even sixteenth notes, not as a triplet/)
+  assert.doesNotMatch(runToTheHills.title, /triplet/i)
+  for (const lesson of [trooper, runToTheHills])
+    assert.ok(lesson.notes.every((note) => note.beats !== 1 / 3 && note.beats !== 2 / 3),
+      `${lesson.id}: gallop uses sixteenth values instead of triplet durations`)
+  for (const bar of [0, 1, 2]) {
+    assert.deepEqual(bassBar(runToTheHills, bar).slice(0, 9), [
+      [0, 0.5], [0.5, 0.25], [0.75, 0.25], [1.5, 0.5], [2, 0.25], [2.25, 0.25],
+      [3, 0.5], [3.5, 0.25], [3.75, 0.25],
+    ], `Run to the Hills bar ${bar + 1} has three eighth-plus-two-sixteenth gallops`)
+  }
   console.log(`Guitar and bass course checks passed (${GUITAR_LESSONS.length} guitar, ${BASS_LESSONS.length} bass lessons).`)
 } finally {
   await vite.close()

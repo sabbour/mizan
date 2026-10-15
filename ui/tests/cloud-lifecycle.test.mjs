@@ -138,7 +138,7 @@ function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = 
     const filename = sourceRoot + name
     let source = readFileSync(filename, 'utf8').replaceAll('import.meta.env', '({})')
     if (name === 'Library.tsx') source += '\nexport { Queue, YouTubeSearch, PopularMusic, unifyMidiResults, MidiSearch }\n'
-    if (name === 'CloudSetup.tsx') source += '\nexport { GcpAccountFields, AwsAccountFields }\n'
+    if (name === 'CloudSetup.tsx') source += '\nexport { GcpAccountFields, AwsAccountFields, ProviderCredentialPrerequisites }\n'
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2023 },
     }).outputText
@@ -462,7 +462,7 @@ test('native FFmpeg browsing uses the Windows request and reply format', async (
   let listener
   let reply = { ok: true, result: { ok: true, path: 'C:\\Native\\ffmpeg.exe' } }
   const exports = {}
-  const source = readFileSync(sourceRoot + 'bridge.ts', 'utf8')
+  const source = readFileSync(sourceRoot + 'bridge.ts', 'utf8').replaceAll('import.meta.env', '({})')
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 },
   }).outputText
@@ -684,6 +684,83 @@ test('Azure starts with an existing subnet, keeps saved networks, and resets app
   }
 })
 
+test('all cloud account entries show credential and capacity prerequisites before their actions', async () => {
+  const h = harness({}, { loadCloudSetup: true })
+  const { CloudSetup, ProviderCredentialPrerequisites } = h.load('CloudSetup.tsx')
+  const cases = [
+    {
+      provider: 'azure', name: 'Azure', href: 'https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows',
+      commands: ['az --version', 'az login'],
+      text: [/Before you start/, /saved local Azure sign-in/, /browser sign-in/, /Azure PowerShell/,
+        /CLI is optional/, /same Windows account/, /not a sign-in failure/,
+        /active subscription with billing enabled/, /A100 GPU availability and quota/],
+    },
+    {
+      provider: 'gcp', name: 'Google Cloud', href: 'https://cloud.google.com/sdk/docs/install',
+      commands: ['gcloud --version', 'gcloud auth application-default login'],
+      text: [/Before you start/, /Application Default Credentials, or ADC/,
+        /Browser sign-in/, /gcloud auth login/, /Google Cloud CLI is optional/,
+        /same Windows account/, /not a sign-in failure/, /active project with billing enabled/,
+        /g2-standard-4/, /g2-standard-8/, /nvidia-l4/, /GPU availability and quota/],
+    },
+    {
+      provider: 'aws', name: 'AWS',
+      href: 'https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html',
+      commands: ['aws --version', 'aws configure sso --profile "mizan"', 'aws sso login --profile "mizan"'],
+      text: [/Before you start/, /AWS profile entered here/, /browser sign-in/,
+        /CLI is optional if the profile is ready/, /aws configure/, /same Windows account/, /not a sign-in failure/,
+        /active account with billing enabled/, /g5\.4xlarge/, /not Fargate/,
+        /GPU availability and quota/, /Replace mizan with the profile name/],
+    },
+  ]
+
+  for (const item of cases) {
+    const entry = h.render(CloudSetup, {
+      provider: item.provider, status: null, onStatus() {}, onClose() {},
+      acquireOperation: () => () => {},
+    })
+    const views = [entry]
+    let current = entry.tree
+    while (typeof current.type === 'function') {
+      const nested = h.render(current.type, current.props)
+      views.push(nested)
+      current = nested.tree
+    }
+    const panel = views.at(-1)
+    await panel.settle()
+    const guideNode = nodes(panel.tree,
+      (node) => node.type === ProviderCredentialPrerequisites)[0]
+    assert.ok(guideNode, `${item.name} mounts its credential guide`)
+    const action = nodes(panel.tree, (node) => node.type === 'button'
+      && text(node) === (item.provider === 'azure' ? 'Continue' : `Check ${item.name} access`))[0]
+    assert.ok(action, `${item.name} has its expected next account action`)
+    const order = nodes(panel.tree, (node) => node.type === ProviderCredentialPrerequisites || node === action)
+    assert.strictEqual(order[0], guideNode, `${item.name} prerequisites appear before the action`)
+    assert.strictEqual(order[1], action)
+
+    const guide = h.render(guideNode.type, guideNode.props)
+    const guidance = text(guide.tree)
+    for (const expected of item.text) assert.match(guidance, expected, `${item.name}: ${expected}`)
+    assert.doesNotMatch(guidance, /boto3|noninteractive credential chain|profile-backed SDK|quota\/capacity/i)
+    const commands = nodes(guide.tree, (node) => node.type === 'code').map(text)
+    for (const expected of item.commands) assert.ok(commands.includes(expected), `${item.name}: ${expected}`)
+    assert.equal(nodes(guide.tree, (node) => node.type === 'a')[0].props.href, item.href)
+
+    if (item.provider === 'gcp') {
+      const instructions = nodes(guide.tree, (node) => node.type === 'p'
+        && text(node).includes('gcloud auth login'))[0]
+      const children = Array.isArray(instructions.props.children)
+        ? instructions.props.children : [instructions.props.children]
+      const loginCommand = children.findIndex((child) => child?.type === 'code'
+        && text(child) === 'gcloud auth login')
+      assert.equal(children[loginCommand + 1], ' ',
+        'The rendered gcloud command and its explanation have a visible separating space')
+    }
+    guide.unmount()
+    for (const view of views) view.unmount()
+  }
+})
+
 test('unsupported cloud provider metadata does not open a supported provider setup', () => {
   const h = harness({}, { loadCloudSetup: true })
   const { CloudSetup } = h.load('CloudSetup.tsx')
@@ -725,12 +802,16 @@ test('a removed provider requires an explicit choice and never falls back to Azu
 })
 
 test('Google Cloud project discovery is retryable and fills resource names only after selection', async () => {
-  let fail = true, calls = 0
+  let result = 'missing', calls = 0
   const h = harness({
     cloudSubscriptions: async (provider) => {
       assert.equal(provider, 'gcp')
       calls++
-      if (fail) throw new Error('Sign in with Google Cloud credentials.')
+      if (result === 'missing') throw new Error(
+        'Google Cloud Application Default Credentials are unavailable. Run gcloud auth application-default login under the same Windows account that runs Mizan, then retry. Browser sign-in and gcloud auth login alone do not configure Application Default Credentials for Mizan.')
+      if (result === 'refresh') throw new Error(
+        'Google Cloud Application Default Credentials could not be refreshed. The credentials may have expired or been revoked. Run gcloud auth application-default login under the same Windows account that runs Mizan, then retry.')
+      if (result === 'empty') return { subscriptions: [] }
       return { subscriptions: [{ projectId: 'test-project', projectName: 'Test project', projectNumber: '123456789012', state: 'ACTIVE' }] }
     },
   })
@@ -738,12 +819,25 @@ test('Google Cloud project discovery is retryable and fills resource names only 
   const setConfig = (next) => { config = typeof next === 'function' ? next(config) : next }
   const view = h.render(h.load('CloudSetup.tsx').GcpAccountFields, { config, setConfig })
   assert.equal(nodes(view.tree, (node) => node.type === 'select')[0].props.disabled, true)
+  assert.match(text(view.tree), /Application Default Credentials \(ADC\)/)
+  assert.match(text(view.tree), /separate from Check Google Cloud access/)
+  assert.doesNotMatch(text(view.tree), /using your saved sign-in/)
   await view.settle()
-  assert.match(text(view.tree), /Sign in with Google Cloud credentials/)
+  assert.match(text(view.tree), /Application Default Credentials are unavailable/)
+  assert.match(text(view.tree), /then retry/)
   assert.equal(config.projectId, undefined)
-  fail = false
-  button(view.tree, 'Refresh projects').props.onClick()
-  view.update(); await view.settle()
+  const refreshProjects = async () => {
+    button(view.tree, 'Refresh projects').props.onClick()
+    view.update()
+    assert.equal(nodes(view.tree, (node) => node.type === 'select')[0].props.disabled, true,
+      'Refresh immediately disables selection until the newest request settles')
+    assert.match(text(view.tree), /Finding projects…/)
+    assert.doesNotMatch(text(view.tree), /Test project \( ?test-project ?\)/,
+      'Refresh clears stale discovered projects while loading')
+    await view.settle()
+  }
+  result = 'projects'
+  await refreshProjects()
   const picker = nodes(view.tree, (node) => node.type === 'select')[0]
   assert.equal(picker.props.required, true)
   picker.props.onChange({ target: { value: 'test-project' } })
@@ -755,7 +849,29 @@ test('Google Cloud project discovery is retryable and fills resource names only 
   view.update({ config, setConfig })
   nodes(view.tree, (node) => node.type === 'select')[0].props.onChange({ target: { value: 'test-project' } })
   assert.equal(config.bucket, 'saved-custom-bucket', 'The saved project keeps its custom resources')
-  assert.equal(calls, 2)
+
+  result = 'refresh'
+  await refreshProjects()
+  assert.match(text(view.tree), /could not be refreshed/)
+  assert.doesNotMatch(text(view.tree), /Test project \( ?test-project ?\)/,
+    'A failed refresh does not leave stale discovered projects visible')
+  assert.match(text(view.tree), /Saved project: test-project \( ?not verified ?\)/)
+  assert.equal(config.projectId, 'test-project', 'A failed refresh preserves the saved project')
+  assert.equal(config.bucket, 'saved-custom-bucket')
+
+  result = 'empty'
+  await refreshProjects()
+  assert.match(text(view.tree), /No active Google Cloud projects are visible/)
+  assert.match(text(view.tree), /Saved project: test-project \( ?not verified ?\)/)
+  assert.equal(config.projectId, 'test-project', 'An empty list preserves the saved project')
+
+  result = 'projects'
+  await refreshProjects()
+  assert.match(text(view.tree), /Test project \( ?test-project ?\)/,
+    'Refresh recovers after an empty accessible-project list')
+  assert.equal(config.projectId, 'test-project')
+  assert.equal(config.bucket, 'saved-custom-bucket')
+  assert.equal(calls, 5)
   view.unmount()
 })
 

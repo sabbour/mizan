@@ -9,7 +9,7 @@ import { CourseSection } from '../course/Course'
 import type { CourseBrowse } from '../course/browse'
 import { LESSONS } from '../course/curriculum'
 import { PIANO_LESSONS } from '../course/piano'
-import { FRETTED_LESSONS } from '../course/fretted'
+import { FRETTED_BROWSE_LESSONS } from '../course/fretted'
 import { PIANO_INSPIRED } from '../course/pianoInspired'
 import './library.css'
 
@@ -1418,7 +1418,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               }}>
               {item.label}
               {item.id === 'catalog' && <span className="lib-tab-count num">{entries?.length ?? ''}</span>}
-              {item.id === 'course' && <span className="lib-tab-count num">{LESSONS.length + PIANO_LESSONS.length + PIANO_INSPIRED.length + FRETTED_LESSONS.length}</span>}
+              {item.id === 'course' && <span className="lib-tab-count num">{LESSONS.length + PIANO_LESSONS.length + PIANO_INSPIRED.length + FRETTED_BROWSE_LESSONS.length}</span>}
               {item.id === 'catalog' && queueJobs.length > 0 && tab !== 'catalog' && <span className="lib-tab-count num">· {queueJobs.length} in queue</span>}
             </button>
           ))}
@@ -1572,7 +1572,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
               <span>The source does not list a per-file license. I confirm that I have permission to use this MIDI file.</span>
             </label>
           )}
-          <p>This MIDI file will be added to your library. It will not be treated as audio or transcribed.</p>
+          <p>This MIDI file will be added to your library, not treated as audio or transcribed. Pitch bends play during held notes and are preserved in MIDI exports; score notation shows the written starting pitch with bend annotations, while MusicXML cannot preserve the full controller curve.</p>
           {midiOfferError && <p className="intake-error" role="alert">{midiOfferError.message} {midiOfferError.fix}</p>}
           <div className="midi-import-actions">
             <button className="btn btn-quiet" autoFocus disabled={busy} onClick={() => {

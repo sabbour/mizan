@@ -8,20 +8,28 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import CancelledError, Future, TimeoutError as FutureTimeoutError
 from contextlib import closing
-from threading import Event
+from threading import Event, Lock
 import time
 import warnings
 
 from scipy.io.wavfile import WavFileWarning
 
-from ..errors import DownloadFailed, FFmpegUnavailable, InsufficientDisk, UnsupportedMedia, VideoUnavailable
+from ..errors import (DownloadFailed, FFmpegProbeTimedOut, FFmpegUnavailable, InsufficientDisk,
+                      UnsupportedMedia, VideoUnavailable)
 from ..paths import home
 from .audio import read_audio
 from .providers import check_cancel
 
 logger = logging.getLogger(__name__)
 FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/"
+FFMPEG_VERSION_TIMEOUT_SECONDS = 30
+_FFMPEG_VALIDATION_LOCK = Lock()
+_FFMPEG_VALIDATION_CACHE: dict[str, tuple[int, int, int, int, int]] = {}
+_FFMPEG_VALIDATION_IN_FLIGHT: dict[
+    tuple[str, tuple[int, int, int, int, int]], Future[None]
+] = {}
 
 
 def copy_decoded(source: Path, output: Path, cancelled: Event) -> float:
@@ -87,22 +95,72 @@ def _normalize_ffmpeg_path(value: str, *, require_absolute: bool) -> str:
     return str(path)
 
 
+def _ffmpeg_file_identity(executable: str) -> tuple[str, tuple[int, int, int, int, int]]:
+    try:
+        stat = Path(executable).stat()
+    except OSError as exc:
+        raise FFmpegUnavailable(f"FFmpeg could not be inspected: {exc}") from exc
+    return (os.path.normcase(os.path.abspath(executable)),
+            (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+
+
 def validate_ffmpeg_executable(value: str, *, require_absolute: bool = False) -> str:
     executable = _normalize_ffmpeg_path(value, require_absolute=require_absolute)
+    normalized_path, identity = _ffmpeg_file_identity(executable)
+    key = (normalized_path, identity)
+    with _FFMPEG_VALIDATION_LOCK:
+        if _FFMPEG_VALIDATION_CACHE.get(normalized_path) == identity:
+            return executable
+        future = _FFMPEG_VALIDATION_IN_FLIGHT.get(key)
+        if future is None:
+            future = Future()
+            _FFMPEG_VALIDATION_IN_FLIGHT[key] = future
+            owner = True
+        else:
+            owner = False
+
+    if not owner:
+        try:
+            future.result(timeout=FFMPEG_VERSION_TIMEOUT_SECONDS + 10)
+        except CancelledError as exc:
+            raise FFmpegUnavailable("FFmpeg validation was interrupted. Retry with the selected executable.") from exc
+        except FutureTimeoutError as exc:
+            raise FFmpegProbeTimedOut(
+                f"FFmpeg validation did not finish within {FFMPEG_VERSION_TIMEOUT_SECONDS + 10} seconds.") from exc
+        return executable
+
     try:
-        result = subprocess.run(
-            [executable, "-version"], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=5, check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise FFmpegUnavailable("FFmpeg did not respond to -version within 5 seconds.") from exc
-    except OSError as exc:
-        raise FFmpegUnavailable(f"FFmpeg could not start: {exc}") from exc
-    version = (result.stdout or "") + "\n" + (result.stderr or "")
-    if result.returncode != 0 or not re.search(r"(?im)^ffmpeg version\s+\S+", version):
-        raise FFmpegUnavailable("The selected file is not a working FFmpeg executable.")
-    return executable
+        try:
+            result = subprocess.run(
+                [executable, "-version"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=FFMPEG_VERSION_TIMEOUT_SECONDS, check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise FFmpegProbeTimedOut(
+                f"FFmpeg did not respond to -version within {FFMPEG_VERSION_TIMEOUT_SECONDS} seconds.") from exc
+        except OSError as exc:
+            raise FFmpegUnavailable(f"FFmpeg could not start: {exc}") from exc
+        version = (result.stdout or "") + "\n" + (result.stderr or "")
+        if result.returncode != 0 or not re.search(r"(?im)^ffmpeg version\s+\S+", version):
+            raise FFmpegUnavailable("The selected file is not a working FFmpeg executable.")
+        current_path, current_identity = _ffmpeg_file_identity(executable)
+        if current_path != normalized_path or current_identity != identity:
+            raise FFmpegUnavailable("The selected FFmpeg executable changed during validation. Retry with that file.")
+        with _FFMPEG_VALIDATION_LOCK:
+            _FFMPEG_VALIDATION_CACHE[normalized_path] = identity
+        future.set_result(None)
+        return executable
+    except FFmpegUnavailable as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        with _FFMPEG_VALIDATION_LOCK:
+            if _FFMPEG_VALIDATION_IN_FLIGHT.get(key) is future:
+                del _FFMPEG_VALIDATION_IN_FLIGHT[key]
+            if not future.done():
+                future.cancel()
 
 
 def _winget_ffmpeg_path() -> str | None:

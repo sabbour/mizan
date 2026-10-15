@@ -35,6 +35,10 @@ FIXES = {
     "download_failed": "Check your connection and try the link again.",
     "unsupported_media": "Try a finished, public YouTube video with audio.",
     "ffmpeg_unavailable": "Download FFmpeg, extract it, then choose bin\\ffmpeg.exe in Song analysis settings.",
+    "ffmpeg_validation_timeout": (
+        "FFmpeg took too long to start. Wait for startup activity to finish, then retry "
+        "with the selected executable; you do not need to download FFmpeg."
+    ),
     "insufficient_disk": "Free disk space, then retry the job.",
     "model_failed": "Retry the job. If it fails again, restart Mizan.",
     "cloud_failed": "Review the Cloud error details and correct the reported issue before retrying.",
@@ -766,6 +770,12 @@ class Api:
             self._library.delete_score_track(song_id, track_id)
             return self._open_song(song_id)
         return response(delete)
+
+    def change_score_track_instrument(self, song_id: str, track_id: str, gm_program: int) -> dict[str, Any]:
+        def change():
+            self._library.change_score_track_instrument(song_id, track_id, gm_program)
+            return self._open_song(song_id)
+        return response(change)
 
     def reprocess_song(self, song_id: str) -> dict[str, Any]:
         return response(lambda: {"ok": True, "job": self._queue_job(self._runner.reprocess(song_id))})

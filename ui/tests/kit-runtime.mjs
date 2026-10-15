@@ -9,7 +9,7 @@ globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
   const { feedbackAt, HAND_GLOW, PIECE_GLOW, LOOKAHEAD } = await vite.ssrLoadModule('/src/workspace/kitFeedback.ts')
-  const { motionMatrix } = await vite.ssrLoadModule('/src/workspace/kitRenderer.ts')
+  const { motionMatrix, usesElectronicStudioLighting } = await vite.ssrLoadModule('/src/workspace/kitRenderer.ts')
   const { prepare, lodFor, triangleCount } = await vite.ssrLoadModule('/src/workspace/kitAsset.ts')
   const { LOOKS, KIT_TYPES } = await vite.ssrLoadModule('/src/workspace/prefs.ts')
   const { fallbackScene } = await vite.ssrLoadModule('/src/workspace/kitScene.ts')
@@ -74,6 +74,12 @@ try {
   assert.ok(q(1.4).pulse > 0 && q(1.44).pulse < 0.01, 'separated hits at 60 bpm keep the full 0.45 s pulse')
   assert.ok(q(1.5).upcoming > 0 && q(1.5).upcomingTint === PIECE_GLOW.snare, 'and still anticipate the next note through the beat')
   assert.equal(LOOKAHEAD, 1)
+  assert.ok(usesElectronicStudioLighting('electronic', 'Realistic'), 'electronic kits use the added studio reflections in the realistic look')
+  assert.ok(!usesElectronicStudioLighting('acoustic', 'Realistic'), 'acoustic kits keep the existing realistic lighting')
+  assert.ok(!usesElectronicStudioLighting('electronic', 'ClayStudyModel') &&
+    !usesElectronicStudioLighting('electronic', 'NeonRhythm') &&
+    !usesElectronicStudioLighting('electronic', 'TechnicalBlueprint'), 'the added lighting is limited to the electronic realistic look')
+  assert.ok(!usesElectronicStudioLighting(undefined, 'Realistic'), 'shared renderer callers such as piano keep their existing lighting by default')
   // Reduced motion: a steady mark, no wobble.
   const calm = feedbackAt(strikes, { beat: 1.05, playing: true, countingIn: false, countBeat: 0 }, { ...opts, reduced: true }).get('snare')
   assert.ok(calm.pulse === 0.8 && calm.since === 99, 'reduced motion shows a steady mark without wobble')

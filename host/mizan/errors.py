@@ -56,6 +56,11 @@ class FFmpegUnavailable(MizanError):
     message = "FFmpeg is not available. Install it or choose its executable in Song analysis settings."
 
 
+class FFmpegProbeTimedOut(FFmpegUnavailable):
+    code = "ffmpeg_validation_timeout"
+    message = "FFmpeg validation timed out. Retry with the selected executable."
+
+
 class ModelFailed(MizanError):
     code = "model_failed"
     message = "The music processing model could not finish."
@@ -109,6 +114,21 @@ class ScoreTrackNotFound(MizanError):
 class ScoreTrackAmbiguous(MizanError):
     code = "score_track_ambiguous"
     message = "This older score does not identify which notes belong to this track. Re-import the score to delete this part."
+
+
+class ScoreTrackInstrumentNotEditable(MizanError):
+    code = "score_track_instrument_not_editable"
+    message = "Only saved transcribed pitched tracks can have their instrument changed. Drum and generated tracks cannot be converted."
+
+
+class InvalidScoreTrackInstrument(MizanError):
+    code = "invalid_score_track_instrument"
+    message = "Choose a supported pitched instrument."
+
+
+class ScoreTrackInstrumentAmbiguous(MizanError):
+    code = "score_track_instrument_ambiguous"
+    message = "This older score does not identify which notes belong to this track, so its instrument cannot be changed safely."
 
 
 class FolderNotFound(MizanError):

@@ -470,9 +470,10 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
               <li><strong>Build</strong> the worker and, with your approval, use your saved Hugging Face token.</li>
             </ol>
             <p className="cloud-cost-note">Azure storage, registry and GPU Jobs can cost money. Nothing is created until you approve it. Only upload recordings you have permission to use.</p>
+            <ProviderCredentialPrerequisites provider="azure" />
             <details>
               <summary>Requirements and permissions</summary>
-              <p>Sign in with <code>az login</code> or another supported Azure Identity credential. No app registration or client secret is needed. Your subscription needs A100 quota in the chosen region and permission to create a resource group. Assigning scoped Blob and registry roles may require an administrator.</p>
+              <p>No app registration or client secret is needed. Assigning scoped Blob and registry roles may require an administrator.</p>
               <p>Switching back to Local stops new uploads, not a Job already running. Cloud stays Local until access and Job configuration pass preflight.</p>
             </details>
             {status?.config && status.issue && <p className="cloud-error" role="alert">{status.issue}</p>}
@@ -754,6 +755,29 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
       </div>
     </dialog>
   )
+}
+
+function ProviderCredentialPrerequisites({ provider }: {
+  provider: CloudProvider
+}) {
+  const command = provider === 'azure' ? 'az' : provider === 'gcp' ? 'gcloud' : 'aws'
+  return <section className="cloud-guide" aria-label="Before you start">
+    <h3>Before you start</h3>
+    {provider === 'azure' ? <>
+      <p><strong>Sign-in:</strong> Mizan uses your saved local Azure sign-in, not your browser sign-in. Sign in with Azure CLI or an already configured supported tool such as Azure PowerShell. The CLI is optional if that tool is already set up for this Windows account.</p>
+      <p><a href="https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows" target="_blank" rel="noreferrer">Install Azure CLI for Windows</a>{' '}if needed. Verify <code>az --version</code>, then run <code>az login</code>{' '}under the same Windows account that runs Mizan.</p>
+      <p><strong>Subscription and GPU:</strong> Use an active subscription with billing enabled and access to create resources. A100 GPU availability and quota are required in a region offered by Mizan; ask your administrator about access or quota.</p>
+    </> : provider === 'gcp' ? <>
+      <p><strong>Sign-in:</strong> Mizan needs a saved application login (called Application Default Credentials, or ADC) for this Windows account. Browser sign-in and <code>gcloud auth login</code>{' '}alone do not set this up. The Google Cloud CLI is optional if another supported ADC source is already configured.</p>
+      <p>If ADC is missing, <a href="https://cloud.google.com/sdk/docs/install" target="_blank" rel="noreferrer">install Google Cloud CLI</a>. Verify <code>gcloud --version</code>, then run <code>gcloud auth application-default login</code>{' '}under the same Windows account and select <strong>Refresh projects</strong>.</p>
+      <p><strong>Project and GPU:</strong> Choose an active project with billing enabled and access for this sign-in. Mizan supports <code>g2-standard-4</code> or <code>g2-standard-8</code> with <code>nvidia-l4</code>. The selected region needs GPU availability and quota.</p>
+    </> : <>
+      <p><strong>Sign-in:</strong> Mizan uses the AWS profile entered here, not your browser sign-in. Use AWS CLI to set up or sign in to that profile; an already configured working profile also works, so the CLI is optional if the profile is ready. <code>aws configure</code>{' '}is another option for setting up a basic profile.</p>
+      <p><a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" target="_blank" rel="noreferrer">Install AWS CLI v2 for Windows</a>{' '}if needed. Verify <code>aws --version</code>. For IAM Identity Center, run <code>aws configure sso --profile "mizan"</code>, then <code>aws sso login --profile "mizan"</code>{' '}under the same Windows account. Replace <code>mizan</code>{' '}with the profile name you configure and enter in Mizan.</p>
+      <p><strong>Account and GPU:</strong> Use an active account with billing enabled and access for the selected profile. Mizan supports AWS Batch on managed EC2 <code>g5.4xlarge</code> only, not Fargate. The selected region needs GPU availability and quota; ask your administrator about access or quota.</p>
+    </>}
+    <p>If PowerShell says <code>{command}</code>{' '}is not recognized, install the CLI or use its installer to add it to PATH, then open a new PowerShell window. This is a local setup issue, not a sign-in failure. Mizan does not install the CLI or run sign-in commands.</p>
+  </section>
 }
 
 type OtherCloudProvider = Exclude<CloudProvider, 'azure'>
@@ -1160,6 +1184,8 @@ function ProviderCloudSetup<P extends OtherCloudProvider>({
             onClick={() => dialog.current?.close()}>Close</button>
         </div>
         <div className="cloud-guide"><p>Mizan sends recordings to private cloud storage. Cloud resources can cost money.</p></div>
+        {step === 'settings' && settingsStage === 'account' &&
+          <ProviderCredentialPrerequisites provider={provider} />}
         {status?.issue && <p className="cloud-error" role="alert">{status.issue}</p>}
         {status?.warning && <p role="status">{status.warning}</p>}
         <button className="btn" type="button" disabled={busy || settingsLoading}
@@ -1347,18 +1373,27 @@ function GcpAccountFields({ config, setConfig }: {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
+  const request = useRef(0)
   useEffect(() => {
     let active = true
+    const id = ++request.current
     void host.cloudSubscriptions('gcp').then(({ subscriptions }) => {
-      if (active) {
+      if (active && request.current === id) {
         setProjects(subscriptions)
-        if (!subscriptions.length) setError('No accessible Google Cloud projects were found. Check your sign-in and permissions, then refresh.')
+        setError(subscriptions.length ? null
+          : 'No active Google Cloud projects are visible to these credentials. Check project membership, then refresh.')
       }
     }).catch((reason: unknown) => {
-      if (active) setError(providerError('Google Cloud', reason))
-    }).finally(() => { if (active) setLoading(false) })
+      if (active && request.current === id) {
+        setProjects([])
+        setError(providerError('Google Cloud', reason))
+      }
+    }).finally(() => {
+      if (active && request.current === id) setLoading(false)
+    })
     return () => { active = false }
   }, [refresh])
+  const savedProjectStatus = loading ? 'checking' : error ? 'not verified' : 'not found'
   return <>
     <label>Google Cloud project
       <select name="projectId" required disabled={loading} value={config.projectId ?? ''}
@@ -1372,20 +1407,22 @@ function GcpAccountFields({ config, setConfig }: {
         }}>
         <option value="">{loading ? 'Finding projects…' : 'Choose a project'}</option>
         {config.projectId && !projects.some((project) => project.projectId === config.projectId)
-          && <option value={config.projectId}>Saved project: {config.projectId} (not found)</option>}
+          && <option value={config.projectId}>Saved project: {config.projectId} ({savedProjectStatus})</option>}
         {projects.map((project) => <option key={project.projectId} value={project.projectId}>
           {project.projectName} ({project.projectId})
         </option>)}
       </select>
     </label>
     <button type="button" className="btn" disabled={loading} onClick={() => {
+      request.current++
       setLoading(true)
       setError(null)
+      setProjects([])
       setRefresh((value) => value + 1)
     }}>
       {loading ? 'Finding projects…' : 'Refresh projects'}
     </button>
-    <p>Projects come from the Google Cloud API using your saved sign-in. Mizan fills in resource names after you choose a project.</p>
+    <p>Project discovery lists active projects visible to these configured Application Default Credentials (ADC). It is separate from <strong>Check Google Cloud access</strong> and does not create resources. If no projects appear, check project membership and refresh. Mizan fills in resource names after you choose a project.</p>
     {error && <p className="cloud-error" role="alert">{error}</p>}
   </>
 }

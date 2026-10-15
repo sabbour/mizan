@@ -1,7 +1,8 @@
-import type { DrumHit, DrumLane, Song, Track } from './song'
+import type { DrumHit, DrumLane, PianoNote, Song, Track } from './song'
 import { barAt as measureIndex, barStart, barTempo, measures as meterMeasures } from './meter'
 import { isGuitarTrack } from './guitar'
 import { isBassTrack } from './bass'
+import { notesForTrack, planFrettedTab, type FrettedInstrumentConfig } from './fretboard'
 
 const DIV = 16 // divisions per quarter note
 const notationEvents = (song: Song) => [...song.piano, ...song.vocals, ...song.chords, ...song.drums,
@@ -386,7 +387,13 @@ function pitch(midi: number, flats: boolean, spelled?: string): string {
   return `<pitch><step>${name[0]}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${Math.floor(base / 12) - 1}</octave></pitch>`
 }
 
-type Head = { xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean; finger?: number }
+type Head = {
+  xml: string; stop?: boolean; start?: boolean; cents?: string; staccato?: boolean; finger?: number
+  /** String and fret, for a tab part. */
+  tab?: { string: number; fret: number }
+  /** A note the moment cannot play as written: drawn in brackets with a ! under it. */
+  unplayable?: boolean
+}
 type Event = { pos: number; dur: number; heads: Head[] }
 
 function voice(events: Event[], voiceNo: number, staff: number, stem: string | null, barDivs: number, division = DIV): string {
@@ -414,11 +421,13 @@ function voice(events: Event[], voiceNo: number, staff: number, stem: string | n
         const start = head.start || index < lengths.length - 1
         const ties = `${stop ? '<tie type="stop"/>' : ''}${start ? '<tie type="start"/>' : ''}`
         const articulation = head.staccato && !stop && !index ? '<articulations><staccato/></articulations>' : ''
-        const fingering = head.finger && !stop && !index ? `<technical><fingering>${head.finger}</fingering></technical>` : ''
+        const shown = !stop && !index
+        const technical = `${head.finger && shown ? `<fingering>${head.finger}</fingering>` : ''}${head.tab && shown ? `<string>${head.tab.string}</string><fret>${head.tab.fret}</fret>` : ''}`
+        const fingering = technical ? `<technical>${technical}</technical>` : ''
         const notation = stop || start || articulation || fingering
           ? `<notations>${stop ? '<tied type="stop"/>' : ''}${start ? '<tied type="start"/>' : ''}${articulation}${fingering}</notations>`
           : ''
-        xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length, division)}${stem ? `<stem>${stem}</stem>` : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : ''}</note>`
+        xml += `<note>${i ? '<chord/>' : ''}${head.xml}<duration>${length}</duration>${ties}<voice>${voiceNo}</voice>${typeOf(length, division)}${stem ? `<stem>${stem}</stem>` : ''}${head.unplayable ? '<notehead parentheses="yes">normal</notehead>' : ''}<staff>${staff}</staff>${notation}${head.cents && !stop ? `<lyric><text>${head.cents}</text></lyric>` : head.unplayable && shown ? '<lyric><text>!</text></lyric>' : ''}</note>`
       })
     }
     cursor = e.pos + duration
@@ -466,7 +475,7 @@ function harmony(symbol: string): string {
 }
 
 /** Chord symbols and (bar 1) tempo, written before the notes; mid-bar chords are placed with forward/backup. Section names are drawn by the score overlay. */
-function annotations(song: Song, bar: number, chords: boolean, scale = 1): string {
+function annotations(song: Song, bar: number, chords: boolean, scale = 1, bentNotes: readonly PianoNote[] = []): string {
   const grid = notationGrid(song)
   const span = grid.bars[bar - 1]
   let xml = ''
@@ -479,6 +488,16 @@ function annotations(song: Song, bar: number, chords: boolean, scale = 1): strin
   // Mark the tempo at the start and where the beat unit or speed changes (e.g. 4/4 to 12/8).
   if (bar === 1 || unitChanged || Math.abs(tempo / previous! - 1) >= 0.05) {
     xml += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit>${compound ? '<beat-unit-dot/>' : ''}<per-minute>${Math.round(compound ? tempo / 1.5 : tempo)}</per-minute></metronome></direction-type><sound tempo="${Math.round(tempo * 1000) / 1000}"/></direction>`
+  }
+  for (const note of bentNotes) {
+    const barStart = grid.toBeat(span.startDiv)
+    const barEnd = grid.toBeat(span.endDiv)
+    if (!note.pitchBends?.length || note.startBeat < barStart || note.startBeat >= barEnd) continue
+    const text = note.pitchBends.map((point) =>
+      `${point.semitones >= 0 ? '+' : ''}${point.semitones.toFixed(3)} semitones at +${point.beat.toFixed(3)} beat`,
+    ).join('; ')
+    const offset = Math.round((grid.toDiv(note.startBeat) - span.startDiv) * scale)
+    xml += `<direction placement="above"><direction-type><words>MIDI pitch bend from the written starting pitch: ${text}</words></direction-type><offset>${offset}</offset><staff>1</staff></direction>`
   }
   let cursor = 0
   const names = song.chords.length ? song.chords : song.chordLabels ?? []
@@ -509,14 +528,14 @@ export function pianoXml(song: Song, chords = true): string {
   const lines = voiceLines(notes.map((note) => ({
     startDiv: note.startDiv,
     endDiv: note.endDiv,
-    staff: note.source.hand === 'left' ? 2 : 1,
-    head: { xml: pitch(note.midi, note.flats, note.source.spell), staccato: note.staccato, finger: note.source.finger },
+    staff: note.source.hand === 'left' || (!note.source.hand && note.midi < 60) ? 2 : 1,
+    head: { xml: pitch(note.midi, note.flats, note.source.spell), staccato: note.staccato, finger: note.source.finger, unplayable: note.source.notPlayable },
   })), true)
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
     measures.push(
       measureOpen(bar, attrs, song) +
-        annotations(song, bar, chords) +
+        annotations(song, bar, chords, 1, song.piano) +
         voiceLinesXml(lines, [1, 2], grid.bars[bar - 1], DIV) +
         (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') +
         '</measure>',
@@ -607,7 +626,7 @@ export function vocalXml(song: Song): string {
     const start = span.startDiv
     const barDivs = span.endDiv - start
     let cursor = start
-    let xml = measureOpen(bar, attrs, song) + annotations(song, bar, true)
+    let xml = measureOpen(bar, attrs, song) + annotations(song, bar, true, 1, song.vocals)
     const rest = (duration: number) => {
       for (const d of pieces(duration, DIV)) xml += `<note><rest/><duration>${d}</duration>${typeOf(d, DIV)}</note>`
     }
@@ -656,16 +675,53 @@ export function instrumentXml(song: Song, track: Track): string {
       startDiv: note.startDiv,
       endDiv: note.endDiv,
       staff: split && note.midi < 60 ? 2 : 1,
-      head: { xml: pitch(base + (fretted ? 12 : 0), keyFlats(song)), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato },
+      head: { xml: pitch(base + (fretted ? 12 : 0), keyFlats(song)), cents: cents ? `${cents > 0 ? '+' : ''}${cents}¢` : undefined, staccato: note.staccato, unplayable: note.source.notPlayable },
     }
   }))
   const measures: string[] = []
   for (let bar = 1; bar <= song.bars; bar++) {
-    measures.push(measureOpen(bar, attrs, song) + annotations(song, bar, true) +
+    measures.push(measureOpen(bar, attrs, song) + annotations(song, bar, true, 1, song.instrumentNotes?.[track.id] ?? []) +
       voiceLinesXml(lines, split ? [1, 2] : [1], grid.bars[bar - 1], DIV) +
       (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') + '</measure>')
   }
   return wrap(track.name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!), measures, track.gmProgram)
+}
+
+/**
+ * A tablature part for a guitar or bass track: each note's string and fret as the practice tab shows them (so a repaired
+ * song gives repaired positions). A note that cannot be played as written has no fret and is bracketed with a ! under it.
+ */
+export function frettedTabXml(song: Song, track: Track, config: FrettedInstrumentConfig): string {
+  const grid = notationGrid(song)
+  const DIV = grid.division
+  const raw = notesForTrack(song, track)
+  const plan = planFrettedTab(raw, config)
+  const places = new Map(raw.map((note, index) => [note, plan[index].position] as const))
+  const notes = notationNotes(raw, track.id, song)
+  const tuning = config.strings.map((string, line) => {
+    const [, name, octave] = /^([A-G])(\d)/.exec(string.openPitch)!
+    return `<staff-tuning line="${line + 1}"><tuning-step>${name}</tuning-step><tuning-octave>${octave}</tuning-octave></staff-tuning>`
+  }).join('')
+  const attrs = `<attributes><divisions>${DIV}</divisions>${timeXml(song)}<clef><sign>TAB</sign><line>5</line></clef><staff-details><staff-lines>${config.strings.length}</staff-lines>${tuning}</staff-details></attributes>`
+  const lines = voiceLines(notes.filter((note) => note.source.beats > 0).map((note) => {
+    const place = places.get(note.source as typeof raw[number])
+    return {
+      startDiv: note.startDiv,
+      endDiv: note.endDiv,
+      staff: 1,
+      head: {
+        xml: pitch(Math.ceil(note.midi - 0.5), keyFlats(song)),
+        tab: place ? { string: place.conventionalStringNumber, fret: place.fret } : undefined,
+        unplayable: !place,
+      },
+    }
+  }))
+  const measures: string[] = []
+  for (let bar = 1; bar <= song.bars; bar++) {
+    measures.push(measureOpen(bar, attrs, song) + voiceLinesXml(lines, [1], grid.bars[bar - 1], DIV) +
+      (bar === song.bars ? '<barline location="right"><bar-style>light-heavy</bar-style></barline>' : '') + '</measure>')
+  }
+  return wrap(`${track.name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!)} tab`, measures, track.gmProgram)
 }
 
 /** The accompaniment as a grand staff: each chord's voicing held in the right hand, its bass note in the left. Plays what the engine plays. */
