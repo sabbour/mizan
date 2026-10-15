@@ -303,6 +303,10 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
         "or another license on the authors' behalf.\n",
     )
     save_license("samples-fluidr3-gm", fluidr3_license)
+    save_license(
+        "asset-webxr-generic-hands",
+        (ROOT / "scripts" / "licenses" / "webxr-generic-hands.txt").read_text(encoding="utf-8"),
+    )
     windows_mit = (OUTPUT_LICENSES / "host-onnxruntime-windowsml.txt").read_text(encoding="utf-8")
     return [
         {
@@ -428,6 +432,16 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             "group": "Fonts & assets",
             "note": "Eight bundled acoustic-kit hits were selected and transcoded from WAV to Ogg Vorbis.",
             "_license": "licenses/samples-sm-drums.txt",
+        },
+        {
+            "name": "WebXR generic hand models",
+            "version": "f4992299601614adbfefd398dc8e281556bb7444",
+            "license": "MIT",
+            "author": "Copyright (c) 2019 Amazon",
+            "url": "https://github.com/immersive-web/webxr-input-profiles/tree/f4992299601614adbfefd398dc8e281556bb7444/packages/assets/profiles/generic-hand",
+            "group": "Fonts & assets",
+            "note": "Bundled left and right connected hand models, unchanged except filenames; posed by Mizan for the optional 3D guitar and bass view.",
+            "_license": "licenses/asset-webxr-generic-hands.txt",
         },
         {
             "name": "FluidR3 General MIDI samples",

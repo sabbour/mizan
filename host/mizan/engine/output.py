@@ -7,6 +7,7 @@ import mido
 from ..meter import bar_index, beat_at_time, song_bar_map, time_at_beat
 from .accompaniment import generate_accompaniment
 from .drums import GM_DRUMS, gm_pitch
+from .gm import GM_PROGRAM_NAMES
 
 
 DETECTED_GM_PROGRAMS = {"clean_electric_guitar": 27}
@@ -31,6 +32,12 @@ def _resolved_gm_program(track: dict) -> int | None:
 
 def exportable_track(track: dict) -> bool:
     if track.get("group") != "detected":
+        return True
+    correction = track.get("instrumentCorrection")
+    if (track.get("instrument") == "other" and isinstance(correction, dict) and
+            type(correction.get("gmProgram")) is int and
+            0 <= correction["gmProgram"] < len(GM_PROGRAM_NAMES) and
+            _valid_gm_program(track) == correction["gmProgram"]):
         return True
     source_instrument = track.get("sourceInstrument")
     return (track.get("instrument") == "other" and type(source_instrument) is str and
@@ -137,6 +144,189 @@ def tempo_changes(song: dict) -> list[tuple[float, float]]:
     return changes
 
 
+def _pitch_bend_plan(event: dict, ticks_per_beat: int) -> dict:
+    start = max(0, round(event["startBeat"] * ticks_per_beat))
+    end = max(start + 1, round((event["startBeat"] + event.get("beats", 0.1)) * ticks_per_beat))
+    pitch = event["midi"]
+    if type(pitch) not in (int, float) or not math.isfinite(pitch):
+        raise ValueError("A MIDI note has an invalid pitch.")
+    base = math.ceil(pitch - 0.5)
+    points = [(start, pitch - base)]
+    bends = event.get("pitchBends", [])
+    if not isinstance(bends, list):
+        raise ValueError("A MIDI pitch-bend curve is invalid.")
+    for point in bends:
+        if (not isinstance(point, dict) or type(point.get("beat")) not in (int, float)
+                or type(point.get("semitones")) not in (int, float)
+                or not math.isfinite(point["beat"]) or not math.isfinite(point["semitones"])
+                or point["beat"] < 0 or point["beat"] >= event.get("beats", 0.1)):
+            raise ValueError("A MIDI pitch-bend curve is invalid.")
+        tick = start + round(point["beat"] * ticks_per_beat)
+        if tick < end:
+            points.append((tick, pitch - base + point["semitones"]))
+    collapsed = []
+    for tick, value in points:
+        if collapsed and collapsed[-1][0] == tick:
+            collapsed[-1] = (tick, value)
+        else:
+            collapsed.append((tick, value))
+    return {"start": start, "end": end, "base": base, "points": collapsed,
+            "hasBends": bool(bends) or pitch != base}
+
+
+def _bend_at(plan: dict, tick: int) -> float:
+    value = plan["points"][0][1]
+    for point_tick, point_value in plan["points"][1:]:
+        if point_tick > tick:
+            break
+        value = point_value
+    return value
+
+
+def _compatible_bend_plans(left: dict, right: dict) -> bool:
+    start, end = max(left["start"], right["start"]), min(left["end"], right["end"])
+    if start >= end:
+        return True
+    changes = {start}
+    changes.update(tick for tick, _ in left["points"] if start < tick < end)
+    changes.update(tick for tick, _ in right["points"] if start < tick < end)
+    return all(math.isclose(_bend_at(left, tick), _bend_at(right, tick), abs_tol=1e-7)
+               for tick in changes)
+
+
+def _export_pitch_bent_midi(midi: mido.MidiFile, song: dict, available: list[int]) -> None:
+    reserved = set()
+    for track in song["tracks"]:
+        if not exportable_track(track) or track["instrument"] == "drums":
+            continue
+        if track["id"] == "vocals":
+            reserved.add(2)
+        elif track["id"] == "accompaniment":
+            reserved.add(1)
+        elif _resolved_gm_program(track) is None:
+            reserved.add(0)
+    free_channels = [channel for channel in available if channel not in reserved]
+    free_channels.extend(channel for channel in (0, 1, 2) if channel not in reserved)
+    channel_programs = {}
+    channel_plans = {}
+    outputs = []
+    end_tick = round((song_bar_map(song)[-1]["startBeat"] + song_bar_map(song)[-1]["beats"])
+                     * midi.ticks_per_beat)
+
+    for track in song["tracks"]:
+        if not exportable_track(track):
+            continue
+        events = _track_events(song, track)
+        output = mido.MidiTrack()
+        output.append(mido.MetaMessage("track_name", name=track["name"]))
+        gm_program = _resolved_gm_program(track)
+        if track["instrument"] == "drums":
+            preferred = 9
+            program = 0
+        elif track["id"] == "vocals":
+            preferred = 2
+            program = 53
+        elif track["id"] == "accompaniment":
+            preferred = 1
+            program = 0
+        elif gm_program is not None:
+            if not free_channels:
+                raise ValueError("MIDI pitch-bend export exceeds the available melodic channels.")
+            preferred = free_channels.pop(0)
+            program = gm_program
+        else:
+            program = 0
+            if 0 in channel_programs:
+                if not free_channels:
+                    raise ValueError("MIDI pitch-bend export exceeds the available melodic channels.")
+                preferred = free_channels.pop(0)
+            else:
+                preferred = 0
+        if preferred != 9:
+            if preferred in channel_programs and channel_programs[preferred] != program:
+                if not free_channels:
+                    raise ValueError("MIDI pitch-bend export exceeds the available melodic channels.")
+                preferred = free_channels.pop(0)
+            channel_programs[preferred] = program
+
+        messages = []
+        used = set()
+        owned = [preferred] if preferred != 9 else []
+        for event in sorted(events, key=lambda item: item["startBeat"]):
+            if preferred == 9:
+                start = max(0, round(event["startBeat"] * midi.ticks_per_beat))
+                end = max(start + 1, round((event["startBeat"] + event.get("beats", 0.1))
+                                           * midi.ticks_per_beat))
+                pitch = gm_pitch(event)
+                messages.extend([
+                    (start, 1, mido.Message("note_on", channel=9, note=pitch,
+                                            velocity=max(1, min(127, round(event["velocity"] * 127))))),
+                    (end, -1, mido.Message("note_off", channel=9, note=pitch, velocity=0)),
+                ])
+                continue
+
+            plan = _pitch_bend_plan(event, midi.ticks_per_beat)
+            channel = next((candidate for candidate in owned
+                            if all(_compatible_bend_plans(plan, other)
+                                   for other in channel_plans.get(candidate, []))), None)
+            if channel is None:
+                if not free_channels:
+                    raise ValueError(
+                        "Pitch-bend export needs more than the 15 available melodic MIDI channels "
+                        "to preserve simultaneous independent bends."
+                    )
+                channel = free_channels.pop(0)
+                owned.append(channel)
+                channel_programs[channel] = program
+            channel_programs[channel] = program
+            channel_plans.setdefault(channel, []).append(plan)
+            used.add(channel)
+            for tick, semitones in plan["points"]:
+                messages.append((tick, 0, (channel, semitones)))
+            messages.extend([
+                (plan["start"], 1, mido.Message("note_on", channel=channel, note=plan["base"],
+                                                velocity=max(1, min(127, round(event["velocity"] * 127))))),
+                (plan["end"], -1, mido.Message("note_off", channel=channel, note=plan["base"], velocity=0)),
+            ])
+
+        if preferred == 9:
+            used.add(9)
+        outputs.append((output, messages, used))
+
+    channel_ranges = {}
+    for channel, plans in channel_plans.items():
+        if any(plan["hasBends"] for plan in plans):
+            max_offset = max(abs(value) for plan in plans for _, value in plan["points"])
+            range_cents = max(200, math.ceil(max_offset * 100 - 1e-9))
+            if range_cents > 12799:
+                raise ValueError("MIDI pitch-bend range exceeds the format's 127-semitone limit.")
+            channel_ranges[channel] = (range_cents // 100, range_cents % 100)
+
+    for output, messages, used in outputs:
+        for channel in sorted(used):
+            if channel == 9:
+                continue
+            output.append(mido.Message("program_change", channel=channel, program=channel_programs[channel]))
+            if channel in channel_ranges:
+                semitones, cents = channel_ranges[channel]
+                for control, value in ((101, 0), (100, 0), (6, semitones), (38, cents),
+                                       (101, 127), (100, 127)):
+                    output.append(mido.Message("control_change", channel=channel, control=control, value=value))
+        previous = 0
+        for tick, priority, message in sorted(messages, key=lambda item: (item[0], item[1])):
+            if isinstance(message, tuple):
+                channel, semitones = message
+                semitones_range, cents = channel_ranges.get(channel, (2, 0))
+                full_range = semitones_range + cents / 100
+                wheel = max(-8192, min(8191, round(semitones / full_range * 8192)))
+                message = mido.Message("pitchwheel", channel=channel, pitch=wheel)
+            message.time = tick - previous
+            output.append(message)
+            previous = tick
+        output.append(mido.MetaMessage("end_of_track", time=max(0, end_tick - previous)))
+        midi.tracks.append(output)
+
+
 def export_midi(song: dict, path: Path) -> None:
     midi = mido.MidiFile(ticks_per_beat=480)
     tempo = mido.MidiTrack()
@@ -166,6 +356,15 @@ def export_midi(song: dict, path: Path) -> None:
         for note in _track_events(song, track)
     )
     available = [channel for channel in range(3, 16) if channel != 9]
+    has_bend_curves = any(
+        note.get("pitchBends")
+        for track in song["tracks"] if track["instrument"] != "drums" and exportable_track(track)
+        for note in _track_events(song, track)
+    )
+    if has_bend_curves:
+        _export_pitch_bent_midi(midi, song, available)
+        midi.save(path)
+        return
     for track in song["tracks"]:
         if not exportable_track(track):
             continue
@@ -341,6 +540,15 @@ def export_musicxml(song: dict, path: Path) -> None:
                 if position != cursor:
                     move = ET.SubElement(measure, "forward" if position > cursor else "backup")
                     ET.SubElement(move, "duration").text = str(abs(position - cursor))
+                if onset == start and event.get("pitchBends"):
+                    description = "; ".join(
+                        f"{point['semitones']:+.3f} semitones at +{point['beat']:.3f} beat"
+                        for point in event["pitchBends"]
+                    )
+                    direction = ET.SubElement(measure, "direction", placement="above")
+                    ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = (
+                        f"MIDI pitch bend from the written starting pitch: {description}"
+                    )
                 note = ET.SubElement(measure, "note")
                 pitch = ET.SubElement(note, "pitch")
                 midi_pitch = event["midi"]

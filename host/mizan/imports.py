@@ -58,7 +58,32 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
             events.append((tick, track_index, index, message))
         end_tick = max(end_tick, tick)
     programs, bends, active = {}, {}, {}
-    rpn, bend_range = {}, {}
+    rpn, parameter_select, bend_range = {}, {}, {}
+
+    def channel_bend(channel: int | None) -> float:
+        if channel == 9:
+            return 0.0
+        semitones, cents = bend_range.get(channel, (2, 0))
+        return bends.get(channel, 0) / 8192 * (semitones + cents / 100)
+
+    def update_held_bends(channel: int | None, tick: int) -> None:
+        if channel == 9:
+            return
+        current = channel_bend(channel)
+        for (active_channel, _), starts in active.items():
+            if active_channel != channel:
+                continue
+            for note in starts:
+                delta = current - note["initialBend"]
+                if not math.isclose(delta, note["lastBend"], abs_tol=1e-12):
+                    point = {"beat": round((tick - note["tick"]) / midi.ticks_per_beat, 9),
+                             "semitones": delta}
+                    if note["pitchBends"] and note["pitchBends"][-1]["beat"] == point["beat"]:
+                        note["pitchBends"][-1] = point
+                    else:
+                        note["pitchBends"].append(point)
+                    note["lastBend"] = delta
+
     for tick, track_index, _, message in sorted(events, key=lambda event: event[:3]):
         channel = getattr(message, "channel", None)
         if message.type == "track_name":
@@ -86,33 +111,38 @@ def parse_midi(data: bytes) -> tuple[str | None, float, float, int, list[dict]]:
             parameter = list(rpn.get(channel, (127, 127)))
             parameter[0 if message.control == 101 else 1] = message.value
             rpn[channel] = tuple(parameter)
-        elif message.type == "control_change" and message.control in (6, 38) and rpn.get(channel) == (0, 0):
-            if any(key[0] == channel and starts for key, starts in active.items()):
-                raise InvalidFile("Changing MIDI pitch-bend range during held notes is not supported.")
+            parameter_select[channel] = "rpn"
+        elif message.type == "control_change" and message.control in (99, 98):
+            parameter_select[channel] = "nrpn"
+        elif (message.type == "control_change" and message.control in (6, 38)
+              and parameter_select.get(channel) == "rpn" and rpn.get(channel) == (0, 0)):
             current = list(bend_range.get(channel, (2, 0)))
             current[0 if message.control == 6 else 1] = message.value
             if current[1] > 99:
                 raise InvalidFile("The MIDI pitch-bend range is invalid.")
             bend_range[channel] = tuple(current)
+            update_held_bends(channel, tick)
         elif message.type == "pitchwheel":
-            if channel != 9 and message.pitch != bends.get(channel, 0) and any(
-                key[0] == channel and starts for key, starts in active.items()
-            ):
-                raise InvalidFile("Changing MIDI pitch bends during held notes are not supported.")
             bends[channel] = message.pitch
+            update_held_bends(channel, tick)
         elif message.type == "note_on" and message.velocity > 0:
-            semitones, cents = bend_range.get(channel, (2, 0))
-            offset = bends.get(channel, 0) / 8192 * (semitones + cents / 100) if channel != 9 else 0
+            offset = channel_bend(channel)
             active.setdefault((channel, message.note), []).append(
-                (tick, message.velocity, offset, track_index, programs.get(channel)))
+                {"tick": tick, "velocity": message.velocity, "offset": offset, "track": track_index,
+                 "program": programs.get(channel), "initialBend": offset, "lastBend": 0.0,
+                 "pitchBends": []})
         elif message.type in ("note_off", "note_on"):
             starts = active.get((channel, message.note))
             if starts:
-                start, velocity, offset, owner, program = starts.pop(0)
-                notes_by_track[owner].append(
-                    {"midi": message.note + offset, "startBeat": start / midi.ticks_per_beat,
-                     "beats": max(1 / 64, (tick - start) / midi.ticks_per_beat),
-                     "velocity": velocity / 127, "channel": channel, "program": program})
+                note = starts.pop(0)
+                release_beat = (tick - note["tick"]) / midi.ticks_per_beat
+                event = {"midi": message.note + note["offset"], "startBeat": note["tick"] / midi.ticks_per_beat,
+                         "beats": max(1 / 64, release_beat),
+                         "velocity": note["velocity"] / 127, "channel": channel, "program": note["program"]}
+                pitch_bends = [point for point in note["pitchBends"] if point["beat"] < round(release_beat, 9)]
+                if pitch_bends:
+                    event["pitchBends"] = pitch_bends
+                notes_by_track[note["track"]].append(event)
     parts = []
     for track_index, notes in enumerate(notes_by_track):
         if not notes:
@@ -353,6 +383,11 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
                          "beats": round(note["beats"], 6),
                          "hand": note.get("hand", "left" if note["midi"] < 60 else "right"),
                          "velocity": round(note["velocity"], 4)}
+                if note.get("pitchBends"):
+                    event["pitchBends"] = [
+                        {"beat": round(point["beat"], 9), "semitones": round(point["semitones"], 9)}
+                        for point in note["pitchBends"]
+                    ]
                 if soundfont:
                     instrument_notes.setdefault(track_id, []).append(
                         {key: value for key, value in event.items() if key != "hand"})

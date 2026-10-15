@@ -10,7 +10,8 @@ from typing import Any
 from uuid import uuid4
 
 from .errors import (FolderNameExists, FolderNotFound, InvalidFolderName, InvalidPosition,
-                     ScoreTrackAmbiguous, ScoreTrackNotFound, SongNotFound)
+                     InvalidScoreTrackInstrument, ScoreTrackAmbiguous, ScoreTrackInstrumentAmbiguous,
+                     ScoreTrackInstrumentNotEditable, ScoreTrackNotFound, SongNotFound)
 from .paths import home
 
 
@@ -309,18 +310,193 @@ class LibraryStore:
                   json.dumps(tempo_map), song_id))
         return self.get(song_id)
 
-    def delete_score_track(self, song_id: str, track_id: str) -> dict:
-        from .engine.output import export_midi, export_musicxml, exportable_track
+    def _commit_score_revision(self, song_id: str, entry: dict, path: Path, song: dict,
+                               export_song: dict, parts: list[str], position: dict | None,
+                               stale_message: str, *, preserve_position: bool = False) -> dict:
+        from .engine.output import export_midi, export_musicxml
 
+        revision = uuid4().hex
+        analysis = path.with_name(f"analysis-{revision}.json")
+        midi = path.with_name(f"score-{revision}.mid")
+        musicxml = path.with_name(f"score-{revision}.musicxml")
+        artifacts = {**entry["artifacts"], "analysis": str(analysis),
+                     "midi": str(midi), "musicxml": str(musicxml)}
+        try:
+            analysis.write_text(json.dumps(song, ensure_ascii=True, allow_nan=False), encoding="utf-8")
+            export_midi(export_song, midi)
+            export_musicxml(export_song, musicxml)
+            with closing(self._connect()) as connection, connection:
+                if preserve_position:
+                    cursor = connection.execute("""
+                        UPDATE songs SET parts = ?, artifacts = ?, song_path = ?
+                        WHERE id = ? AND song_path = ?
+                    """, (json.dumps(parts), json.dumps(artifacts), str(analysis), song_id, str(path)))
+                else:
+                    cursor = connection.execute("""
+                        UPDATE songs SET parts = ?, position = ?, artifacts = ?, song_path = ?
+                        WHERE id = ? AND song_path = ?
+                    """, (json.dumps(parts), json.dumps(position), json.dumps(artifacts),
+                          str(analysis), song_id, str(path)))
+                if cursor.rowcount != 1:
+                    raise SongNotFound(stale_message)
+        except Exception:
+            for output in (analysis, midi, musicxml):
+                output.unlink(missing_ok=True)
+            raise
+        return self.get(song_id)
+
+    @staticmethod
+    def _score_for_export(song: dict, tracks: list[dict]) -> dict:
+        from .engine.output import exportable_track
+
+        export_song = {**song}
+        for item in tracks:
+            if item.get("group") == "detected":
+                if exportable_track(item):
+                    export_song.setdefault(item["id"], song.get("instrumentNotes", {}).get(item["id"], []))
+                continue
+            if item.get("group") == "creative":
+                if item["id"] in song:
+                    export_song[item["id"]] = song[item["id"]]
+                continue
+            if item["instrument"] == "other":
+                if exportable_track(item):
+                    export_song.setdefault(item["id"], song.get("instrumentNotes", {}).get(item["id"], []))
+                continue
+            source = song.get(item["instrument"], [])
+            export_song[item["id"]] = [event for event in source
+                                       if event.get("trackId", item["id"]) == item["id"]
+                                       or ("trackId" not in event and sum(
+                                           part["instrument"] == item["instrument"] for part in tracks
+                                           if part.get("group") != "creative") == 1)]
+        export_song["tracks"] = [item for item in tracks if item["id"] in export_song]
+        return export_song
+
+    def change_score_track_instrument(self, song_id: str, track_id: str, gm_program: int) -> dict:
+        from .engine.gm import GM_PROGRAM_NAMES, gm_program_name
+
+        if type(gm_program) is not int or not 0 <= gm_program < len(GM_PROGRAM_NAMES):
+            raise InvalidScoreTrackInstrument()
+        if not isinstance(track_id, str) or not track_id:
+            raise ScoreTrackNotFound()
+        entry = self.get(song_id)
+        path = Path(entry["song_path"])
+        song = json.loads(path.read_text(encoding="utf-8"))
+        tracks = song.get("tracks")
+        if not isinstance(tracks, list):
+            raise ScoreTrackNotFound()
+        matches = [item for item in tracks if isinstance(item, dict) and item.get("id") == track_id]
+        if len(matches) > 1:
+            raise ScoreTrackInstrumentAmbiguous()
+        track = matches[0] if matches else None
+        if track is None or track.get("group") == "creative":
+            raise ScoreTrackNotFound()
+        instrument = track.get("instrument")
+        if instrument not in ("piano", "vocals", "other"):
+            raise ScoreTrackInstrumentNotEditable()
+
+        instrument_notes = song.get("instrumentNotes")
+        if instrument_notes is None:
+            instrument_notes = {}
+        if not isinstance(instrument_notes, dict):
+            raise ScoreTrackInstrumentAmbiguous()
+        for owner_id, notes in instrument_notes.items():
+            if not isinstance(owner_id, str) or not isinstance(notes, list) or any(
+                    not isinstance(event, dict) or event.get("trackId", owner_id) != owner_id
+                    for event in notes):
+                raise ScoreTrackInstrumentAmbiguous()
+        for owner_id, notes in instrument_notes.items():
+            if owner_id != track_id and any(event.get("trackId") == track_id for event in notes):
+                raise ScoreTrackInstrumentAmbiguous()
+
+        if instrument == "other":
+            events = instrument_notes.get(track_id)
+            if not isinstance(events, list):
+                raise ScoreTrackInstrumentAmbiguous()
+            selected_events = events
+        else:
+            source_events = song.get(instrument)
+            if not isinstance(source_events, list) or any(not isinstance(event, dict) for event in source_events):
+                raise ScoreTrackInstrumentAmbiguous()
+            same_instrument = [
+                item for item in tracks
+                if isinstance(item, dict) and item.get("group") != "creative" and item.get("instrument") == instrument
+            ]
+            same_ids = [item.get("id") for item in same_instrument]
+            if (any(not isinstance(owner_id, str) or not owner_id for owner_id in same_ids) or
+                    len(same_ids) != len(set(same_ids)) or track_id in instrument_notes):
+                raise ScoreTrackInstrumentAmbiguous()
+            selected_events = []
+            remaining_events = []
+            for event in source_events:
+                owner_id = event.get("trackId")
+                if owner_id is None:
+                    if "trackId" in event or len(same_instrument) != 1:
+                        raise ScoreTrackInstrumentAmbiguous()
+                    selected_events.append(event)
+                elif owner_id == track_id:
+                    selected_events.append(event)
+                elif owner_id in same_ids:
+                    remaining_events.append(event)
+                else:
+                    raise ScoreTrackInstrumentAmbiguous()
+
+        updated_track = dict(track)
+        correction = updated_track.get("instrumentCorrection")
+        if not isinstance(correction, dict):
+            original_program = updated_track.get("gmProgram")
+            if type(original_program) is not int or not 0 <= original_program <= 127:
+                source_instrument = updated_track.get("sourceInstrument")
+                original_program = None
+                if source_instrument == "clean_electric_guitar":
+                    original_program = 27
+            correction = {
+                "detectedName": updated_track.get("name", ""),
+                "detectedInstrument": instrument,
+                "detectedGmProgram": original_program,
+                "sourceInstrument": updated_track.get("sourceInstrument"),
+            }
+        updated_track["instrumentCorrection"] = {**correction, "gmProgram": gm_program}
+        updated_track["gmProgram"] = gm_program
+        updated_track["name"] = gm_program_name(gm_program)
+        updated_track["instrument"] = "other"
+        updated_tracks = [updated_track if item is track else item for item in tracks]
+        updated_song = {
+            **song,
+            "tracks": updated_tracks,
+            "instrumentNotes": {**instrument_notes, track_id: selected_events},
+        }
+        if instrument != "other":
+            updated_song[instrument] = remaining_events
+        parts = [item["name"] for item in updated_tracks if item.get("group") != "creative"]
+        export_song = self._score_for_export(updated_song, updated_tracks)
+        return self._commit_score_revision(
+            song_id, entry, path, updated_song, export_song, parts, None,
+            "The saved score changed while changing this instrument. Reopen the song and try again.",
+            preserve_position=True,
+        )
+
+    def delete_score_track(self, song_id: str, track_id: str) -> dict:
         entry = self.get(song_id)
         if not isinstance(track_id, str):
             raise ScoreTrackNotFound()
         path = Path(entry["song_path"])
         song = json.loads(path.read_text(encoding="utf-8"))
+
+        def deletable(item: dict) -> bool:
+            if item.get("group") == "creative":
+                return False
+            if item["instrument"] in ("piano", "drums", "vocals"):
+                return True
+            correction = item.get("instrumentCorrection")
+            return item["instrument"] == "other" and (
+                item.get("group") == "detected"
+                or isinstance(correction, dict)
+                and correction.get("detectedInstrument") in ("piano", "vocals")
+            )
+
         track = next((item for item in song["tracks"]
-                      if item["id"] == track_id and item.get("group") != "creative"
-                      and (item["instrument"] in ("piano", "drums", "vocals")
-                           or item["instrument"] == "other" and item.get("group") == "detected")), None)
+                      if item["id"] == track_id and deletable(item)), None)
         if track is None:
             raise ScoreTrackNotFound()
         instrument = track["instrument"]
@@ -355,46 +531,11 @@ class LibraryStore:
                         "solo": [value for value in position["solo"] if value != track_id]}
 
         # Exports contain only the remaining score; imported originals and recording stems stay untouched.
-        export_song = {**song}
-        for item in remaining:
-            if item.get("group") == "detected":
-                if exportable_track(item):
-                    export_song[item["id"]] = song.get("instrumentNotes", {}).get(item["id"], [])
-                continue
-            if item.get("group") == "creative":
-                if item["id"] in song:
-                    export_song[item["id"]] = song[item["id"]]
-                continue
-            source = song.get(item["instrument"], [])
-            export_song[item["id"]] = [event for event in source
-                                       if event.get("trackId", item["id"]) == item["id"]
-                                       or ("trackId" not in event and sum(
-                                           part["instrument"] == item["instrument"] for part in remaining
-                                           if part.get("group") != "creative") == 1)]
-        export_song["tracks"] = [item for item in remaining if item["id"] in export_song]
-        revision = uuid4().hex
-        analysis = path.with_name(f"analysis-{revision}.json")
-        midi = path.with_name(f"score-{revision}.mid")
-        musicxml = path.with_name(f"score-{revision}.musicxml")
-        artifacts = {**entry["artifacts"], "analysis": str(analysis),
-                     "midi": str(midi), "musicxml": str(musicxml)}
-        try:
-            analysis.write_text(json.dumps(song, ensure_ascii=True, allow_nan=False), encoding="utf-8")
-            export_midi(export_song, midi)
-            export_musicxml(export_song, musicxml)
-            with closing(self._connect()) as connection, connection:
-                cursor = connection.execute("""
-                    UPDATE songs SET parts = ?, position = ?, artifacts = ?, song_path = ?
-                    WHERE id = ? AND song_path = ?
-                """, (json.dumps(parts), json.dumps(position), json.dumps(artifacts),
-                      str(analysis), song_id, str(path)))
-                if cursor.rowcount != 1:
-                    raise SongNotFound("The saved score changed while deleting this track. Reopen the song and try again.")
-        except Exception:
-            for output in (analysis, midi, musicxml):
-                output.unlink(missing_ok=True)
-            raise
-        return self.get(song_id)
+        export_song = self._score_for_export(song, remaining)
+        return self._commit_score_revision(
+            song_id, entry, path, song, export_song, parts, position,
+            "The saved score changed while deleting this track. Reopen the song and try again.",
+        )
 
     def delete(self, song_id: str) -> None:
         entry = self.get(song_id)

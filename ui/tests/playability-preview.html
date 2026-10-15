@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Playability visual check</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      // Open /tests/playability-preview.html?case=piano or ?case=guitar&view=tab (or view=guitar for the 3D fretboard).
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { Workspace } from '/src/workspace/Workspace.tsx'
+      import { buildSong } from '/src/workspace/song.ts'
+      import '/src/index.css'
+
+      const query = new URLSearchParams(location.search)
+      const kind = query.get('case') === 'guitar' ? 'guitar' : 'piano'
+      const note = (midi, startBeat, beats, extra = {}) => ({ midi, startBeat, beats, ...extra })
+      const song = buildSong()
+      song.chords = []
+      if (kind === 'piano') {
+        // A transcription that gave the right hand seven notes at once, a left hand two octaves wide, and eleven keys at once.
+        song.tracks = [{ id: 'piano', instrument: 'piano', name: 'Piano', detail: 'Both hands, two staves' }]
+        song.piano = [
+          note(48, 0, 4, { hand: 'left' }),
+          ...[60, 62, 64, 65, 67, 69, 71].map((m) => note(m, 0, 2, { hand: 'right' })),
+          note(36, 4, 2, { hand: 'left' }), note(48, 4, 2, { hand: 'left' }), note(60, 4, 2, { hand: 'left' }),
+          note(72, 4, 2, { hand: 'right' }), note(74, 4, 2, { hand: 'right' }),
+          ...Array.from({ length: 11 }, (_, i) => note(50 + i, 8, 2, { hand: i < 5 ? 'left' : 'right' })),
+          note(43, 12, 4, { hand: 'left' }), note(67, 12, 1, { hand: 'right' }), note(71, 13, 1, { hand: 'right' }), note(74, 14, 2, { hand: 'right' }),
+        ]
+      } else {
+        const track = { id: 'gtr', instrument: 'other', name: 'Electric guitar', detail: 'Draft transcription', gmProgram: 27 }
+        song.tracks = [track]
+        song.piano = []
+        song.instrumentNotes = {
+          gtr: [
+            note(52, 0, 4), note(50, 1, 1),
+            note(47, 4, 2, { string: 2, fret: 2 }), note(58, 4, 2, { string: 3, fret: 8 }),
+            ...[40, 45, 50, 55, 59, 64, 69].map((m) => note(m, 8, 2)),
+            note(48, 12, 4), note(52, 12.5, 3.5), note(55, 13, 3), note(60, 13.5, 2.5), note(64, 14, 2),
+          ],
+        }
+      }
+      const defaults = { piano: query.get('view') ?? 'keyboard', guitar: query.get('view') ?? 'tab', click: false }
+      createRoot(document.getElementById('root')).render(
+        React.createElement(Workspace, { song, songId: `playability-${kind}`, note: 'Playability preview', defaults }),
+      )
+    </script>
+  </body>
+</html>

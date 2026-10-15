@@ -6,24 +6,71 @@ resources in an account that you own.
 
 ## Prepare account access
 
-Set up each provider's command-line credentials before you enter its resource
-settings. Do not enter passwords, access keys, or provider tokens in Mizan.
+Mizan does not install provider CLIs or sign in for you. Set up your saved
+sign-in outside Mizan, under the same Windows account that runs Mizan. Do not
+enter passwords, access keys, or provider tokens in Mizan. A CLI is optional
+when Mizan already has a working supported sign-in.
 
-Prepare access for each provider before setup:
+- **Azure:** Mizan uses your saved local Azure sign-in, not your browser
+  sign-in. Sign in with Azure CLI or an already configured supported tool such
+  as Azure PowerShell. The CLI is optional if that tool is already set up.
+  Install
+  [Azure CLI for Windows](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows)
+  if needed, then verify and sign in:
 
-- **Azure:** Install Azure CLI. Run `az login`. Use a subscription with A100 quota in a supported region. Other Azure Identity credentials also work.
-- **Google Cloud:** Install Google Cloud CLI. Run `gcloud auth application-default login`. `gcloud auth login` alone does not set up Application Default Credentials for Mizan.
-- **AWS:** Install AWS CLI. Create or sign in to a named profile outside Mizan. Use `aws configure sso` or `aws configure`.
+  ```powershell
+  az --version
+  az login
+  ```
 
-Google Cloud uses the
-configured Application Default Credentials. AWS uses the selected profile and
-region through `boto3.Session`. Keep these credentials in their local provider
-tools.
+- **Google Cloud:** Mizan needs a saved application login called Application
+  Default Credentials (ADC) for this Windows account. Browser sign-in and
+  `gcloud auth login` alone do not set this up. The
+  [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) is optional
+  when another supported ADC source is already configured. If ADC is missing,
+  verify and create it under Mizan's Windows account:
+
+  ```powershell
+  gcloud --version
+  gcloud auth application-default login
+  ```
+
+  Then select **Refresh projects** in Mizan.
+
+- **AWS:** Mizan uses the AWS profile you enter, not your browser sign-in.
+  Other saved credential types supported by the AWS SDK remain available; AWS
+  CLI is optional if the selected profile already works. `aws configure`
+  remains an option for a basic profile. For IAM Identity Center, install
+  [AWS CLI v2 for Windows](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html),
+  verify the CLI, then configure and sign in to the profile you will enter in
+  Mizan. These commands use `mizan` as a simple example; replace it with your
+  profile name:
+
+  ```powershell
+  aws --version
+  aws configure sso --profile "mizan"
+  aws sso login --profile "mizan"
+  ```
+
+If PowerShell says `az`, `gcloud`, or `aws` is not recognized, the CLI is
+missing or its `PATH` is not set; this is not a cloud sign-in failure. Install
+the CLI, or use its installer to add the installed CLI's `bin` directory to
+`PATH`, then open a **new PowerShell window** and verify the corresponding
+`--version` command. Run CLI sign-in commands and Mizan as the same Windows
+user so they use the intended local credentials.
+
+Google Cloud project discovery uses ADC to list active projects visible to
+that credential. It is separate from **Check Google Cloud access**, which is
+a readiness check and does not list projects or create resources. If the list
+is empty, check project membership and refresh.
 
 ## Provider resources and limits
 
 Azure keeps the existing Container Apps GPU Jobs, Blob Storage, and Azure
-Container Registry path. Select a subscription and an A100-supported region.
+Container Registry path. Select an active, billing-enabled subscription and a
+region offered by Mizan with available A100 quota and capacity. Subscription
+access must allow resource creation; scoped role assignments may require an
+administrator.
 The setup fields include `subscriptionId`, `location`, `resourceGroup`,
 `storageAccount`, `container`, `jobName`, `registry`, `environment`, and
 `identity`. The first network choice uses an existing virtual network
@@ -39,19 +86,29 @@ their current choice. Mizan
 gets the tenant ID from the selected subscription. It builds the worker in
 your registry. Do not use the shared image procedure for Azure.
 
-Google Cloud uses Batch and Cloud Storage. Enter `projectId`, `location`,
+Google Cloud uses Batch and Cloud Storage. Choose an active project visible to
+ADC with billing enabled; project listing requires access to view the project.
+For setup, the account also needs access to use the selected project's required
+APIs and resources; ask an administrator if Mizan reports denied access.
+Enter `projectId`, `location`,
 `region`, `bucket`, `serviceAccount`, `machineType`, and `accelerator`.
 `location` and `region` must match. Mizan supports G2 L4 machines only:
 `g2-standard-4` with `nvidia-l4` supports Small and Medium.
 `g2-standard-8` with `nvidia-l4` supports Small, Medium, and Large.
 Choose a region that offers the selected machine and has the required GPU
-quota. Use a private bucket and a service account in the selected project.
+quota and capacity. Use a private bucket and a service account in the selected
+project. Cost approval remains separate from credentials and project discovery.
 
-AWS uses Batch on managed EC2 GPU instances and S3. AWS Fargate is not
-supported. Enter `profile`, `region`, `accountId`, `bucket`,
+AWS uses Batch on managed EC2 GPU instances and S3. The selected profile must
+identify the intended active, billing-enabled AWS account; Mizan confirms the
+identity through STS. Approved setup needs access to the selected region's
+Batch, EC2, S3, IAM, and network resources; an administrator may need to grant
+that access. AWS Fargate is not supported. Enter `profile`, `region`,
+`accountId`, `bucket`,
 `computeEnvironment`, `jobQueue`, `jobDefinition`, and `role`. Mizan supports
 `g5.4xlarge` only. Its Batch compute environment must use managed EC2 and that
-instance type. The region must offer this instance and have enough capacity.
+instance type. The region must offer this instance and have enough GPU quota
+and capacity.
 Use a private S3 bucket. Set both `subnetIds` and `securityGroupIds`, or leave
 both empty so approved setup can create a private worker network.
 

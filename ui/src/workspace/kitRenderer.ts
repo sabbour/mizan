@@ -1,6 +1,6 @@
 import type { HatState } from './kit'
-import type { AnyTarget, Item, Prepared, Vec3 } from './kitAsset'
-import type { Look } from './prefs'
+import type { AnyTarget, Item, MaterialView, Prepared, Vec3 } from './kitAsset'
+import type { KitType, Look } from './prefs'
 
 /**
  * WebGL renderer for a prepared kit. One program serves every look: the look picks the shading model (PBR,
@@ -27,8 +27,14 @@ export type Feedback = {
   press?: number
 }
 export type FrameState = { hat: HatState; feedback: ReadonlyMap<AnyTarget, Feedback>; selected: ReadonlySet<AnyTarget> }
+/**
+ * A mesh drawn on top of the kit in world space and rewritten by the caller every frame (the hands and drumsticks).
+ * `data` has 12 floats per vertex like a kit item; the renderer re-uploads it on each draw while `visible` is set.
+ */
+export type Overlay = { name: string; data: Float32Array; index: Uint32Array; material: MaterialView; alpha: number; visible: boolean; /** Draw only outward faces (for translucent tubes). */ cull?: boolean; /** Fade out with the vertex uv.x = 2 + fade (a hand's short wrist). */ fade?: boolean }
 
 const LOOK_INDEX: Record<Look, number> = { Realistic: 0, ClayStudyModel: 1, NeonRhythm: 2, TechnicalBlueprint: 3 }
+export const usesElectronicStudioLighting = (kit: KitType | undefined, look: Look) => kit === 'electronic' && look === 'Realistic'
 /** Background and floor tone per look; the neon stage is dark for contrast. Blueprint outlines its translucent parts too. */
 const STAGE: Record<Look, { bg: Vec3; floor: Vec3; shadow: number; ink?: Vec3; inkWidth?: number; inkAll?: boolean }> = {
   Realistic: { bg: [1, 1, 1], floor: [0.91, 0.91, 0.915], shadow: 0.075 },
@@ -56,7 +62,7 @@ uniform vec4 baseColor; uniform float metal; uniform float rough; uniform vec3 e
 uniform sampler2D baseTex; uniform sampler2D ormTex; uniform sampler2D normalTex; uniform sampler2D emisTex;
 uniform float hasBase; uniform float hasOrm; uniform float hasNormal; uniform float hasEmis;
 uniform float look; uniform vec3 eye; uniform float flatten; uniform float shadowAlpha; uniform float floorPass; uniform vec3 floorColor; uniform vec3 bg;
-uniform float ink; uniform vec3 inkColor; uniform float halo; uniform float alpha;
+uniform float ink; uniform vec3 inkColor; uniform float halo; uniform float alpha; uniform float electronicStudio;
 uniform float pulse; uniform vec3 tint; uniform vec3 tint2; uniform float split; uniform float upcoming; uniform vec3 upTint;
 varying vec3 vn; varying vec3 wp; varying vec2 vuv; varying vec3 vt; varying float vw; varying vec3 lp;
 float bands(float x, float steps) { float s = x * steps; return (floor(s) + smoothstep(0.35, 0.65, fract(s))) / steps; }
@@ -85,7 +91,7 @@ void main() {
     N = normalize(mix(N, facet, 0.18));
   }
   if (ink > 0.0) {
-    if (dot(N, V) > 0.0) discard;
+    if (dot(N, V) > 0.0 || vuv.x > 2.3) discard;
     gl_FragColor = vec4(inkColor, 1.0);
     return;
   }
@@ -117,6 +123,7 @@ void main() {
   float occlusion = mix(0.6, 1.0, smoothstep(0.0, 0.45, wp.y)) * ao;
   vec3 col;
   float a = alpha;
+  if (vuv.x > 1.5) a *= 1.0 - smoothstep(0.2, 1.0, vuv.x - 2.0);
   if (look < 0.5) {
     float shine = mix(220.0, 3.0, pow(r, 0.6));
     vec3 F0 = mix(vec3(0.04), base, mt);
@@ -131,6 +138,18 @@ void main() {
     vec3 ambient = mix(vec3(0.34, 0.33, 0.32), vec3(0.62, 0.64, 0.68), 0.5 + 0.5 * N.y) * occlusion;
     vec3 diffuse = base * (ambient + vec3(1.0, 0.97, 0.92) * k * 0.85 + vec3(0.82, 0.88, 1.0) * f * 0.3 + rl * 0.15);
     col = diffuse * (1.0 - mt) + env * F * occlusion * mix(0.6, 1.0, mt) + spec * F;
+    if (electronicStudio > 0.5) {
+      vec3 softKey = normalize(vec3(-0.45, 0.82, 0.35));
+      vec3 softBounce = normalize(vec3(0.65, 0.3, 0.7));
+      float darkness = 1.0 - smoothstep(0.2, 0.55, dot(base, vec3(0.2126, 0.7152, 0.0722)));
+      float keyWrap = max(dot(N, softKey) * 0.6 + 0.4, 0.0);
+      float bounceWrap = max(dot(N, softBounce) * 0.55 + 0.45, 0.0);
+      float panel = pow(max(dot(N, normalize(softKey + V)), 0.0), mix(14.0, 2.8, r));
+      float edge = pow(1.0 - facing, 1.6);
+      col += darkness * (vec3(0.04, 0.043, 0.048) * keyWrap + vec3(0.015, 0.017, 0.02) * bounceWrap);
+      col += darkness * vec3(0.72, 0.76, 0.82) * panel * 0.14;
+      col += darkness * vec3(0.52, 0.57, 0.64) * edge * 0.14;
+    }
     col = vec3(1.0) - exp(-col * 1.15);
   } else if (look < 1.5) {
     // Hand-painted clay: matte clay forms under a warm painted light. Soft toon bands between a cool violet shade
@@ -179,6 +198,10 @@ const rotX = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new
 const rotZ = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }
 const HAT_OFFSET: Record<HatState, string> = { closed: 'closed', pedal: 'pedalClosed', 'half-open': 'partiallyOpen', open: 'fullyOpen' }
 
+/** How far the top hi-hat cymbal sits above (or below) its rest height in a hat state. */
+export const hatOffsetOf = (prepared: Pick<Prepared, 'hatStates'>, hat: HatState) =>
+  hat === 'pedal' ? Math.max(prepared.hatStates.pedalClosed ?? 0, prepared.hatStates.closed ?? 0) : prepared.hatStates[HAT_OFFSET[hat]] ?? 0
+
 /** The local motion of a part for its piece's feedback: press, wobble, hat travel or swing. `hatOpen` (0 closed, 1 open)
  *  scales the top hi-hat's wobble: a closed hat is clamped against the bottom cymbal and does not rock. */
 export function motionMatrix(item: Pick<Item, 'motion' | 'angle' | 'target'>, fb: Feedback | undefined, hatOffset: number, hatOpen = 1): Float32Array {
@@ -211,12 +234,14 @@ export class KitRenderer {
   private at: Record<string, WebGLUniformLocation | null>
   private attrs: number[]
   private items: Uploaded[] = []
+  private overlays: (Overlay & { vbo: WebGLBuffer; ibo: WebGLBuffer; count: number })[] = []
   private floor: { vbo: WebGLBuffer; ibo: WebGLBuffer; count: number }
   private textures = new Map<number, WebGLTexture>()
   private white: WebGLTexture
   private indexUint: boolean
   private prepared: Prepared | null = null
   private look: Look = 'Realistic'
+  private electronicStudioLighting = false
   view = new Float32Array(16)
   eye: number[] = [0, 1, 2]
 
@@ -240,7 +265,7 @@ export class KitRenderer {
     this.attrs = ['p', 'n', 'uv', 'tg'].map((name) => gl.getAttribLocation(this.program, name))
     this.at = Object.fromEntries(['m', 'vp', 'grow', 'sun', 'flatten', 'baseColor', 'metal', 'rough', 'emissive', 'normalScale', 'baseTex', 'ormTex', 'normalTex', 'emisTex',
       'hasBase', 'hasOrm', 'hasNormal', 'hasEmis', 'look', 'eye', 'shadowAlpha', 'floorPass', 'floorColor', 'bg', 'ink', 'inkColor', 'halo', 'alpha',
-      'pulse', 'tint', 'tint2', 'split', 'upcoming', 'upTint'].map((name) => [name, gl.getUniformLocation(this.program, name)]))
+      'pulse', 'tint', 'tint2', 'split', 'upcoming', 'upTint', 'electronicStudio'].map((name) => [name, gl.getUniformLocation(this.program, name)]))
     gl.uniform1i(this.at.baseTex, 0); gl.uniform1i(this.at.ormTex, 1); gl.uniform1i(this.at.normalTex, 2); gl.uniform1i(this.at.emisTex, 3)
     this.white = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, this.white)
@@ -265,12 +290,13 @@ export class KitRenderer {
   }
 
   /** Replaces the drawn kit (a new look or kit); textures already uploaded for this kit are kept. */
-  setScene(prepared: Prepared, look: Look, images: (ImageBitmap | null)[]) {
+  setScene(prepared: Prepared, look: Look, images: (ImageBitmap | null)[], kit?: KitType) {
     const gl = this.gl
     for (const item of this.items) { gl.deleteBuffer(item.vbo); gl.deleteBuffer(item.ibo) }
     this.items = prepared.items.map((item) => ({ ...item, ...this.upload(item.data, item.index) }))
     this.prepared = prepared
     this.look = look
+    this.electronicStudioLighting = usesElectronicStudioLighting(kit, look)
     for (const item of prepared.items) for (const index of [item.material.baseTex, item.material.ormTex, item.material.normalTex, item.material.emissiveTex]) {
       if (index < 0 || this.textures.has(index) || !images[index]) continue
       const texture = gl.createTexture()!
@@ -282,6 +308,51 @@ export class KitRenderer {
       const aniso = gl.getExtension('EXT_texture_filter_anisotropic')
       if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4)
       this.textures.set(index, texture)
+    }
+  }
+
+  /** Replaces the overlay meshes (hands, sticks); their vertices are re-uploaded on every draw. */
+  setOverlays(list: Overlay[]) {
+    const gl = this.gl
+    for (const overlay of this.overlays) { gl.deleteBuffer(overlay.vbo); gl.deleteBuffer(overlay.ibo) }
+    this.overlays = list.map((overlay) => {
+      const buffers = this.upload(overlay.data, overlay.index)
+      return Object.assign(overlay, buffers)
+    })
+  }
+
+  private uploadOverlays() {
+    const gl = this.gl
+    for (const overlay of this.overlays) {
+      if (!overlay.visible) continue
+      this.bind(overlay)
+      gl.bufferData(gl.ARRAY_BUFFER, overlay.data, gl.DYNAMIC_DRAW)
+    }
+  }
+
+  private drawOverlays(pass: 'shadow' | 'solid' | 'outline', stage: (typeof STAGE)[Look]) {
+    const gl = this.gl
+    for (const overlay of this.overlays) {
+      if (!overlay.visible) continue
+      this.bind(overlay)
+      gl.uniformMatrix4fv(this.at.m, false, IDENTITY)
+      if (pass === 'solid') {
+        this.material(overlay)
+        this.feedbackUniforms(undefined, false)
+        gl.uniform1f(this.at.alpha, overlay.alpha)
+        if (overlay.alpha < 1 || overlay.fade) gl.enable(gl.BLEND)
+        if (overlay.cull) gl.enable(gl.CULL_FACE)
+        this.elements(overlay.count)
+        gl.disable(gl.CULL_FACE)
+        gl.disable(gl.BLEND)
+        gl.uniform1f(this.at.alpha, 1)
+      } else if (pass === 'outline') {
+        gl.uniform1f(this.at.ink, 1)
+        gl.uniform1f(this.at.grow, stage.inkWidth!)
+        this.elements(overlay.count)
+        gl.uniform1f(this.at.ink, 0)
+        gl.uniform1f(this.at.grow, 0)
+      } else this.elements(overlay.count)
     }
   }
 
@@ -304,7 +375,7 @@ export class KitRenderer {
   }
   private elements(count: number) { this.gl.drawElements(this.gl.TRIANGLES, count, this.indexUint ? this.gl.UNSIGNED_INT : this.gl.UNSIGNED_SHORT, 0) }
 
-  private material(item: Uploaded) {
+  private material(item: { material: MaterialView }) {
     const gl = this.gl, m = item.material
     gl.uniform4fv(this.at.baseColor, m.base)
     gl.uniform1f(this.at.metal, m.metal)
@@ -338,7 +409,7 @@ export class KitRenderer {
     const look = this.look
     const stage = STAGE[look]
     // The pedal chick never presses the top cymbal through the bottom one: it rests at the closed contact at most.
-    const hatOffset = state.hat === 'pedal' ? Math.max(prepared.hatStates.pedalClosed ?? 0, prepared.hatStates.closed ?? 0) : prepared.hatStates[HAT_OFFSET[state.hat]] ?? 0
+    const hatOffset = hatOffsetOf(prepared, state.hat)
     const hatOpen = state.hat === 'open' ? 1 : state.hat === 'half-open' ? 0.5 : 0
     gl.viewport(0, 0, width, height)
     gl.clearColor(stage.bg[0], stage.bg[1], stage.bg[2], 1)
@@ -348,7 +419,9 @@ export class KitRenderer {
     gl.uniformMatrix4fv(this.at.vp, false, this.view)
     gl.uniform3fv(this.at.eye, this.eye)
     gl.uniform1f(this.at.look, LOOK_INDEX[look])
+    gl.uniform1f(this.at.electronicStudio, this.electronicStudioLighting && look === 'Realistic' ? 1 : 0)
     gl.uniform3fv(this.at.bg, stage.bg)
+    this.uploadOverlays()
     gl.uniform3fv(this.at.inkColor, stage.ink ?? [0, 0, 0])
     for (const name of ['flatten', 'floorPass', 'ink', 'halo', 'grow']) gl.uniform1f(this.at[name], 0)
     gl.uniform1f(this.at.alpha, 1)
@@ -374,6 +447,7 @@ export class KitRenderer {
       gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
       gl.uniform3fv(this.at.sun, sun)
       for (const item of this.items) { this.bind(item); gl.uniformMatrix4fv(this.at.m, false, model(item)); this.elements(item.count) }
+      this.drawOverlays('shadow', stage)
     })
     gl.disable(gl.STENCIL_TEST)
     gl.uniform1f(this.at.flatten, 0)
@@ -393,6 +467,7 @@ export class KitRenderer {
       gl.uniform1f(this.at.alpha, 1)
       this.elements(item.count)
     }
+    this.drawOverlays('solid', stage)
     this.feedbackUniforms(undefined, false)
     const outline = (item: Uploaded) => {
       gl.uniform1f(this.at.ink, 1)
@@ -407,6 +482,7 @@ export class KitRenderer {
       gl.uniformMatrix4fv(this.at.m, false, model(item))
       outline(item)
     }
+    if (stage.ink) this.drawOverlays('outline', stage)
     const glass = this.items.filter(translucent)
     if (glass.length) {
       const distance = (item: Uploaded) => { const c = item.frame === IDENTITY ? prepared.center : item.center; return -Math.hypot(c[0] - this.eye[0], c[1] - this.eye[1], c[2] - this.eye[2]) }
@@ -460,6 +536,8 @@ export class KitRenderer {
   dispose() {
     const gl = this.gl
     for (const item of this.items) { gl.deleteBuffer(item.vbo); gl.deleteBuffer(item.ibo) }
+    for (const overlay of this.overlays) { gl.deleteBuffer(overlay.vbo); gl.deleteBuffer(overlay.ibo) }
+    this.overlays = []
     gl.deleteBuffer(this.floor.vbo); gl.deleteBuffer(this.floor.ibo)
     this.clearTextures()
     gl.deleteTexture(this.white)

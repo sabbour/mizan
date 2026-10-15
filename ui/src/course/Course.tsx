@@ -6,7 +6,7 @@ import { PIANO_LESSONS, PIANO_STAGES, pianoGenres, pianoLessonList, pianoLessonS
 import { PIANO_INSPIRED } from './pianoInspired'
 import { byArtist, inspiredOrder } from './inspired'
 import { KEY_NAMES, PROGRESSION_COUNT, progressionLessons, SCALE_COUNT, SCALE_FAMILIES, scaleLessons, scaleTonic, type KeyMode } from './pianoTonal'
-import { BASS_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, GUITAR_LESSONS, frettedLessonList, frettedGenres, frettedScaleLessons, type FrettedInstrument, type FrettedLesson } from './fretted'
+import { FRETTED_BROWSE_LESSONS, FRETTED_CONFIG, FRETTED_GENRES, FRETTED_LEVELS, frettedLessonList, frettedGenres, frettedScaleLessons, type FrettedInstrument, type FrettedLesson } from './fretted'
 import { tempoLabel } from './state'
 
 /** Consecutive identical bars share one count and sticking line. */
@@ -129,7 +129,9 @@ function PianoLessonButton({ lesson, onLesson, number }: { lesson: PianoLesson; 
 function FrettedLessonButton({ lesson, onLesson, number }: { lesson: FrettedLesson; onLesson: (id: string) => void; number?: number }) {
   const family = SCALE_FAMILIES.find((item) => item.id === lesson.family)
   const detail = lesson.kind === 'genre' ? `${lesson.genre} · Level ${lesson.level}`
-    : lesson.kind === 'inspired' ? `Inspired by ${lesson.artist}`
+    : lesson.kind === 'inspired' ? lesson.track
+      ? `Inspired by ${lesson.artist} · Song reference: ${lesson.track}`
+      : `Inspired by ${lesson.artist} · Original technique study`
       : lesson.kind === 'scale' ? `${scaleTonic(lesson.tonic!, lesson.family!)} ${family?.name} · ${scaleVariantsLabel(lesson.variant)}`
         : FRETTED_LEVELS[lesson.level - 1]
   return (
@@ -255,24 +257,21 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
   const tonal = browse.pianoShelf === 'progression' ? progressionLessons(browse.pianoKey.pitch, browse.pianoKey.mode)
     : browse.pianoShelf === 'scale' ? scaleLessons(browse.pianoKey.pitch, browse.pianoScale) : []
   const frettedInstrument: FrettedInstrument = browse.instrument === 'bass' ? 'bass' : 'guitar'
-  const frettedLessons = frettedInstrument === 'guitar' ? GUITAR_LESSONS : BASS_LESSONS
-  const frettedShelf = frettedInstrument === 'guitar' ? browse.guitarShelf : browse.bassShelf
+  const frettedLessons = FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === frettedInstrument)
+  const savedFrettedShelf = frettedInstrument === 'guitar' ? browse.guitarShelf : browse.bassShelf
+  const frettedShelf = savedFrettedShelf === 'inspired' ? 'course' : savedFrettedShelf
   const frettedGenre = frettedInstrument === 'guitar' ? browse.guitarGenre : browse.bassGenre
   const frettedGenreList = frettedGenres(frettedInstrument)
   const selectedFrettedGenre = frettedGenreList.includes(frettedGenre) ? frettedGenre : frettedGenreList[0]
   const frettedGenreLessons = frettedLessons.filter((lesson) => lesson.kind === 'genre' && lesson.genre === selectedFrettedGenre)
     .toSorted((a, b) => a.level - b.level)
-  const frettedArtists = byArtist(frettedLessons.filter((lesson) => lesson.kind === 'inspired'))
-  const frettedArtist = frettedInstrument === 'guitar' ? browse.guitarArtist : browse.bassArtist
-  const selectedFrettedArtist = frettedArtists.find(({ artist }) => artist === frettedArtist) ?? frettedArtists[0]
   const frettedKey = frettedInstrument === 'guitar' ? browse.guitarKey : browse.bassKey
   const frettedScale = frettedInstrument === 'guitar' ? browse.guitarScale : browse.bassScale
   const selectedFrettedScale = SCALE_FAMILIES.some((family) => family.id === frettedScale) ? frettedScale : 'major'
   const selectedScaleLessons = frettedScaleLessons(frettedInstrument, frettedKey.pitch, selectedFrettedScale)
-  const setFrettedShelf = (shelf: 'course' | 'genre' | 'inspired' | 'scale') =>
+  const setFrettedShelf = (shelf: 'course' | 'genre' | 'scale') =>
     set(frettedInstrument === 'guitar' ? { guitarShelf: shelf } : { bassShelf: shelf })
   const setFrettedGenre = (genre: string) => set(frettedInstrument === 'guitar' ? { guitarGenre: genre } : { bassGenre: genre })
-  const setFrettedArtist = (artist: string) => set(frettedInstrument === 'guitar' ? { guitarArtist: artist } : { bassArtist: artist })
   const setFrettedScale = (pitch: number, family: string) => set(frettedInstrument === 'guitar'
     ? { guitarKey: { pitch }, guitarScale: family }
     : { bassKey: { pitch }, bassScale: family })
@@ -283,8 +282,8 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
           options={[
             { id: 'drums', label: 'Drums', count: LESSONS.length },
             { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length + PIANO_INSPIRED.length },
-            { id: 'guitar', label: 'Guitar', count: GUITAR_LESSONS.length },
-            { id: 'bass', label: 'Bass', count: BASS_LESSONS.length },
+            { id: 'guitar', label: 'Guitar', count: FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'guitar').length },
+            { id: 'bass', label: 'Bass', count: FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'bass').length },
           ]} />
         {browse.instrument === 'piano' && (
           <Segments name="piano-shelf" label="Lessons" value={browse.pianoShelf} onChange={(pianoShelf) => set({ pianoShelf })}
@@ -300,25 +299,22 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
           <Segments name="fretted-shelf" label="Lessons" value={frettedShelf} onChange={setFrettedShelf}
             options={[{ id: 'course', label: 'Course', count: frettedLessons.filter((lesson) => lesson.kind === 'course').length },
               { id: 'genre', label: 'Genres', count: frettedLessons.filter((lesson) => lesson.kind === 'genre').length },
-              { id: 'inspired', label: 'Inspired', count: frettedArtists.length },
               { id: 'scale', label: 'Scales', count: SCALE_FAMILIES.length }]} />
         )}
       </div>
       {browse.instrument === 'guitar' || browse.instrument === 'bass' ? (
         <section className="course" aria-labelledby={`course-${frettedInstrument}`}>
           <h2 id={`course-${frettedInstrument}`} className="lib-h2">
-            {frettedInstrument === 'guitar' ? 'Guitar' : 'Bass'} {frettedShelf === 'course' ? 'course' : frettedShelf === 'genre' ? 'by genre' : frettedShelf === 'inspired' ? 'inspired studies' : 'scales'}
+            {frettedInstrument === 'guitar' ? 'Guitar' : 'Bass'} {frettedShelf === 'course' ? 'course' : frettedShelf === 'genre' ? 'by genre' : 'scales'}
             <span className="dim num"> {frettedShelf === 'scale'
               ? `${selectedScaleLessons.length} in ${scaleTonic(frettedKey.pitch, selectedFrettedScale)} ${SCALE_FAMILIES.find((family) => family.id === selectedFrettedScale)?.name}`
               : frettedShelf === 'course' ? frettedLessons.filter((lesson) => lesson.kind === 'course').length
-                : frettedShelf === 'genre' ? frettedLessons.filter((lesson) => lesson.kind === 'genre').length
-                  : frettedLessons.filter((lesson) => lesson.kind === 'inspired').length}</span>
+                : frettedLessons.filter((lesson) => lesson.kind === 'genre').length}</span>
           </h2>
           <p className="course-intro">{frettedShelf === 'course'
             ? `Learn five levels of ${frettedInstrument} basics. Use standard tuning to play open notes, fret patterns, string changes, picking, chord shapes, scales, and original phrases. Tab positions are estimates.`
-            : frettedShelf === 'genre' ? `${FRETTED_GENRES.length} genres each have five original studies. Each study has a four-bar pattern with note choices and rhythms that fit its genre.`
-              : frettedShelf === 'inspired' ? 'Original technique studies inspired by distinctive guitar and bass approaches. These are learning exercises, not note-for-note song transcriptions or claims of recording accuracy.'
-                : `Fifteen scale families in all twelve keys. Each scale has a complete one-octave ascent and descent plus two pattern studies. Suggested tab positions are not authored fingering.`}</p>
+            : frettedShelf === 'genre' ? `${FRETTED_GENRES.length} genres each have five original studies. Each eight-bar phrase has a repeating hook, a contrasting answer, and a return, with notes and rhythms that fit its genre.`
+              : `Fifteen scale families in all twelve keys. Each scale has a complete one-octave ascent and descent plus two pattern studies. Suggested tab positions are not authored fingering.`}</p>
           {frettedShelf === 'course'
             ? <ol className="course-levels">
               {FRETTED_LEVELS.map((name, level) => {
@@ -339,14 +335,7 @@ export function CourseSection({ onLesson, browse, onBrowse }: {
               <ol className="course-steps">{frettedGenreLessons.map((lesson) =>
                 <FrettedLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} />)}</ol>
             </GenreShelf>
-            : frettedShelf === 'inspired'
-              ? <GenreShelf id={`course-${frettedInstrument}-inspired`} value={selectedFrettedArtist.artist} onChange={setFrettedArtist}
-                styles={frettedArtists.map(({ artist, lessons }) => ({ style: artist, note: `${lessons.length} ${lessons.length === 1 ? 'study' : 'studies'}` }))}>
-                <h3>{selectedFrettedArtist.artist}</h3>
-                <ol className="course-steps course-collection">{selectedFrettedArtist.lessons.map((lesson, index) =>
-                  <FrettedLessonButton key={lesson.id} lesson={lesson} onLesson={onLesson} number={index + 1} />)}</ol>
-              </GenreShelf>
-              : <div>
+            : <div>
                 <ScalePicker pitch={frettedKey.pitch} family={selectedFrettedScale} onChange={setFrettedScale} />
                 <p className="course-genre-facts">
                   <span>{scaleTonic(frettedKey.pitch, selectedFrettedScale)} {SCALE_FAMILIES.find((family) => family.id === selectedFrettedScale)?.name} ·
@@ -524,7 +513,9 @@ export function FrettedLessonPanel({ lesson, onLesson }: { lesson: FrettedLesson
   const instrument = lesson.instrument === 'guitar' ? 'Guitar' : 'Bass'
   const family = SCALE_FAMILIES.find((item) => item.id === lesson.family)
   const focus = lesson.kind === 'genre' ? `${lesson.genre} · Level ${lesson.level}`
-    : lesson.kind === 'inspired' ? `Inspired by ${lesson.artist} · Original technique study`
+    : lesson.kind === 'inspired' ? lesson.track
+      ? `Inspired by ${lesson.artist} · Song reference: ${lesson.track} · Original riff study`
+      : `Inspired by ${lesson.artist} · Original technique study`
       : lesson.kind === 'scale' ? `${scaleTonic(lesson.tonic!, lesson.family!)} ${family?.name} · ${scaleVariantsLabel(lesson.variant)}`
         : `${FRETTED_LEVELS[lesson.level - 1]} · Level ${lesson.level}`
   const details = lesson.kind === 'genre' ? 'genre and level' : lesson.kind === 'inspired' ? 'artist and technique'
@@ -541,10 +532,12 @@ export function FrettedLessonPanel({ lesson, onLesson }: { lesson: FrettedLesson
             <div><dt>Instrument</dt><dd>{config.name}</dd></div>
             {lesson.genre && <div><dt>Genre</dt><dd>{lesson.genre}</dd></div>}
             {lesson.artist && <div><dt>Inspired by</dt><dd>{lesson.artist}</dd></div>}
+            {lesson.track && <div><dt>Song reference</dt><dd>{lesson.track}</dd></div>}
             {lesson.family && <div><dt>Scale</dt><dd>{scaleTonic(lesson.tonic!, lesson.family)} {family?.name}</dd></div>}
             <div><dt>{lesson.kind === 'scale' ? 'Pattern' : lesson.kind === 'inspired' ? 'Study' : 'Level'}</dt><dd>{lesson.kind === 'scale'
               ? `${scaleVariantsLabel(lesson.variant)} · ${lesson.level} of 3`
-              : lesson.kind === 'inspired' ? 'Original technique study' : `${lesson.level} · ${FRETTED_LEVELS[lesson.level - 1]}`}</dd></div>
+              : lesson.kind === 'inspired' ? lesson.track ? 'Original riff study' : 'Original technique study'
+                : `${lesson.level} · ${FRETTED_LEVELS[lesson.level - 1]}`}</dd></div>
             <div><dt>Tuning</dt><dd>{config.strings.map(({ openPitch }) => openPitch).join(' · ')} · standard tuning</dd></div>
             <div><dt>Meter</dt><dd className="num">{lesson.meter.numerator}/{lesson.meter.denominator} · {lesson.bars} bars</dd></div>
             <div><dt>Tempo</dt><dd className="num">start {tempoLabel(lesson, lesson.tempo.start)} → aim for {tempoLabel(lesson, lesson.tempo.target)}</dd></div>

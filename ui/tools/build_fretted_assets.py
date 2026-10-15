@@ -295,7 +295,7 @@ def string_y(index, count, bridge_spacing, nut_spacing):
 
 def tuner_position(index, kind):
     if kind == "guitar":
-        return 0.018 + index * 0.021, 0.014 + index * 0.004
+        return 0.018 + index * 0.021, 0.012 + index * 0.0012
     side = 1 if index < 2 else -1
     return 0.025 + (index % 2) * 0.055, side * (0.018 + (index % 2) * 0.01)
 
@@ -537,15 +537,19 @@ class GltfBuilder:
         mat_coil = self.material("MAT_Pickup_Cream" if kind == "guitar" else "MAT_Pickup_Black",
             (0.94, 0.91, 0.82) if kind == "guitar" else (0.045, 0.045, 0.045), 0.34)
         mat_bobbin = self.material("MAT_Pickup_Bobbin", (0.12, 0.105, 0.09), 0.58)
+        mat_shadow = self.material("MAT_ContactShadow", (0.2, 0.19, 0.17), 0.9)
 
         # The body uses a closed sculpted outline and a rolled, subtly domed top.
         if kind == "guitar":
-            control = [(0.17, 0.031), (0.22, 0.051), (0.28, 0.10), (0.275, 0.128),
-                (0.24, 0.14), (0.175, 0.116), (0.105, 0.085), (0.035, 0.135),
-                (-0.04, 0.16), (-0.12, 0.136), (-0.18, 0.084), (-0.195, 0.015),
-                (-0.177, -0.075), (-0.118, -0.133), (-0.04, -0.16), (0.035, -0.141),
-                (0.11, -0.086), (0.18, -0.107), (0.242, -0.118), (0.27, -0.095),
-                (0.267, -0.072), (0.222, -0.041), (0.17, -0.027)]
+            control = [(0.17, 0.031), (0.205, 0.046), (0.238, 0.078), (0.262, 0.108),
+                (0.276, 0.126), (0.268, 0.137), (0.250, 0.138), (0.222, 0.130),
+                (0.180, 0.112), (0.140, 0.092), (0.105, 0.079), (0.075, 0.088),
+                (0.040, 0.124), (-0.010, 0.153), (-0.070, 0.161), (-0.130, 0.147),
+                (-0.178, 0.105), (-0.196, 0.040), (-0.194, -0.035), (-0.172, -0.095),
+                (-0.125, -0.138), (-0.065, -0.158), (-0.005, -0.150), (0.040, -0.124),
+                (0.075, -0.100), (0.105, -0.092), (0.140, -0.098), (0.180, -0.108),
+                (0.215, -0.114), (0.240, -0.108), (0.249, -0.092), (0.238, -0.074),
+                (0.212, -0.052), (0.180, -0.032), (0.17, -0.029)]
         else:
             control = [(0.20, 0.033), (0.25, 0.058), (0.30, 0.11), (0.285, 0.139),
                 (0.24, 0.15), (0.17, 0.118), (0.10, 0.093), (0.025, 0.142),
@@ -553,7 +557,7 @@ class GltfBuilder:
                 (-0.171, -0.087), (-0.105, -0.149), (-0.025, -0.165), (0.054, -0.135),
                 (0.127, -0.094), (0.207, -0.116), (0.27, -0.117), (0.287, -0.083),
                 (0.251, -0.049), (0.20, -0.027)]
-        outline = catmull(control, 8)
+        outline = catmull(control, 5 if kind == "guitar" else 8)
         area = sum(outline[i][0] * outline[(i + 1) % len(outline)][1] -
                    outline[(i + 1) % len(outline)][0] * outline[i][1] for i in range(len(outline)))
         if area < 0:
@@ -561,10 +565,16 @@ class GltfBuilder:
         body_edge = cfg["thickness"] / 2 - BODY_DOME
         body_mesh = layered_body(outline, -body_edge, body_edge, 150)
         body_node = self.add_mesh(body, "Body_Mesh", body_mesh, mat_body, extras={"bevelled": True, "triangleCount": len(body_mesh.tri)})
-        pick = catmull([(0.18, 0.031), (0.23, 0.057), (0.25, 0.076), (0.221, 0.089),
+        pick_points = [(0.18, 0.031), (0.23, 0.057), (0.25, 0.076), (0.221, 0.089),
             (0.145, 0.074), (0.075, 0.079), (0, 0.071), (-0.037, 0.032),
             (-0.025, -0.02), (0.035, -0.071), (0.11, -0.114), (0.175, -0.108),
-            (0.20, -0.074), (0.17, -0.032)], 8)
+            (0.20, -0.074), (0.17, -0.032)]
+        if kind == "guitar":
+            pick_points = [(0.18, 0.031), (0.23, 0.057), (0.25, 0.076), (0.221, 0.089),
+                (0.145, 0.074), (0.075, 0.079), (0, 0.071), (-0.037, 0.032),
+                (-0.025, -0.02), (0.035, -0.071), (0.11, -0.076), (0.175, -0.090),
+                (0.205, -0.070), (0.17, -0.032)]
+        pick = catmull(pick_points, 8)
         self.add_mesh(body, "Pickguard", extruded_shape(pick, cfg["thickness"] / 2 - 0.0035,
             cfg["thickness"] / 2 + 0.0003, radial=1, dome=0.00035), mat_cream)
         self.add_mesh(body, "RearCover_Electronics", box((0.03, -0.038, -cfg["thickness"] / 2 - 0.002), (0.15, 0.085, 0.002)), mat_back)
@@ -616,14 +626,14 @@ class GltfBuilder:
         for fret in (3, 5, 7, 9, 12, 15, 17, 19, 21):
             if fret <= cfg["frets"]:
                 ix = (fret_x(fret - 1, cfg["scale"], nut_x) + fret_x(fret, cfg["scale"], nut_x)) / 2
-                self.add_mesh(side_inlays, f"SideInlay_{fret:02d}", sphere((ix, -0.0315, 0.046), 0.0018, 8, 6), mat_inlay, origin=(neck_start, 0, 0))
+                self.add_mesh(side_inlays, f"SideInlay_{fret:02d}", sphere((ix, -board_width(ix) / 2 + 0.0004, 0.046), 0.0018, 8, 6), mat_inlay, origin=(neck_start, 0, 0))
         self.add_position_nodes(self.position_root, kind)
 
         # Headstock and individual tuner pivots/posts. Six inline for guitar; 2+2 for bass.
         head_length = cfg["overall"] + tail_x - 0.006 - nut_x
-        hs_outline = catmull([(-0.004, -0.021), (-0.004, 0.021), (0.026, 0.028),
-            (0.10, 0.044), (0.13, 0.052), (0.145, 0.028), (0.139, -0.025),
-            (0.107, -0.041), (0.075, -0.031), (0.018, -0.024)], 8)
+        hs_outline = catmull([(-0.004, -0.021), (-0.004, 0.021), (0.026, 0.026),
+            (0.10, 0.034), (0.13, 0.036), (0.147, 0.018), (0.141, -0.017),
+            (0.107, -0.028), (0.075, -0.026), (0.018, -0.023)], 8)
         hs_max = max(p[0] for p in hs_outline)
         hs_local = [(x * head_length / hs_max, y) for x, y in hs_outline]
         self.add_mesh(head, "Headstock_Mesh", extruded_shape(hs_local, 0.025, 0.052, radial=8), mat_maple)
@@ -639,8 +649,8 @@ class GltfBuilder:
             })
             self.add_mesh(pivot, f"Tuner_{i + 1}_Post", cylinder((0, 0, 0), (0, 0, 0.009), 0.003, 10), mat_metal)
             self.add_mesh(pivot, f"Tuner_{i + 1}_Button",
-                box((0, math.copysign(0.014, peg_y), 0.004), (0.01, 0.02, 0.004), bevel=0.0015), mat_metal)
-            self.add_mesh(pivot, f"Tuner_{i + 1}_Housing", box((0, 0, -0.002), (0.016, 0.014, 0.004)), mat_brush)
+                box((0, math.copysign(0.0125, peg_y), 0.004), (0.008, 0.015, 0.003), bevel=0.001), mat_metal)
+            self.add_mesh(pivot, f"Tuner_{i + 1}_Housing", box((0, 0, -0.002), (0.012, 0.011, 0.004)), mat_brush)
 
         # Three single-coil guitar pickups or the bass's two split/single-coil pickups.
         positions = [(0.14, "Neck"), (0.09, "Middle"), (0.037, "Bridge")] if kind == "guitar" else [(0.14, "Neck"), (0.05, "Bridge")]
@@ -669,15 +679,19 @@ class GltfBuilder:
                         cylinder((px, y, 0.0365), (px, y, 0.04), 0.0017, 10), mat_metal)
 
         # Bridge saddle pivots and distinct string contact points.
-        base = box((-0.004, 0, 0.031), (0.022, cfg["bridgeSpacing"] * 2 + 0.018, 0.018))
+        base = box((-0.004, 0, 0.031), (0.022, cfg["bridgeSpacing"] * 2 + 0.018, 0.018), bevel=0.002)
         self.add_mesh(bridge, "Bridge_Base", base, mat_brush)
+        plate = box((-0.004, 0, 0.0405), (0.026, cfg["bridgeSpacing"] * 2 + 0.024, 0.003), bevel=0.0012)
+        self.add_mesh(bridge, "Bridge_Plate", plate, mat_metal)
+        shadow = box((-0.004, 0, cfg["thickness"] / 2 + 0.0006), (0.04, cfg["bridgeSpacing"] * 2 + 0.05, 0.0004))
+        self.add_mesh(bridge, "Bridge_ContactShadow", shadow, mat_shadow)
         if kind == "guitar":
             for i, string in enumerate(cfg["strings"]):
                 y = string_y(i, len(cfg["strings"]), cfg["bridgeSpacing"], cfg["nutSpacing"])
                 sx = -0.006 + i * 0.0022
                 self.add_mesh(bridge, f"Saddle_{i + 1}_{string['name'].replace(' ', '')}",
-                    box((sx, y, 0.045), (0.009, 0.009, 0.009)), mat_metal,
-                    translation=(sx, y, 0.045), extras={"stringNumber": i + 1, "contactPoint": [sx, y, 0.049]})
+                    box((sx, y, 0.0465), (0.009, 0.0072, 0.011), bevel=0.0008), mat_metal,
+                    translation=(sx, y, 0.045), extras={"stringNumber": i + 1, "contactPoint": [sx, y, 0.0518]})
             self.add_mesh(bridge, "TremoloBlock", box((-0.01, 0, 0.019), (0.025, 0.07, 0.015)), mat_brush)
             arm_pivot = self.group(bridge, "TremoloArm", (-0.006, -0.035, 0.048), {"pivot": "bridge-socket", "removable": True})
             self.add_mesh(arm_pivot, "TremoloArm_Shaft", tube([(0, 0, 0), (-0.028, -0.025, -0.01), (-0.052, -0.04, -0.011)], 0.0016, 10), mat_metal)
@@ -686,11 +700,14 @@ class GltfBuilder:
             for i, string in enumerate(cfg["strings"]):
                 y = string_y(i, len(cfg["strings"]), cfg["bridgeSpacing"], cfg["nutSpacing"])
                 self.add_mesh(bridge, f"Saddle_{i + 1}_{string['name'].replace(' ', '')}",
-                    box((0, y, 0.045), (0.014, 0.012, 0.009)), mat_metal,
-                    translation=(0, y, 0.045), extras={"stringNumber": i + 1, "contactPoint": [0, y, 0.049]})
+                    box((0, y, 0.0465), (0.014, 0.012, 0.011)), mat_metal,
+                    translation=(0, y, 0.045), extras={"stringNumber": i + 1, "contactPoint": [0, y, 0.0518]})
 
         control_positions = [("Knob_Volume", (0.145, -0.043)), ("Knob_Tone1", (0.115, -0.075)),
             ("Knob_Tone2", (0.08, -0.095))]
+        if kind == "guitar":
+            control_positions = [("Knob_Volume", (0.145, -0.043)), ("Knob_Tone1", (0.118, -0.066)),
+                ("Knob_Tone2", (0.088, -0.078))]
         for name, point in control_positions:
             pivot = self.group(controls, name, (point[0], point[1], cfg["thickness"] / 2), {"pivot": "vertical-axis"})
             self.add_mesh(pivot, f"{name}_Seat", cylinder((0, 0, 0.0003), (0, 0, 0.0012), 0.0127, 24), mat_bobbin)
@@ -724,8 +741,8 @@ class GltfBuilder:
                 t = segment / 64
                 x = cfg["nutX"] * (1 - t)
                 y = yn + (yb - yn) * t
-                points.append((x, y, 0.052 - 0.010 * t))
-            points.append((0, yb, 0.042))
+                points.append((x, y, 0.0507 - 0.0004 * t))
+            points.append((0, yb, 0.0503))
             gauge = string["gauge"]
             radius = gauge * 0.0254 / 2
             mesh = tube(points, radius, 8, string_uv=True)

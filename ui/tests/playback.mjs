@@ -10,6 +10,7 @@
 // Add --instrument for instrument scores, saved practice views and continuous part switching.
 // Add --job-preview for live recording controls and removal of generated Creative tracks.
 // Add --fretted for guitar/bass courses, saved views and continuous part switching.
+// Add --fretted-hidpi for only the compact guitar/bass checks at double pixel density.
 // MIZAN_TEST_OPENED optionally points to a live Api.open_song JSON response for the Cairokee benchmark.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
@@ -21,25 +22,31 @@ import { instrumentChecks } from './instrument-workspace.mjs'
 import { practiceChecks } from './practice-workspace.mjs'
 import { browserMeterChecks } from './meter.mjs'
 import { jobPreviewChecks } from './job-preview.mjs'
-import { frettedChecks, tabChecks } from './fretted-workspace.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const testUrl = process.env.MIZAN_TEST_URL ?? 'http://localhost:5173'
 // The browser profile lives outside the app folder, so its files never trigger the dev server's reloads.
-const profile = await mkdtemp(join(tmpdir(), 'mizan-playback-'))
+const profile = process.env.MIZAN_TEST_PROFILE
+  ? join(process.cwd(), process.env.MIZAN_TEST_PROFILE)
+  : await mkdtemp(join(tmpdir(), 'mizan-playback-'))
 spawn(process.env.MIZAN_TEST_BROWSER ?? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', [
   '--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
   '--autoplay-policy=no-user-gesture-required', '--no-first-run', 'about:blank',
 ], { stdio: 'ignore' })
 const stopOwnedBrowsers = () => execFileSync('powershell.exe', ['-NoProfile', '-Command', `
-    $all = Get-CimInstance Win32_Process
+    $all = Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'"
     $owned = $all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('${profile.replaceAll("'", "''")}') }
-    function Stop-TestBrowser([int]$parentId) {
-      foreach ($child in ($all | Where-Object ParentProcessId -eq $parentId)) { Stop-TestBrowser $child.ProcessId }
-      Stop-Process -Id $parentId -ErrorAction SilentlyContinue
+    $processIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+    do {
+      $previousCount = $processIds.Count
+      $children = @($all | Where-Object { $processIds -contains [int]$_.ParentProcessId } |
+        ForEach-Object { [int]$_.ProcessId })
+      $processIds = @($processIds + $children | Sort-Object -Unique)
+    } while ($processIds.Count -gt $previousCount)
+    foreach ($processId in $processIds) {
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
-    foreach ($ownedProcess in $owned) { Stop-TestBrowser $ownedProcess.ProcessId }
-  `], { stdio: 'ignore', timeout: 15000 })
+  `], { stdio: 'ignore', timeout: 45000 })
 const connectBrowser = async () => {
   let port
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -131,7 +138,8 @@ try {
   const pianoOnly = process.argv.includes('--piano')
   const jobPreviewOnly = process.argv.includes('--job-preview')
   const tabOnly = process.argv.includes('--fretted-tab')
-  const frettedOnly = process.argv.includes('--fretted') || tabOnly
+  const frettedHidpiOnly = process.argv.includes('--fretted-hidpi')
+  const frettedOnly = process.argv.includes('--fretted') || tabOnly || frettedHidpiOnly
   if (frettedOnly) {
     const artifacts = process.env.MIZAN_TEST_ARTIFACTS
     if (artifacts) {
@@ -142,16 +150,18 @@ try {
         await writeFile(join(artifacts, `fretted-${payload}.png`), Buffer.from(shot.data, 'base64'))
       }
     }
-    for (const [width, height] of [[1440, 900], [617, 900]]) {
-      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    const sizes = frettedHidpiOnly ? [[617, 900, 2]] : [[1440, 900, 1], [1366, 768, 1], [617, 900, 1], [617, 900, 2]]
+    for (const [width, height, scale] of sizes) {
+      await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false })
       await call('Emulation.setEmulatedMedia', {
         features: [{ name: 'prefers-reduced-motion', value: width === 617 ? 'reduce' : 'no-preference' }],
       })
       if (artifacts) await evaluate(`window.__mizanFrettedShot = (name) => {
-        window.mizanFrettedShot(name + '-${width}');
+        window.mizanFrettedShot(name + '-${width}${scale === 1 ? '' : '-2x'}');
         return new Promise((resolve) => setTimeout(resolve, 500));
       }`)
-      console.log(await evaluate(`(${(tabOnly ? tabChecks : frettedChecks).toString()})()`))
+      console.log(await evaluate(`import('/tests/fretted-workspace.mjs').then((checks) =>
+        checks.${tabOnly ? 'tabChecks' : 'frettedChecks'}())`))
       await call('Page.navigate', { url: testUrl })
       for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
     }
@@ -989,6 +999,7 @@ async function deleteScoreChecks() {
   await wait(() => !!document.querySelector('.track-menu'))
   assert(document.querySelectorAll('.track-stem').length === stems, 'All recording stems remain')
   assert(document.querySelector('[aria-label="Delete Drum kit score"]'), 'Unrelated score stays')
+  assert(document.querySelector('[aria-label="Delete Electric Guitar Clean score"]'), 'Detected instrument score stays')
   assert(document.querySelector('[role="menuitemradio"][aria-checked="true"]'), 'A replacement score is selected')
   await wait(() => !JSON.parse(localStorage.getItem('mizan:mixer:s1')).muted.includes('piano'))
   document.querySelector('[aria-label="Back to the library"]').click()
@@ -1001,6 +1012,10 @@ async function deleteScoreChecks() {
   assert(document.querySelectorAll('.track-stem').length === stems, 'Recording remains after reopen')
   document.querySelector('[aria-label="Delete Drum kit score"]').click()
   await wait(() => !document.querySelector('[aria-label="Delete Drum kit score"]'))
+  document.querySelector('.track-button').click()
+  await wait(() => !!document.querySelector('.track-menu'))
+  document.querySelector('[aria-label="Delete Electric Guitar Clean score"]').click()
+  await wait(() => !document.querySelector('[aria-label="Delete Electric Guitar Clean score"]'))
   document.querySelector('.track-button').click()
   await wait(() => !!document.querySelector('.track-menu'))
   assert([...document.querySelectorAll('.track-menu .track-empty')].some((item) =>
@@ -2111,7 +2126,8 @@ async function pianoChecks(width) {
       gl.readPixels(Math.round(at.x * gl.drawingBufferWidth), Math.round(at.y * gl.drawingBufferHeight), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
       return (px[0] + px[1] + px[2]) / 3
     }
-    samples.push({ white: [36, 38, 40, 41, 43].map(read), black: [37, 39, 42, 44, 46].map(read) })
+    // Keys in the top octaves, which the hands over the lesson's notes never cover.
+    samples.push({ white: [96, 98, 100, 101, 103].map(read), black: [97, 99, 102, 104, 106].map(read) })
   }
   look.value = 'TechnicalBlueprint'
   look.dispatchEvent(new Event('change', { bubbles: true }))

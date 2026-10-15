@@ -17,6 +17,7 @@ type Anchor = { time: number; beat: number; spb: number; count: number }
 type Sample = { midi: number; soft: AudioBuffer; loud: AudioBuffer }
 type GmSample = { midi: number; buffer: AudioBuffer }
 type GmManifest = { instruments: { program: number; name: string; samples: { midi: number; url: string; silent?: boolean }[] }[] }
+type BendableNote = Pick<PianoNote, 'midi' | 'startBeat' | 'beats' | 'pitchBends'>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -504,14 +505,14 @@ export class Engine {
       if (!inRange(n.startBeat) && !(resume && n.startBeat < from && end > from)) return
       const start = Math.max(n.startBeat, from)
       const duration = this.seconds(start, end)
-      if (id === 'piano') this.piano(at(start), n, duration, n.trackId ?? song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano')
-      else this.lead(at(start), n, duration, id)
+      if (id === 'piano') this.piano(at(start), n, duration, n.trackId ?? song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano', start)
+      else this.lead(at(start), n, duration, id, start)
     }
     for (const n of song.piano) note(n, 'piano')
     for (const n of song.vocals ?? []) {
       if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
       const start = Math.max(n.startBeat, from)
-      this.vocal(at(start), n, this.seconds(start, n.startBeat + n.beats), n.trackId ?? 'vocals')
+      this.vocal(at(start), n, this.seconds(start, n.startBeat + n.beats), n.trackId ?? 'vocals', start)
     }
     for (const part of song.tracks) {
       if (part.instrument !== 'other') continue
@@ -519,11 +520,11 @@ export class Engine {
         if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
         const start = Math.max(n.startBeat, from)
         const duration = this.seconds(start, n.startBeat + n.beats)
-        if (part.id === 'instrument-organ') this.organ(at(start), n.midi, duration, (n.velocity ?? 0.7) * 0.28, part.id)
+        if (part.id === 'instrument-organ') this.organ(at(start), n, duration, (n.velocity ?? 0.7) * 0.28, part.id, start)
         else if (part.gmProgram != null && part.gmProgram >= 0 && part.gmProgram <= 127) {
-          this.gmNote(at(start), n.midi, duration, (n.velocity ?? 0.7) * 0.6, part.id, part.gmProgram)
+          this.gmNote(at(start), n, duration, (n.velocity ?? 0.7) * 0.6, part.id, part.gmProgram, start)
         } else this.sampleNote(at(start), n.midi, duration,
-          (n.velocity ?? 0.7) * 0.6, this.bus(part.id), 0.018, 0.7, true)
+          (n.velocity ?? 0.7) * 0.6, this.bus(part.id), 0.018, 0.7, true, n, start)
       }
     }
     for (const part of this.extras) {
@@ -600,12 +601,19 @@ export class Engine {
     attack = 0.006,
     release = RELEASE,
     soft = velocity < 0.56,
+    bendNote?: BendableNote,
+    fromBeat?: number,
   ): void {
     const ctx = this.ctx!
     const sample = this.nearestSample(midi)
     const source = ctx.createBufferSource()
     source.buffer = soft ? sample.soft : sample.loud
-    source.playbackRate.value = 2 ** ((midi - sample.midi) / 12)
+    const playbackRate = 2 ** ((midi - sample.midi) / 12)
+    if (bendNote && fromBeat !== undefined) {
+      this.pitchBends(source.playbackRate, playbackRate, bendNote, fromBeat, time)
+    } else {
+      source.playbackRate.value = playbackRate
+    }
     const gain = ctx.createGain()
     const peak = Math.max(0.0001, Math.min(1, velocity))
     const releaseAt = time + Math.max(0.04, duration)
@@ -615,13 +623,41 @@ export class Engine {
     gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + release)
     source.connect(gain).connect(destination)
     const natural = source.buffer.duration / source.playbackRate.value
-    this.track(source, time, Math.min(time + natural, releaseAt + release + 0.05, this.noteBoundary))
+    const stop = bendNote?.pitchBends?.length
+      ? Math.min(releaseAt + release + 0.05, this.noteBoundary)
+      : Math.min(time + natural, releaseAt + release + 0.05, this.noteBoundary)
+    this.track(source, time, stop)
   }
 
-  private organ(time: number, midi: number, duration: number, velocity: number, id: string): void {
+  private pitchBends(param: AudioParam, baseValue: number, note: BendableNote, fromBeat: number, time: number): void {
+    const elapsed = Math.max(0, fromBeat - note.startBeat)
+    const points = (note.pitchBends ?? []).filter((point) =>
+      Number.isFinite(point.beat) && Number.isFinite(point.semitones) &&
+      point.beat >= 0 && point.beat < note.beats)
+    let semitones = 0
+    for (const point of points) {
+      if (point.beat > elapsed + 1e-9) break
+      semitones = point.semitones
+    }
+    const set = (value: number, at: number) => {
+      if (param.setValueAtTime) param.setValueAtTime(value, at)
+      else param.value = value
+    }
+    const initialValue = baseValue * 2 ** (semitones / 12)
+    param.value = initialValue
+    set(initialValue, time)
+    for (const point of points) {
+      if (point.beat <= elapsed + 1e-9) continue
+      const beat = note.startBeat + point.beat
+      set(baseValue * 2 ** (point.semitones / 12), time + this.seconds(fromBeat, beat))
+    }
+  }
+
+  private organ(time: number, note: BendableNote, duration: number, velocity: number, id: string, fromBeat: number): void {
     const ctx = this.ctx!
     const source = ctx.createOscillator()
-    source.frequency.value = 440 * 2 ** ((midi - 69) / 12)
+    const frequency = 440 * 2 ** ((note.midi - 69) / 12)
+    this.pitchBends(source.frequency, frequency, note, fromBeat, time)
     this.organWave ??= ctx.createPeriodicWave(new Float32Array(5), new Float32Array([0, 1, 0.55, 0.24, 0.12]))
     source.setPeriodicWave(this.organWave)
     const gain = ctx.createGain()
@@ -634,15 +670,15 @@ export class Engine {
     this.track(source, time, end + 0.09)
   }
 
-  private gmNote(time: number, midi: number, duration: number, velocity: number, id: string, program: number): void {
+  private gmNote(time: number, note: BendableNote, duration: number, velocity: number, id: string, program: number, fromBeat: number): void {
     const ctx = this.ctx!
     const samples = this.gmSamples.get(program)
     if (!samples?.length) throw new Error(`The GM sound bank is not ready for program ${program + 1}.`)
     const sample = samples.reduce((best, item) =>
-      Math.abs(item.midi - midi) < Math.abs(best.midi - midi) ? item : best)
+      Math.abs(item.midi - note.midi) < Math.abs(best.midi - note.midi) ? item : best)
     const source = ctx.createBufferSource()
     source.buffer = sample.buffer
-    source.playbackRate.value = 2 ** ((midi - sample.midi) / 12)
+    this.pitchBends(source.playbackRate, 2 ** ((note.midi - sample.midi) / 12), note, fromBeat, time)
     const gain = ctx.createGain()
     const end = Math.min(time + Math.max(0.04, duration), this.noteBoundary)
     gain.gain.setValueAtTime(0.0001, time)
@@ -651,15 +687,18 @@ export class Engine {
     gain.gain.exponentialRampToValueAtTime(0.0001, end + 0.3)
     source.connect(gain).connect(this.bus(id))
     const natural = sample.buffer.duration / source.playbackRate.value
-    this.track(source, time, Math.min(time + natural, end + 0.32, this.noteBoundary))
+    const stop = note.pitchBends?.length
+      ? Math.min(end + 0.32, this.noteBoundary)
+      : Math.min(time + natural, end + 0.32, this.noteBoundary)
+    this.track(source, time, stop)
   }
 
-  private piano(time: number, note: PianoNote, duration: number, id: string): void {
+  private piano(time: number, note: PianoNote, duration: number, id: string, fromBeat = note.startBeat): void {
     const velocity = note.velocity ?? (note.hand === 'right' ? 0.78 : 0.68)
-    this.sampleNote(time, note.midi, duration, velocity * 0.72, this.bus(id), 0.006, RELEASE, velocity < 0.56)
+    this.sampleNote(time, note.midi, duration, velocity * 0.72, this.bus(id), 0.006, RELEASE, velocity < 0.56, note, fromBeat)
   }
 
-  private vocal(time: number, note: MelodyNote, duration: number, id: string): void {
+  private vocal(time: number, note: MelodyNote, duration: number, id: string, fromBeat = note.startBeat): void {
     const ctx = this.ctx!
     const fundamental = 440 * 2 ** ((note.midi - 69) / 12)
     const harmonics = new Float32Array(33)
@@ -672,7 +711,7 @@ export class Engine {
     }
     const source = ctx.createOscillator()
     source.setPeriodicWave(ctx.createPeriodicWave(new Float32Array(33), harmonics))
-    source.frequency.value = fundamental
+    this.pitchBends(source.frequency, fundamental, note, fromBeat, time)
     const gain = ctx.createGain()
     const peak = Math.max(0.01, Math.min(1, note.velocity ?? 0.6)) * 0.22
     gain.gain.setValueAtTime(0, time)
@@ -684,8 +723,8 @@ export class Engine {
   }
 
   /** Creative parts use the softer piano velocity layer. */
-  private lead(time: number, note: PianoNote, duration: number, id: string): void {
-    this.sampleNote(time, note.midi, duration, (note.velocity ?? 0.7) * 0.6, this.bus(id), 0.018, 0.7, true)
+  private lead(time: number, note: PianoNote, duration: number, id: string, fromBeat = note.startBeat): void {
+    this.sampleNote(time, note.midi, duration, (note.velocity ?? 0.7) * 0.6, this.bus(id), 0.018, 0.7, true, note, fromBeat)
   }
 
   private pad(time: number, tones: number[], duration: number): void {

@@ -9,7 +9,14 @@ import { KitRenderer, stageBackground, type Feedback } from './kitRenderer'
 import { feedbackAt, HAND_GLOW, type Strike } from './kitFeedback'
 import { loadPiano, loadPianoManifest, preparedPiano, type PianoManifest, type PreparedPiano } from './pianoAsset'
 import { HandsView } from './HandsView'
+import { useHandsPref } from './useHandsPref'
+import type { PianoGeometry, PianoHandPlan, PianoHands } from './pianoHands'
 
+type HandsKit = {
+  instance: PianoHands
+  build: typeof import('./pianoHands')['buildPianoHandPlan']
+  geometry: typeof import('./pianoHands')['pianoGeometry']
+}
 type Props = {
   song: Song
   engine: Engine
@@ -20,6 +27,7 @@ type Props = {
 }
 
 const PEDAL_LABEL: Record<number, string> = { 64: 'Sustain pedal', 66: 'Sostenuto pedal', 67: 'Soft pedal' }
+const UNASSIGNED_GLOW: [number, number, number] = [0.72, 0.72, 0.72]
 /** The look chosen in this session; a view choice only, never stored. */
 const session: { look?: Look } = {}
 
@@ -68,6 +76,12 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
   // Bumped when a renderer starts, so a model that loaded first is still uploaded and framed.
   const [rendererReady, setRendererReady] = useState(0)
   const renderer = useRef<{ renderer: KitRenderer; size: () => [number, number] } | null>(null)
+  // The hands load only once the 3D keyboard is shown; without them the keyboard works as before.
+  const [loadedKit, setHandsKit] = useState<HandsKit | null>(null)
+  const [handsFailed, setHandsFailed] = useState(false)
+  const [handsOn, toggleHands] = useHandsPref()
+  // With Hands off nothing of the hands is drawn or posed; the models are only fetched once they are on.
+  const handsKit = handsOn ? loadedKit : null
   const camera = useRef<{ view: Float32Array; width: number; height: number } | null>(null)
   const lastSignature = useRef('')
   const lastLabels = useRef('')
@@ -84,7 +98,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       const list = strikes.get(target) ?? []
       const last = list.at(-1)
       if (last && Math.abs(last.beat - note.startBeat) < 1e-9) {
-        if (last.hand !== note.hand) last.hand = 'both'
+        if (last.hand && note.hand && last.hand !== note.hand) last.hand = 'both'
+        else last.hand ??= note.hand
       } else list.push({ beat: note.startBeat, velocity: note.velocity ?? 0.7, specified: true, hand: note.hand })
       strikes.set(target, list)
       held.set(key, [...held.get(key) ?? [], { start: note.startBeat, end: note.startBeat + note.beats, note }])
@@ -94,6 +109,18 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       fingered: notes.some((note) => note.finger), pedals: song.pedals ?? null }
   }, [notes, song.pedals])
 
+  useEffect(() => {
+    if (!handsOn || loadedKit) return
+    let cancelled = false
+    import('./pianoHands').then(async (module) => {
+      const assets = await module.loadHandAssets()
+      if (!cancelled) setHandsKit({ instance: new module.PianoHands(assets), build: module.buildPianoHandPlan, geometry: module.pianoGeometry })
+    }).catch((error) => {
+      console.warn('The piano hands could not be loaded; showing the keyboard without them.', error)
+      if (!cancelled) setHandsFailed(true)
+    })
+    return () => { cancelled = true }
+  }, [handsOn, loadedKit])
   useEffect(() => {
     let cancelled = false
     loadPianoManifest().then((value) => {
@@ -187,6 +214,16 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     current.renderer.setScene(scene.prepared, scene.look, scene.images)
     lastSignature.current = ''
   }, [scene, context, rendererReady])
+  const geometry = useMemo<PianoGeometry | null>(() => scene && handsKit ? handsKit.geometry(scene.prepared) : null, [scene, handsKit])
+  const handPlan = useMemo<PianoHandPlan | null>(() => scene && handsKit ? handsKit.build(notes, (key) => scene.prepared.keys.has(key)) : null, [scene, handsKit, notes])
+  const timelines = useMemo(() => handsKit && handPlan && geometry ? handsKit.instance.compile(handPlan, geometry) : null, [handsKit, handPlan, geometry])
+  useEffect(() => {
+    const current = renderer.current
+    if (!current) return
+    current.renderer.setOverlays(handsKit ? handsKit.instance.overlays : [])
+    lastSignature.current = ''
+  }, [handsKit, scene, context, rendererReady])
+  const handsShown = !!(handsKit && timelines)
   // Frame the keybed, front and centre from above, in a gentle perspective: every key from the lowest to the highest,
   // with a little of the case at each end, and the legs and music rest left out. A narrow field of view keeps the end
   // keys their true shape, and the framing depends only on the instrument and the stage size, not on the lesson's notes.
@@ -259,7 +296,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     const moving = t.playing && !t.countingIn
     for (const { key, note, start } of down) {
       const target: KeyTarget = `key:${key}`
-      const tint = HAND_GLOW[note.hand]
+      const tint = note.hand ? HAND_GLOW[note.hand] : UNASSIGNED_GLOW
       const f = feedback.get(target)
       feedback.set(target, { upcoming: f?.upcoming ?? 0, upcomingTint: f?.upcomingTint ?? tint, pulse: Math.max(f?.pulse ?? 0, 0.4), tint, tint2: tint, split: false,
         since: f?.since ?? 99, velocity: f?.velocity ?? note.velocity ?? 0.7, press: moving ? Math.min(1, (beat - start) * secondsPerBeat / 0.04) : 0 })
@@ -268,7 +305,19 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     for (const controller of pedalDown)
       feedback.set(`pedal:${controller}`, { upcoming: 0, upcomingTint: [0, 0, 0], pulse: 0.3, tint: [0.75, 0.75, 0.8], tint2: [0.75, 0.75, 0.8], split: false, since: 99, velocity: 0.7, press: moving ? 1 : 0 })
     const chord = song.chordLabels?.find((label) => label.startBeat <= beat + 1e-9 && beat < label.startBeat + label.beats)?.symbol ?? ''
-    const signature = `${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${f.press ?? 0}`).join(',')}`
+    // The hands are posed from the same clock; a moving pose redraws the frame, a still one does not.
+    let handsSignature = ''
+    if (handsKit && timelines && geometry && scene && renderer.current && !failure && !lost) {
+      handsKit.instance.update(timelines, geometry, {
+        beat: t.beat, playing: t.playing, countingIn: t.countingIn, secondsPerBeat, reduced,
+        loop: loop ? { start: barStart(song, loop.startBar - 1), end: barStart(song, loop.endBar) } : null,
+      }, true)
+      handsSignature = (['left', 'right'] as const).map((side) => {
+        const hand = handsKit.instance.state[side]
+        return `${Math.round(hand.center * 1000)}:${hand.fingers.map((finger) => `${Math.round(finger.target[0] * 1000)},${Math.round(finger.target[1] * 1000)},${Math.round(finger.target[2] * 1000)}`).join(';')}`
+      }).join('|')
+    }
+    const signature = `${handsSignature}#${[...feedback].map(([target, f]) => `${target}:${Math.round(f.pulse * 40)}:${Math.round(f.upcoming * 40)}:${f.press ?? 0}`).join(',')}`
     const current = renderer.current
     if (signature !== lastSignature.current && current && !failure && !lost && scene) {
       lastSignature.current = signature
@@ -281,11 +330,11 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
         setFailure('The 3D piano stopped drawing because of a graphics error. A flat keyboard follows the same notes instead.')
         return
       }
-      ;(globalThis as { __mizanPianoFrame?: (canvas: HTMLCanvasElement, state: { feedback: typeof feedback }) => void }).__mizanPianoFrame?.(canvas.current!, { feedback })
+      ;(globalThis as { __mizanPianoFrame?: (canvas: HTMLCanvasElement, state: { feedback: typeof feedback; hands?: PianoHands['state'] }) => void }).__mizanPianoFrame?.(canvas.current!, { feedback, hands: handsSignature ? handsKit?.instance.state : undefined })
     }
     // Labels over the keys: for keys that are down, the written finger (when Fingering is on) and the letter (when Note
     // letters is on), in the hand's colour; for keys whose next note is coming (the ones that glow), the letter only.
-    const labelled: { key: number; hand: PianoNote['hand']; finger?: number; letter?: string; upcoming: boolean }[] = []
+    const labelled: { key: number; hand?: PianoNote['hand']; finger?: number; letter?: string; upcoming: boolean }[] = []
     for (const { key, note } of down) {
       const finger = fingering ? note.finger : undefined
       const letter = letters ? keyLetter(note, song.key) : undefined
@@ -319,7 +368,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       }
       fingersLayer.current.replaceChildren(...placed.map(({ key, hand, finger, letter, upcoming, x, y, row }) => {
         const span = document.createElement('span')
-        span.className = upcoming ? 'piano-finger piano-finger-next' : `piano-finger piano-finger-${hand}`
+          span.className = upcoming ? 'piano-finger piano-finger-next'
+            : `piano-finger piano-finger-${hand ?? 'unassigned'}`
         span.dataset.key = String(key)
         if (letter) {
           const name = document.createElement('i')
@@ -335,7 +385,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       }))
     }
     if (section.current) {
-      const pressed = down.map(({ key, note }) => `${key}${note.hand === 'left' ? 'L' : 'R'}${note.finger ?? ''}`).sort().join(',')
+      const pressed = down.map(({ key, note }) => `${key}${note.hand === 'left' ? 'L' : note.hand === 'right' ? 'R' : '?'}${note.finger ?? ''}`).sort().join(',')
       section.current.dataset.pressed = pressed
       section.current.dataset.depressed = [...feedback].filter(([target, f]) => target.startsWith('key:') && (f.press ?? 0) > 0).map(([target]) => target.slice(4)).join(',')
       section.current.dataset.upcoming = [...feedback].filter(([target, f]) => target.startsWith('key:') && f.upcoming > 0.05).map(([target]) => target.slice(4)).join(',')
@@ -347,7 +397,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
         pill.toggleAttribute('data-lit', pedalDown.some((controller) => controller === Number(pill.dataset.pedal)))
       const chordPill = section.current.querySelector<HTMLElement>('[data-chord]')
       if (chordPill) chordPill.textContent = chord ? `Chord ${chord}` : 'Chord —'
-      const notesNow = down.map(({ key, note }) => `${noteName(key)}, ${note.hand} hand${note.finger ? `, finger ${note.finger}` : ''}`).join('; ')
+      const notesNow = down.map(({ key, note }) =>
+        `${noteName(key)}${note.hand ? `, ${note.hand} hand` : ''}${note.finger ? `, finger ${note.finger}` : ''}`).join('; ')
       const summary = `${moving}|${notesNow}`
       if (summary !== lastSummary.current && described.current) {
         lastSummary.current = summary
@@ -363,7 +414,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
   const outside = variant ? notes.filter((note) => Math.round(note.midi) < variant.low || Math.round(note.midi) > variant.high).length : 0
   const chooseLook = (value: Look) => { session.look = value; setLook(value) }
   return (
-    <section ref={section} className="practice-view practice-kit practice-piano" data-variant={variantId ?? ''} data-look={look} data-ready={!!scene && !loading && !failure && !lost} data-lost={lost || undefined}
+    <section ref={section} className="practice-view practice-kit practice-piano" data-variant={variantId ?? ''} data-look={look} data-ready={!!scene && !loading && !failure && !lost} data-lost={lost || undefined} data-hands-shown={handsShown ? 'true' : !handsOn ? 'off' : handsFailed ? 'failed' : 'loading'}
       style={{ ['--stage-bg' as string]: `rgb(${stageBackground(look).map((x) => Math.round(x * 255)).join(' ')})` }}
       aria-label="3D keyboard: keys glow as their notes approach and press while they sound, in the colour of the hand that plays them">
       <div className="kit-toolbar" title="Changes only how the piano looks; the notes, sounds and playback stay the same">
@@ -374,6 +425,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
             {LOOKS.map((option) => <option key={option} value={option}>{LOOK_LABEL[option]}</option>)}
           </select>
         </label>
+        <button type="button" className="kit-toggle" data-kit-toggle="hands" aria-pressed={handsOn} onClick={toggleHands}>Hands</button>
       </div>
       {failure ? (
         <>
@@ -393,8 +445,10 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       </>}
       <p ref={described} className="visually-hidden">No notes at the playhead.</p>
       <p className="practice-legend kit-legend">
-        <span className="kit-pill kit-hand" data-hand="left"><b aria-hidden="true">L</b> Left hand</span>
-        <span className="kit-pill kit-hand" data-hand="right"><b aria-hidden="true">R</b> Right hand</span>
+        {notes.some((note) => note.hand) ? <>
+          <span className="kit-pill kit-hand" data-hand="left"><b aria-hidden="true">L</b> Left hand</span>
+          <span className="kit-pill kit-hand" data-hand="right"><b aria-hidden="true">R</b> Right hand</span>
+        </> : <span className="kit-pill kit-state">No hand assignments</span>}
         {song.chordLabels?.length ? <span className="kit-pill" data-chord="">Chord —</span> : null}
         {plan.pedals
           ? [...new Set(plan.pedals.map((pedal) => pedal.controller))].map((controller) =>
@@ -405,7 +459,10 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
             : 'No fingering is written for this music, so no finger numbers are shown. '}
           {letters ? 'Letters name the keys that are down and the next keys to play. ' : ''}
           {outside ? `${outside} note${outside === 1 ? ' is' : 's are'} outside the piano's ${variant!.keys} keys and cannot be shown. ` : ''}
-          Keys light as their notes approach and go down while they sound, in their hand&apos;s colour; paused, the notes at the playhead stay lit.
+          Keys light as their notes approach and go down while they sound; paused, the notes at the playhead stay lit.
+          {!handsOn ? '' : handsFailed ? ' The hands could not be loaded, so only the keyboard is shown.' : ' Hands show a suggested motion, not a recording.'}
+          {handsShown && handPlan?.placedByPitch ? ' No hands are written for this music, so they are placed by pitch: left below middle C, right from middle C up.' : ''}
+          {handsShown && handPlan && !handPlan.placedByPitch && handPlan.fingersSuggested && notes.length ? ' No fingering is written, so the fingers on the hands are suggestions.' : ''}
         </span>
       </p>
     </section>

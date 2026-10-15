@@ -96,6 +96,10 @@
 .practice-piano .practice-stage[hidden] { display: none; }
 .practice-piano > .practice-hands { margin: 0; }
 .practice-kit .practice-stage { position: relative; max-width: 1320px; height: 280px; margin: 0 auto; }
+/* Wide screens: a taller, fixed-height drum stage so the kit and hands read at size (the split workspace still fills its column). */
+@media (min-width: 1100px) and (min-height: 761px) {
+  .practice-kit:not(.practice-piano) .practice-stage { height: min(56vw, 560px); }
+}
 .practice-kit .practice-canvas { display: block; width: 100%; height: 100%; }
 .kit-label {
   position: absolute;
@@ -179,6 +183,20 @@
 .kit-look select:hover { border-color: var(--ink-3); }
 .kit-look select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kit-hand { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.kit-toggle {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kit-toggle[aria-pressed="true"] { border-color: var(--accent-edge); background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.kit-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kit-hand b { font-weight: 800; }
 .kit-hand[data-hand='left'] b { color: var(--hand-left); }
 .kit-hand[data-hand='right'] b { color: var(--hand-right); }
@@ -460,6 +478,136 @@
   height: 16px;
   color: var(--accent);
 }
+.track-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: none;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.track-edit svg {
+  width: 15px;
+  height: 15px;
+}
+
+.track-edit:hover,
+.track-edit:focus-visible {
+  background: var(--chrome);
+  color: var(--ink);
+  outline: none;
+}
+
+.track-instrument-dialog {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 11;
+  width: min(400px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgb(17 17 17 / 0.08), 0 12px 32px rgb(17 17 17 / 0.14);
+}
+
+.track-instrument-dialog form {
+  display: grid;
+  gap: 10px;
+}
+
+.track-instrument-heading,
+.track-instrument-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.track-instrument-heading strong {
+  font-size: 14px;
+}
+
+.track-instrument-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.track-instrument-close:hover,
+.track-instrument-close:focus-visible {
+  background: var(--chrome);
+  outline: none;
+}
+
+.track-instrument-field {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.track-instrument-field select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.track-instrument-field select:focus-visible,
+.track-instrument-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.track-instrument-origin {
+  margin: 0 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.track-instrument-actions {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.track-instrument-actions .btn {
+  min-height: 36px;
+  padding-inline: 12px;
+}
+
+.track-instrument-actions .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.track-edit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .track-row {
   display: flex;
   align-items: center;
@@ -522,6 +670,39 @@
   width: 66px;
   accent-color: var(--accent-deep);
 }
+
+/* Playability note: what the repair changed, quiet and in the flow above the practice view. */
+.playability-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  flex: 1 0 100%;
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 4px 0 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.playability-lines { margin: 0; }
+.playability-switch { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
+.playability-switch button {
+  padding: 2px 9px;
+  border: 0;
+  background: #fff;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+.playability-switch button[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent-deep); font-weight: 600; }
+.playability-where { flex-basis: 100%; }
+.playability-where summary { cursor: pointer; color: var(--accent-deep); }
+.playability-where ul { margin: 4px 0 0; padding: 0; list-style: none; max-height: 140px; overflow: auto; }
+.playability-where li button { border: 0; background: none; padding: 0; color: var(--accent-deep); font: inherit; text-decoration: underline; cursor: pointer; }
+.fretted-fret.is-adjusted { text-decoration: underline dotted 2px; text-underline-offset: 3px; }
+.fretted-unplayable-mark { fill: var(--danger); font-size: 14px; font-weight: 700; }
 
 .audio-error {
   position: absolute;
@@ -1448,6 +1629,20 @@
   .lesson-facts { display: none; }
   .lesson-goal { font-size: 13px; }
   .lesson-nav .btn { padding-block: 4px; }
+}
+@media (max-height: 820px) and (min-width: 1100px) {
+  /* Guitar and bass: keep the 3D view and the tab on screen together by trimming the lesson card to its goal and one line of detail. */
+  .ws[data-practice-instrument="guitar"] .lesson-panel,
+  .ws[data-practice-instrument="bass"] .lesson-panel { align-items: center; padding: 5px 12px; }
+  .ws[data-practice-instrument="guitar"] .lesson-main,
+  .ws[data-practice-instrument="bass"] .lesson-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 16px; }
+  .ws[data-practice-instrument="guitar"] .lesson-facts,
+  .ws[data-practice-instrument="bass"] .lesson-facts { display: none; }
+  .ws[data-practice-instrument="guitar"] .lesson-goal,
+  .ws[data-practice-instrument="bass"] .lesson-goal {
+    display: -webkit-box; overflow: hidden; font-size: 13px; line-height: 1.3;
+    -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+  }
 }
 
 /* The 3D piano's stage is shaped like a keybed, so the frame is spent on the keys rather than the stand. */

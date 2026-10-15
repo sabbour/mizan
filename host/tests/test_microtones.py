@@ -9,7 +9,6 @@ import pytest
 
 from mizan.alignment import note_chroma
 from mizan.engine.output import export_midi, export_musicxml
-from mizan.errors import InvalidFile
 from mizan.imports import import_score, notes_to_song, parse_midi, parse_musicxml
 from mizan.library import LibraryStore
 
@@ -106,5 +105,5 @@ def test_midi_bend_track_and_declared_range_apply_to_other_note_track():
     midi.tracks[0].append(mido.Message("pitchwheel", channel=0, pitch=0, time=240))
     out = io.BytesIO()
     midi.save(file=out)
-    with pytest.raises(InvalidFile, match="during held notes"):
-        parse_midi(out.getvalue())
+    _, _, _, _, bent = parse_midi(out.getvalue())
+    assert bent[0]["notes"][0]["pitchBends"] == [{"beat": 0.5, "semitones": -0.5}]

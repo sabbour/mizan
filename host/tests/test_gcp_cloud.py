@@ -419,6 +419,109 @@ def test_authorized_session_uses_installed_google_auth_transport_offline(monkeyp
         session.close()
 
 
+def test_missing_application_default_credentials_give_sanitized_login_steps(monkeypatch):
+    import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
+
+    monkeypatch.setattr(
+        google.auth, "default",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            DefaultCredentialsError("private credential file contents")))
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud._authorized_session()
+
+    message = str(failure.value)
+    assert "gcloud auth application-default login" in message
+    assert "same Windows account" in message
+    assert "gcloud auth login" in message
+    assert "private credential file contents" not in message
+
+
+def test_refresh_error_is_not_reported_as_network_or_exposes_provider_detail():
+    from google.auth.exceptions import RefreshError
+
+    class FailedRefresh:
+        def request(self, *_args, **_kwargs):
+            raise RefreshError("private refresh token")
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud._Rest(FailedRefresh()).request("GET", "https://example.invalid")
+
+    message = str(failure.value)
+    assert "could not be refreshed" in message
+    assert "gcloud auth application-default login" in message
+    assert "Could not reach" not in message
+    assert "private refresh token" not in message
+
+
+def test_google_network_failure_is_distinct_from_authentication_failure():
+    class OfflineSession:
+        def request(self, *_args, **_kwargs):
+            raise ConnectionError("private network detail")
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud._Rest(OfflineSession()).request("GET", "https://example.invalid")
+
+    message = str(failure.value)
+    assert "Could not reach Google Cloud" in message
+    assert "Application Default Credentials" not in message
+    assert "private network detail" not in message
+
+
+def test_google_auth_transport_failure_is_reported_as_network_error():
+    from google.auth.exceptions import TransportError
+
+    class OfflineSession:
+        def request(self, *_args, **_kwargs):
+            raise TransportError("private network detail")
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud._Rest(OfflineSession()).request("GET", "https://example.invalid")
+
+    message = str(failure.value)
+    assert "Could not reach Google Cloud" in message
+    assert "Application Default Credentials" in message
+    assert "private network detail" not in message
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    (401, "gcloud auth application-default login"),
+    (403, "Cloud Resource Manager API access"),
+])
+def test_google_project_listing_auth_and_permission_errors_are_distinct(
+        monkeypatch, status, expected):
+    class Failure:
+        def request(self, *_args, **_kwargs):
+            return Response(status, {"error": {"status": "PERMISSION_DENIED",
+                                                "message": "private provider detail"}})
+        def close(self):
+            pass
+
+    monkeypatch.setattr(gcp_cloud, "_rest", lambda: gcp_cloud._Rest(Failure()))
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud.list_subscriptions()
+
+    assert expected in str(failure.value)
+    assert "private provider detail" not in str(failure.value)
+    if status == 403:
+        assert "not missing credentials" in str(failure.value)
+
+
+def test_unexpected_google_request_defect_is_not_reported_as_unreachable():
+    class BrokenSession:
+        def request(self, *_args, **_kwargs):
+            raise RuntimeError("private internal detail")
+
+    with pytest.raises(gcp_cloud.CloudError) as failure:
+        gcp_cloud._Rest(BrokenSession()).request("GET", "https://example.invalid")
+
+    assert "failed unexpectedly" in str(failure.value)
+    assert "Could not reach" not in str(failure.value)
+    assert "private internal detail" not in str(failure.value)
+
+
 @pytest.mark.parametrize("config", [
     {**SETTINGS, "region": "us-east1"},
     {**SETTINGS, "machineType": "e2-standard-8"},

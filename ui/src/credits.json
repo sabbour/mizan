@@ -202,7 +202,7 @@
   },
   {
     "name": "azure-identity",
-    "version": "1.26.0",
+    "version": "1.25.3",
     "license": "MIT",
     "author": "Copyright (c) Microsoft Corporation.",
     "url": "https://github.com/Azure/azure-sdk-for-python",
@@ -258,7 +258,7 @@
   },
   {
     "name": "charset-normalizer",
-    "version": "3.5.2",
+    "version": "3.5.1",
     "license": "MIT",
     "author": "Copyright (c) 2025 TAHRI Ahmed R.",
     "url": "https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
@@ -306,7 +306,7 @@
   },
   {
     "name": "filelock",
-    "version": "4.0.12",
+    "version": "4.0.1",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
     "url": "https://github.com/tox-dev/py-filelock",
@@ -402,7 +402,7 @@
   },
   {
     "name": "MarkupSafe",
-    "version": "3.0.4",
+    "version": "3.0.3",
     "license": "BSD-3-Clause",
     "author": "Copyright 2010 Pallets",
     "url": "https://github.com/pallets/markupsafe/",
@@ -450,9 +450,9 @@
   },
   {
     "name": "networkx",
-    "version": "3.7",
+    "version": "3.6.1",
     "license": "BSD-3-Clause",
-    "author": "Copyright (c) 2004-2026, NetworkX Developers",
+    "author": "Copyright (c) 2004-2025, NetworkX Developers",
     "url": "https://networkx.org/",
     "group": "Host/engine libraries"
   },
@@ -522,7 +522,7 @@
   },
   {
     "name": "PyJWT",
-    "version": "2.15.1",
+    "version": "2.14.0",
     "license": "MIT",
     "author": "Copyright (c) 2015-2022 Jos\u00e9 Padilla",
     "url": "https://github.com/jpadilla/pyjwt",
@@ -538,7 +538,7 @@
   },
   {
     "name": "pythonnet",
-    "version": "3.2.0",
+    "version": "3.1.0",
     "license": "MIT",
     "author": "Copyright (c) 2006-2021 the contributors of the Python.NET project",
     "url": "https://pythonnet.github.io/",
@@ -1430,5 +1430,14 @@
     "url": "https://github.com/sfzinstruments/SMDrums",
     "group": "Fonts & assets",
     "note": "Eight bundled acoustic-kit hits were selected and transcoded from WAV to Ogg Vorbis."
+  },
+  {
+    "name": "WebXR generic hand models",
+    "version": "f4992299601614adbfefd398dc8e281556bb7444",
+    "license": "MIT",
+    "author": "Copyright (c) 2019 Amazon",
+    "url": "https://github.com/immersive-web/webxr-input-profiles/tree/f4992299601614adbfefd398dc8e281556bb7444/packages/assets/profiles/generic-hand",
+    "group": "Fonts & assets",
+    "note": "Bundled left and right connected hand models, unchanged except filenames; posed by Mizan for the optional 3D guitar and bass view."
   }
 ]

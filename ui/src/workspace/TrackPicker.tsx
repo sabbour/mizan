@@ -1,10 +1,23 @@
-import { Fragment, useEffect, useId, useRef, useState } from 'react'
-import { Check, ChevronDown, Drum, Headphones, KeyboardMusic, Mic, Music2, Piano, Trash2, Volume2, VolumeX } from 'lucide-react'
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { AudioLines, Check, ChevronDown, Drum, Guitar, Headphones, KeyboardMusic, Mic, Music2, Pencil, Piano, Trash2, Volume2, VolumeX } from 'lucide-react'
 import type { Stem } from '../library/bridge'
 import type { Instrument, Track } from './song'
+import { GM_INSTRUMENTS, gmInstrumentName } from './gmInstruments'
 
 const ICON: Record<Instrument, typeof Piano> = { piano: Piano, drums: Drum, chords: KeyboardMusic, vocals: Mic, other: Music2 }
 const stemId = (id: Stem['id']) => `stem:${id}`
+const editableProgram = (track: Track) => track.gmProgram != null && track.gmProgram >= 0 &&
+  track.gmProgram < GM_INSTRUMENTS.length ? track.gmProgram : track.instrument === 'piano' ? 0 : null
+const canChangeInstrument = (track: Track) =>
+  track.group !== 'creative' && (track.instrument === 'piano' || track.instrument === 'vocals' || track.instrument === 'other')
+const trackIcon = (track: Track, className: string) => {
+  const Icon = track.chordal ? KeyboardMusic
+    : track.instrument === 'other' && track.gmProgram != null && track.gmProgram >= 0 && track.gmProgram <= 7 ? Piano
+    : track.instrument === 'other' && track.gmProgram != null && track.gmProgram >= 24 && track.gmProgram <= 31 ? Guitar
+      : track.instrument === 'other' && track.gmProgram != null && track.gmProgram >= 32 && track.gmProgram <= 39 ? AudioLines
+        : ICON[track.instrument]
+  return <Icon aria-hidden="true" className={className} />
+}
 
 type Props = {
   tracks: Track[]
@@ -12,6 +25,7 @@ type Props = {
   value: string
   onChange: (id: string) => void
   onDelete?: (id: string) => Promise<void>
+  onSaveInstrument?: (id: string, gmProgram: number) => Promise<void>
   muted: ReadonlySet<string>
   onMute: (id: string) => void
   solo: ReadonlySet<string>
@@ -23,15 +37,22 @@ type Props = {
 }
 
 export function TrackPicker({
-  tracks, stems, value, onChange, onDelete, muted, onMute, solo, onSolo, volumes, onVolume, onSynthOnly, onOriginalOnly,
+  tracks, stems, value, onChange, onDelete, onSaveInstrument, muted, onMute, solo, onSolo, volumes, onVolume, onSynthOnly, onOriginalOnly,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [instrumentDraft, setInstrumentDraft] = useState<number | null>(null)
+  const [instrumentError, setInstrumentError] = useState<string | null>(null)
+  const [savingInstrument, setSavingInstrument] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
+  const instrumentSelect = useRef<HTMLSelectElement>(null)
+  const wasEditing = useRef(false)
   const menuId = useId()
   const current = tracks.find((t) => t.id === value) ?? tracks[0]
+  const editingTrack = tracks.find((track) => track.id === editingId)
 
   useEffect(() => {
     if (!open) return
@@ -49,7 +70,8 @@ export function TrackPicker({
         return
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        if (event.target instanceof HTMLInputElement) return
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement ||
+            event.target instanceof HTMLTextAreaElement) return
         event.preventDefault()
         event.stopPropagation()
         const list = items()
@@ -66,7 +88,16 @@ export function TrackPicker({
     }
   }, [open])
 
-  const Icon = current?.chordal ? KeyboardMusic : current ? ICON[current.instrument] : Headphones
+  useEffect(() => {
+    if (editingId) {
+      wasEditing.current = true
+      instrumentSelect.current?.focus()
+    } else if (wasEditing.current) {
+      wasEditing.current = false
+      button.current?.focus()
+    }
+  }, [editingId])
+
   const synthOn = tracks.some((track) => !muted.has(track.id) && (volumes[track.id] ?? 1) > 0)
   const activeStems = stems.filter((stem) => !muted.has(stemId(stem.id)) && (volumes[stemId(stem.id)] ?? 1) > 0)
   const recordingOn = activeStems.length > 0
@@ -77,6 +108,22 @@ export function TrackPicker({
   const soloName = tracks.find((track) => solo.has(track.id))?.name ?? stems.find((stem) => solo.has(stemId(stem.id)))?.label
   const source = soloName ? `${soloName} solo: ${sounds}` : sounds
   const currentQuiet = current && (muted.has(current.id) || (volumes[current.id] ?? 1) === 0)
+
+  const saveInstrument = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingTrack || instrumentDraft == null || !onSaveInstrument || savingInstrument) return
+    setInstrumentError(null)
+    setSavingInstrument(true)
+    try {
+      await onSaveInstrument(editingTrack.id, instrumentDraft)
+      setEditingId(null)
+    } catch (error) {
+      setInstrumentDraft(editableProgram(editingTrack))
+      setInstrumentError(error instanceof Error ? error.message : 'The instrument could not be changed.')
+    } finally {
+      setSavingInstrument(false)
+    }
+  }
 
   const controls = (id: string, name: string) => {
     const quiet = muted.has(id)
@@ -132,7 +179,7 @@ export function TrackPicker({
         onClick={() => setOpen((value) => !value)}
         title={`Choose sounds and tracks. ${source}.${currentQuiet ? ` ${current.name} is muted.` : ''}`}
       >
-        <Icon aria-hidden="true" className="track-icon" />
+        {current ? trackIcon(current, 'track-icon') : <Headphones aria-hidden="true" className="track-icon" />}
         <span className="track-text">
           <span className="track-name">{current?.name ?? 'Sounds'}{currentQuiet ? ' (muted)' : ''}</span>
           <span className="track-detail">{source}</span>
@@ -159,7 +206,6 @@ export function TrackPicker({
           {!tracks.some((track) => track.group !== 'creative') &&
             <p className="track-empty">No transcribed score is available; uncertain candidates may have been withheld.{stems.length ? ' You can still listen to the recording below.' : ''}</p>}
           {tracks.map((track, index) => {
-            const TrackIcon = track.chordal ? KeyboardMusic : ICON[track.instrument]
             const selected = track.id === current?.id
             const firstCreative = track.group === 'creative' && tracks[index - 1]?.group !== 'creative'
             return (
@@ -182,7 +228,7 @@ export function TrackPicker({
                       button.current?.focus()
                     }}
                   >
-                    <TrackIcon aria-hidden="true" className="track-icon" />
+                    {trackIcon(track, 'track-icon')}
                     <span className="track-text">
                       <span className="track-name">{track.name}</span>
                       <span className="track-detail">{track.detail}{track.instrument === 'other'
@@ -194,6 +240,24 @@ export function TrackPicker({
                     {selected && <Check aria-hidden="true" className="track-check" />}
                   </button>
                   {controls(track.id, track.name)}
+                  {onSaveInstrument && canChangeInstrument(track) && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="track-edit"
+                      aria-label={`Change ${track.name} instrument`}
+                      title={`Change ${track.name} instrument`}
+                      onClick={() => {
+                        setOpen(false)
+                        setEditingId(track.id)
+                        setInstrumentDraft(editableProgram(track))
+                        setInstrumentError(null)
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                      <span>Change instrument</span>
+                    </button>
+                  )}
                   {onDelete && track.group !== 'creative' && (
                     <button type="button" role="menuitem" className="track-mute"
                       disabled={deleting !== null}
@@ -248,6 +312,48 @@ export function TrackPicker({
               })}
             </>
           )}
+        </div>
+      )}
+      {editingTrack && (
+        <div className="track-instrument-dialog" role="dialog" aria-label={`Change ${editingTrack.name} instrument`}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !savingInstrument) {
+              event.preventDefault()
+              setEditingId(null)
+            }
+          }}>
+          <form onSubmit={(event) => void saveInstrument(event)}>
+            <div className="track-instrument-heading">
+              <strong>Change instrument</strong>
+              <button type="button" className="track-instrument-close" disabled={savingInstrument}
+                aria-label="Cancel instrument change" onClick={() => setEditingId(null)}>×</button>
+            </div>
+            <p className="track-empty">This changes the sound and practice view. Note pitches, times, lengths, velocities, and the original recording stay unchanged.</p>
+            {editingTrack.instrumentCorrection?.detectedName || editingTrack.sourceInstrument ? (
+              <p className="track-instrument-origin">
+                Originally detected as {editingTrack.instrumentCorrection?.detectedName ??
+                  editingTrack.sourceInstrument!.replace(/[_-]+/g, ' ')}.
+              </p>
+            ) : null}
+            <label className="track-instrument-field">
+              <span>Instrument</span>
+              <select ref={instrumentSelect} value={instrumentDraft ?? ''} disabled={savingInstrument}
+                onChange={(event) => setInstrumentDraft(event.target.value === '' ? null : Number(event.target.value))}>
+                <option value="">Choose an instrument</option>
+                {GM_INSTRUMENTS.map((_, program) => (
+                  <option value={program} key={program}>{gmInstrumentName(program)}</option>
+                ))}
+              </select>
+            </label>
+            {instrumentError && <p className="track-empty" role="alert">{instrumentError}</p>}
+            <div className="track-instrument-actions">
+              <button type="button" className="btn" disabled={savingInstrument} onClick={() => setEditingId(null)}>Cancel</button>
+              <button type="submit" className="btn btn-primary"
+                disabled={savingInstrument || instrumentDraft == null || instrumentDraft === editingTrack.gmProgram}>
+                {savingInstrument ? 'Saving…' : 'Save instrument'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

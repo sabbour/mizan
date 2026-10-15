@@ -1,6 +1,7 @@
 import { buildSong } from '../workspace/song'
 import type { CloudProvider, Entry, FfmpegStatus, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
 import { foldSearchText } from './searchText'
+import { gmInstrumentName } from '../workspace/gmInstruments'
 
 // A stand-in host for the browser dev server: same calls and shapes as the Python bridge.
 
@@ -9,7 +10,7 @@ const STAGES: Stage[] = ['inspect', 'download', 'decode', 'detect', 'separate', 
 
 const entries: Entry[] = [
   {
-    id: 's1', title: 'Paper Rain', artist: 'Mizan Sessions', thumbnail: null, source: 'youtube', parts: ['Piano', 'Drum kit'], recording: true, duration: 196,
+    id: 's1', title: 'Paper Rain', artist: 'Mizan Sessions', thumbnail: null, source: 'youtube', parts: ['Piano', 'Drum kit', 'Electric Guitar Clean'], recording: true, duration: 196,
     createdAt: ago(60 * 30), practicedAt: ago(95), outdated: false, transcriptionModel: 'muscriptor-medium', separationMethod: 'htdemucs-6s-onnx',
     folders: ['f1'],
     position: { bar: 34, loop: { startBar: 33, endBar: 38 }, loopName: null, rate: 0.75, trackId: 'piano', muted: ['piano'], solo: [] },
@@ -197,6 +198,21 @@ const score = (entry: Entry) => {
     if (!song.tracks.some((track) => track.group !== 'creative' && track.instrument === 'piano')) song.piano = []
     if (!song.tracks.some((track) => track.group !== 'creative' && track.instrument === 'drums')) song.drums = []
     if (!song.tracks.some((track) => track.group !== 'creative' && track.instrument === 'vocals')) song.vocals = []
+    if (entry.id === 's1' && entry.parts.includes('Electric Guitar Clean')) {
+      const guitar: ReturnType<typeof buildSong>['tracks'][number] = {
+        id: 'instrument-clean-electric-guitar', instrument: 'other', name: 'Electric Guitar Clean',
+        detail: 'Draft notes from original mix; unverified instrument label',
+        gmProgram: 27, group: 'detected', sourceInstrument: 'clean_electric_guitar',
+      }
+      song.tracks.push(guitar)
+      song.instrumentNotes = {
+        ...song.instrumentNotes,
+        [guitar.id]: [
+          { midi: 64, startBeat: 0, beats: 1, velocity: 0.7, trackId: guitar.id, sourceInstrument: 'clean_electric_guitar' },
+          { midi: 67, startBeat: 2, beats: 0.5, velocity: 0.6, trackId: guitar.id, sourceInstrument: 'clean_electric_guitar' },
+        ],
+      }
+    }
     scores.set(entry.id, song)
   }
   return scores.get(entry.id)!
@@ -691,8 +707,83 @@ export const mockHost = {
     if (track.instrument === 'piano') song.piano = []
     if (track.instrument === 'drums') song.drums = []
     if (track.instrument === 'vocals') song.vocals = []
+    if (track.instrument === 'other') {
+      song.instrumentNotes = Object.fromEntries(
+        Object.entries(song.instrumentNotes ?? {}).filter(([ownerId]) => ownerId !== trackId),
+      )
+    }
     entry.parts = song.tracks.filter((item) => item.group !== 'creative').map((item) => item.name)
     if (entry.position?.trackId === trackId) entry.position.trackId = song.tracks[0]?.id ?? ''
+    return this.open_song(id)
+  },
+  change_score_track_instrument(id: string, trackId: string, gmProgram: number) {
+    if (typeof gmProgram !== 'number' || !Number.isInteger(gmProgram) || gmProgram < 0 || gmProgram >= 120) {
+      return fail('invalid_score_track_instrument', 'Choose a supported pitched instrument.')
+    }
+    const entry = entries.find((item) => item.id === id)
+    if (!entry) return fail('song_not_found', 'This song could not be found.')
+    const song = score(entry)
+    const matches = song.tracks.filter((item) => item.id === trackId)
+    if (matches.length > 1) return fail('score_track_instrument_ambiguous', 'This score does not identify which track to change.')
+    const track = matches[0]
+    if (!track || track.group === 'creative') {
+      return fail('score_track_not_found', 'This transcribed score track could not be found.')
+    }
+    if (track.instrument !== 'piano' && track.instrument !== 'vocals' && track.instrument !== 'other') {
+      return fail('score_track_instrument_not_editable', 'Only saved transcribed pitched tracks can have their instrument changed.')
+    }
+    const instrumentNotes = song.instrumentNotes ?? {}
+    let selectedEvents: ((typeof song.piano)[number] | (typeof song.vocals)[number])[] = []
+    let remainingEvents: typeof selectedEvents = []
+    if (track.instrument === 'other') {
+      selectedEvents = instrumentNotes[trackId]
+      if (!Array.isArray(selectedEvents) || selectedEvents.some((note) => !note || typeof note !== 'object' ||
+        (Object.hasOwn(note, 'trackId') && note.trackId == null) || (note.trackId != null && note.trackId !== trackId))) {
+        return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+      }
+    } else {
+      const source = track.instrument === 'piano' ? song.piano : song.vocals
+      const sameInstrument = song.tracks.filter((item) => item.group !== 'creative' && item.instrument === track.instrument)
+      if (!Array.isArray(source) || new Set(sameInstrument.map((item) => item.id)).size !== sameInstrument.length ||
+          Object.hasOwn(instrumentNotes, trackId)) {
+        return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+      }
+      for (const note of source) {
+        if (!note || typeof note !== 'object') {
+          return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+        }
+        const ownerId = note.trackId
+        if (ownerId == null) {
+          if ('trackId' in note || sameInstrument.length !== 1) {
+            return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+          }
+          selectedEvents.push(note)
+        } else if (ownerId === trackId) selectedEvents.push(note)
+        else if (sameInstrument.some((item) => item.id === ownerId)) remainingEvents.push(note)
+        else return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+      }
+    }
+    for (const [ownerId, notes] of Object.entries(instrumentNotes)) {
+      if (!Array.isArray(notes) || notes.some((note) => !note || typeof note !== 'object' ||
+          (Object.hasOwn(note, 'trackId') && note.trackId == null) ||
+          (note.trackId != null && note.trackId !== ownerId)) ||
+          (ownerId !== trackId && notes.some((note) => note.trackId === trackId))) {
+        return fail('score_track_instrument_ambiguous', 'This score does not identify which notes belong to this track.')
+      }
+    }
+    if (track.instrument !== 'other') song[track.instrument] = remainingEvents
+    const correction = track.instrumentCorrection ?? {
+      detectedName: track.name,
+      detectedInstrument: track.instrument,
+      detectedGmProgram: track.gmProgram ?? null,
+      sourceInstrument: track.sourceInstrument ?? null,
+    }
+    track.instrumentCorrection = { ...correction, gmProgram }
+    track.gmProgram = gmProgram
+    track.name = gmInstrumentName(gmProgram)!
+    track.instrument = 'other'
+    song.instrumentNotes = { ...instrumentNotes, [trackId]: selectedEvents }
+    entry.parts = song.tracks.filter((item) => item.group !== 'creative').map((item) => item.name)
     return this.open_song(id)
   },
   save_position(id: string, position: Entry['position']) {

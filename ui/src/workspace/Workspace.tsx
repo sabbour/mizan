@@ -20,6 +20,8 @@ import { GuitarTabView } from './GuitarTabView'
 import { BassTabView } from './BassTabView'
 import { isGuitarTrack } from './guitar'
 import { isBassTrack } from './bass'
+import { applyPlayability } from './playability'
+import { PlayabilityNote } from './PlayabilityNote'
 import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
 import './workspace.css'
@@ -36,6 +38,7 @@ type Props = {
   onPosition?: (p: Position) => void
   onBack?: () => void
   onDeleteTrack?: (trackId: string) => Promise<void>
+  onSaveInstrument?: (trackId: string, gmProgram: number) => Promise<void>
   analysisNotice?: ReactNode
   /** Starting choices when the player has not saved preferences, e.g. a drum lesson opens with the 3D kit. */
   defaults?: { click?: boolean; drums?: PracticeView; piano?: PracticeView; guitar?: PracticeView; bass?: PracticeView; noteNames?: boolean; fingering?: boolean }
@@ -69,10 +72,11 @@ function FrettedPractice({ song, track, engine, instrument, view }: {
 }
 
 export function Workspace({
-  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, analysisNotice, defaults, onGuides,
+  song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, onSaveInstrument, analysisNotice, defaults, onGuides,
 }: Props) {
   const visibleStems = stems
   const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
+  const instrumentChangeBeat = useRef<number | null>(null)
   // A position saved before re-analysis can name bars this song no longer has (a 158-bar 4/4
   // reading re-analysed as 89 bars of 6/4); resume within this song's bars instead.
   const start = useMemo(() => saved && {
@@ -119,36 +123,50 @@ export function Workspace({
   const tracks = useMemo<Track[]>(() => song.tracks.filter((item) => item.group !== 'creative'), [song])
   const track = tracks.find((t) => t.id === trackId) ?? tracks[0]
   const instrument: Instrument = track?.instrument ?? 'piano'
+  const pianoGmTrack = instrument === 'other' && track != null && track.gmProgram != null &&
+    track.gmProgram >= 0 && track.gmProgram <= 7
   const practiceInstrument: PracticeInstrument | null = instrument === 'piano' || instrument === 'drums' ? instrument
-    : instrument === 'other' && track ? isBassTrack(track) ? 'bass' : isGuitarTrack(track) ? 'guitar' : null : null
+    : pianoGmTrack ? 'piano'
+      : instrument === 'other' && track ? isBassTrack(track) ? 'bass' : isGuitarTrack(track) ? 'guitar' : null : null
+  const viewInstrument: Instrument = pianoGmTrack ? 'piano' : instrument
   const frettedInstrument = practiceInstrument === 'guitar' || practiceInstrument === 'bass' ? practiceInstrument : null
-  const pitched = instrument !== 'drums'
+  const pitched = viewInstrument !== 'drums'
   // Chord-based tracks can be read as notes (Names) or as a chord chart (Shapes); melodic parts read like their instrument.
   const playAlong = !!track?.chordal
   const chart = playAlong && chordMode === 'shapes'
-  const viewed = useMemo(
+  const chosen = useMemo(
     () => {
       if (instrument === 'chords') return voiced
+      if (pianoGmTrack && track) return { ...song, piano: song.instrumentNotes?.[track.id] ?? [] }
       if (instrument === 'other') return song
       if (!track || !song.tracks.some((item) => item.id === track.id && item.group !== 'creative')) return song
       if (song.tracks.filter((item) => item.instrument === instrument && item.group !== 'creative').length < 2) return song
       return { ...song, [instrument]: song[instrument].filter((event) => event.trackId === track.id) }
     },
-    [song, voiced, instrument, track],
+    [song, voiced, instrument, pianoGmTrack, track],
   )
+  // The stored song is never changed: hands and string choices are made playable from it each time, and the player can
+  // switch back to the music exactly as transcribed.
+  const [asTranscribed, setAsTranscribed] = useState(false)
+  const playableTarget = instrument === 'chords' || chart || track?.group === 'creative' ? null : practiceInstrument === 'drums' ? null : practiceInstrument
+  const playable = useMemo(() => applyPlayability(chosen, { instrument: playableTarget, track }), [chosen, playableTarget, track])
+  const viewed = asTranscribed ? chosen : playable.song
   // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
-  const kitPane = !chart && instrument === 'drums' && practice.drums === 'kit'
-  const keyboardPane = !chart && instrument === 'piano' && practice.piano === 'keyboard'
-  const sticking = useMemo(() => instrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
-    [instrument, showSticking, viewed])
+  const pianoHandAssignments = viewed.piano.length > 0 && viewed.piano.every((note) => note.hand != null)
+  const pianoPracticeView = practiceInstrument === 'piano' && practice.piano === 'hands' && !pianoHandAssignments
+    ? 'keyboard' : practice.piano
+  const kitPane = !chart && viewInstrument === 'drums' && practice.drums === 'kit'
+  const keyboardPane = !chart && practiceInstrument === 'piano' && pianoPracticeView === 'keyboard'
+  const sticking = useMemo(() => viewInstrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
+    [viewInstrument, showSticking, viewed])
   const xml = useMemo(() => {
     if (chart) return ''
-    if (instrument === 'chords') return chordsXml(viewed)
-    if (instrument === 'drums') return drumXml(viewed, hasPitchedScore(song), sticking?.hands)
-    if (instrument === 'vocals') return vocalXml(viewed)
-    if (instrument === 'other' && track) return instrumentXml(viewed, track)
+    if (viewInstrument === 'chords') return chordsXml(viewed)
+    if (viewInstrument === 'drums') return drumXml(viewed, hasPitchedScore(song), sticking?.hands)
+    if (viewInstrument === 'vocals') return vocalXml(viewed)
+    if (viewInstrument === 'other' && track) return instrumentXml(viewed, track)
     return pianoXml(viewed)
-  }, [viewed, song, instrument, chart, track, sticking])
+  }, [viewed, song, viewInstrument, chart, track, sticking])
   const storageKey = `mizan:mixer:${songId}`
   const stored = useMemo<StoredMixer | null>(() => {
     try {
@@ -259,7 +277,10 @@ export function Workspace({
       setAudioLoading(loading)
       if (loading) setAudioError(null)
     }
-    if (start) engine.seek(barStart(song, start.bar - 1))
+    const changedAt = instrumentChangeBeat.current
+    instrumentChangeBeat.current = null
+    if (changedAt != null) engine.seek(changedAt)
+    else if (start) engine.seek(barStart(song, start.bar - 1))
     return () => {
       engine.onLoading = null
       engine.onError = null
@@ -304,7 +325,7 @@ export function Workspace({
   const jump = useCallback((bar: number) => engine.seek(barStart(song, Math.max(1, Math.min(song.bars, bar)) - 1)), [engine, song])
 
   const section = song.sections[sectionAt(song, pos.bar)]
-  const confidence = song.confidence[track?.chordal ? 'chords' : instrument] ?? []
+  const confidence = song.confidence[track?.chordal ? 'chords' : viewInstrument] ?? []
 
   const toggleLoop = useCallback(() => {
     setLoop((l) => {
@@ -414,6 +435,7 @@ export function Workspace({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable ||
+        !!target.closest('[role="dialog"]') ||
         (target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))
       if (editing || e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key
@@ -434,7 +456,7 @@ export function Workspace({
         m: () => track && toggleMute(track.id),
         c: toggleClick,
         n: () => pitched && setNoteNames((v) => !v),
-        f: () => instrument === 'piano' && setFingering((v) => !v),
+        f: () => viewInstrument === 'piano' && setFingering((v) => !v),
         s: () => track && toggleSolo(track.id),
         k: () => playAlong && setChordMode((v) => (v === 'names' ? 'shapes' : 'names')),
         v: () => instrument === 'chords' && setSmooth((v) => !v),
@@ -451,10 +473,10 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, toggleLoop, toggleClick, jump, pos.bar, pos.chordIdx, rate, setSpeed, toggleMute, toggleSolo, track, pitched, instrument, playAlong])
+  }, [togglePlay, toggleLoop, toggleClick, jump, pos.bar, pos.chordIdx, rate, setSpeed, toggleMute, toggleSolo, track, pitched, viewInstrument, playAlong])
 
   return (
-    <div className="ws" data-instrument={instrument} data-practice-instrument={practiceInstrument ?? undefined}>
+    <div className="ws" data-instrument={viewInstrument} data-practice-instrument={practiceInstrument ?? undefined}>
       <header className="ws-head">
         <div className="ws-title">
           {onBack && (
@@ -491,10 +513,12 @@ export function Workspace({
         {/* The view and track controls share one column that wraps, however many a track brings, so the title keeps its room. */}
         <div className="ws-controls">
         {playAlong && (
-          <ChordView value={chordMode} onChange={setChordMode} smooth={instrument === 'chords' ? smooth : null} onSmooth={() => setSmooth((v) => !v)} />
+          <ChordView value={chordMode} onChange={setChordMode} smooth={viewInstrument === 'chords' ? smooth : null} onSmooth={() => setSmooth((v) => !v)} />
         )}
         {!chart && practiceInstrument && (
-          <PracticeViewPicker instrument={practiceInstrument} value={practice[practiceInstrument]}
+          <PracticeViewPicker instrument={practiceInstrument}
+            value={practiceInstrument === 'piano' ? pianoPracticeView : practice[practiceInstrument]}
+            handAssignments={practiceInstrument !== 'piano' || pianoHandAssignments}
             onChange={(view) => choosePractice(practiceInstrument, view)} />
         )}
         <TrackPicker
@@ -505,6 +529,17 @@ export function Workspace({
           onDelete={onDeleteTrack ? async (id) => {
             engine.pause()
             await onDeleteTrack(id)
+          } : undefined}
+          onSaveInstrument={onSaveInstrument ? async (id, gmProgram) => {
+            const beat = engine.read().beat
+            if (engine.playing) engine.pause()
+            instrumentChangeBeat.current = beat
+            try {
+              await onSaveInstrument(id, gmProgram)
+            } catch (error) {
+              instrumentChangeBeat.current = null
+              throw error
+            }
           } : undefined}
           muted={muted}
           onMute={toggleMute}
@@ -517,6 +552,7 @@ export function Workspace({
         />
         </div>
         {analysisNotice}
+        {playable.summary && <PlayabilityNote summary={playable.summary} song={chosen} engine={engine} asTranscribed={asTranscribed} onToggle={setAsTranscribed} />}
       </header>
 
       {audioError && <div className="audio-error" role="alert">{audioError}</div>}
@@ -539,7 +575,7 @@ export function Workspace({
       ) : chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={instrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={instrument === 'vocals'} instrumentGuide={instrument === 'other' ? track?.id : undefined} practice={instrument === 'piano' || instrument === 'drums' ? practice[instrument] : 'score'} fingering={fingering} onPick={pick} previewId={track?.id ?? 'chords'} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={viewInstrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={viewInstrument === 'vocals'} instrumentGuide={viewInstrument === 'other' ? track?.id : undefined} practice={practiceInstrument === 'piano' ? pianoPracticeView : viewInstrument === 'drums' ? practice.drums : 'score'} fingering={fingering} onPick={pick} previewId={track?.id ?? 'chords'} />
       )}
 
       <footer className="ws-foot">
@@ -552,7 +588,7 @@ export function Workspace({
           click={click}
           noteNames={pitched ? noteNames : null}
           onNoteNames={() => setNoteNames((v) => !v)}
-          fingering={instrument === 'piano' ? fingering : null}
+          fingering={viewInstrument === 'piano' ? fingering : null}
           onFingering={() => setFingering((v) => !v)}
           onPlay={togglePlay}
           onStep={(d) => jump(pos.bar + d)}
@@ -560,7 +596,7 @@ export function Workspace({
           onLoop={toggleLoop}
           onCountIn={toggleCountIn}
           onClick={toggleClick}
-          sticking={instrument === 'drums' ? showSticking : null}
+          sticking={viewInstrument === 'drums' ? showSticking : null}
           onSticking={toggleSticking}
           onGo={go}
         />

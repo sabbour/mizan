@@ -1,6 +1,6 @@
 import { barAt, measures } from './meter'
 import type { MelodyNote, Song, Track } from './song'
-import { LOOKS, type Look } from './prefs'
+import { FRETTED_LOOKS, type FrettedStyle } from './frettedStyles'
 
 export type FrettedString = {
   string: number
@@ -18,7 +18,7 @@ export type FrettedInstrumentConfig = {
   scaleLength: number
   frets: number
   strings: readonly FrettedString[]
-  styles: readonly Look[]
+  styles: readonly FrettedStyle[]
 }
 
 export const GUITAR: FrettedInstrumentConfig = {
@@ -35,7 +35,7 @@ export const GUITAR: FrettedInstrumentConfig = {
     { string: 5, conventionalStringNumber: 2, name: 'B', openPitch: 'B3', midi: 59, gaugeInches: 0.013 },
     { string: 6, conventionalStringNumber: 1, name: 'High E', openPitch: 'E4', midi: 64, gaugeInches: 0.01 },
   ],
-  styles: LOOKS,
+  styles: FRETTED_LOOKS,
 }
 
 export const BASS: FrettedInstrumentConfig = {
@@ -50,7 +50,7 @@ export const BASS: FrettedInstrumentConfig = {
     { string: 3, conventionalStringNumber: 2, name: 'D', openPitch: 'D2', midi: 38, gaugeInches: 0.065 },
     { string: 4, conventionalStringNumber: 1, name: 'G', openPitch: 'G2', midi: 43, gaugeInches: 0.045 },
   ],
-  styles: LOOKS,
+  styles: FRETTED_LOOKS,
 }
 
 export type FrettedPosition = {
@@ -73,7 +73,9 @@ export type FrettedTabNote = {
   position?: FrettedPosition
   finger?: 1 | 2 | 3 | 4 | 5
   reason?: 'fractional-pitch' | 'outside-range' | 'no-distinct-string'
-    | 'invalid-authored-position'
+    | 'invalid-authored-position' | 'not-playable'
+  /** The position was changed so the moment can be played. */
+  adjusted?: boolean
 }
 
 export type FrettedVisualState =
@@ -82,6 +84,11 @@ export type FrettedVisualState =
   | 'suggested-finger' | 'selected'
 
 const PITCH_CLASSES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B']
+
+export function frettedPitchName(midi: number): string {
+  if (!Number.isInteger(midi) || midi < 0 || midi > 127) return `MIDI ${midi}`
+  return `${PITCH_CLASSES[midi % 12]}${Math.floor(midi / 12) - 1}`
+}
 
 export function fretDistanceFromNut(fret: number, config: FrettedInstrumentConfig): number {
   if (!Number.isInteger(fret) || fret < 0) throw new RangeError('A fret must be a non-negative integer.')
@@ -100,7 +107,7 @@ function positionFor(string: FrettedString, fret: number, config: FrettedInstrum
     conventionalStringNumber: string.conventionalStringNumber,
     fret,
     midi,
-    pitchName: `${pitchClass}${Math.floor(midi / 12) - 1}`,
+    pitchName: frettedPitchName(midi),
     pitchClass,
     octave: Math.floor(midi / 12) - 1,
     fretboardCoordinate: fret === 0 ? config.scaleLength
@@ -135,7 +142,8 @@ export function planFrettedTab(
   const result: FrettedTabNote[] = notes.map((note, index) => ({
     index, midi: note.midi, startBeat: note.startBeat, beats: note.beats,
     finger: note.finger,
-    reason: Number.isInteger(note.midi) ? undefined : 'fractional-pitch',
+    ...(note.adjusted ? { adjusted: true } : {}),
+    reason: !Number.isInteger(note.midi) ? 'fractional-pitch' : note.notPlayable ? 'not-playable' : undefined,
   }))
   const authored = notes.map((note) => {
     if (note.string === undefined && note.fret === undefined) return undefined
@@ -221,8 +229,9 @@ export function identifiesInstrument(
   kind: 'guitar' | 'bass',
 ): boolean {
   const identity = `${track.sourceInstrument ?? ''} ${track.id} ${track.name}`.toLowerCase().replace(/[_-]+/g, ' ')
-  if (Number.isInteger(track.gmProgram) && track.gmProgram! >= 24 && track.gmProgram! <= 39)
-    return kind === 'guitar' ? track.gmProgram! <= 31 : track.gmProgram! >= 32
+  if (Number.isInteger(track.gmProgram) && track.gmProgram! >= 0 && track.gmProgram! <= 127)
+    return kind === 'guitar' ? track.gmProgram! >= 24 && track.gmProgram! <= 31
+      : track.gmProgram! >= 32 && track.gmProgram! <= 39
   const has = (word: string) => new RegExp(`(?:^|[^a-z0-9])${word}(?:$|[^a-z0-9])`).test(identity)
   if (has('ukulele') || has('ukelele') || has('mandolin')) return false
   if (kind === 'guitar') return !has('bass') && (has('guitar') || has('gtr'))
