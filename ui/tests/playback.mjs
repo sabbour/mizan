@@ -1954,6 +1954,16 @@ async function pianoAudioChecks() {
 }
 
 async function pianoChecks(width) {
+  const { LESSONS } = await import('/src/course/curriculum.ts')
+  const { PIANO_LESSONS } = await import('/src/course/piano.ts')
+  const { PIANO_INSPIRED } = await import('/src/course/pianoInspired.ts')
+  const { FRETTED_BROWSE_LESSONS } = await import('/src/course/fretted.ts')
+  const instruments = [
+    { id: 'drums', label: 'Drums', count: LESSONS.length },
+    { id: 'piano', label: 'Piano', count: PIANO_LESSONS.length + PIANO_INSPIRED.length },
+    { id: 'guitar', label: 'Guitar', count: FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'guitar').length },
+    { id: 'bass', label: 'Bass', count: FRETTED_BROWSE_LESSONS.filter((lesson) => lesson.instrument === 'bass').length },
+  ]
   const check = (value, message) => { if (!value) throw new Error(message) }
   const wait = async (test, message, tries = 300) => {
     for (let i = 0; i < tries; i++) {
@@ -1971,11 +1981,14 @@ async function pianoChecks(width) {
   const practiceBefore = localStorage.getItem('mizan:practice')
   await wait(() => document.querySelector('.lib-tabs'), 'The library shows its tabs')
   const tab = document.querySelector('.lib-tabs [data-tab="course"]')
-  check(tab.textContent === 'Course287', `The Course tab counts drum and piano lessons: ${tab.textContent}`)
+  check(tab.textContent === `Course${instruments.reduce((sum, instrument) => sum + instrument.count, 0)}`,
+    `The Course tab counts lessons for all four instruments: ${tab.textContent}`)
   tab.click()
   await wait(() => document.querySelector('.course-instrument'), 'The course offers an instrument choice')
   const radios = [...document.querySelectorAll('.course-instrument [role="radio"]')]
-  check(radios.map((radio) => `${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') === 'Drums 142:true|Piano 145:false', `Drums and piano with their counts: ${radios.map((r) => r.textContent)}`)
+  check(radios.map((radio) => `${radio.dataset.instrument}:${radio.textContent}:${radio.getAttribute('aria-checked')}`).join('|') ===
+    instruments.map(({ id, label, count }) => `${id}:${label} ${count}:${id === 'drums'}`).join('|'),
+    `All four instruments with their lesson counts and Drums selected: ${radios.map((r) => r.textContent)}`)
   radios[0].focus()
   radios[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
   await wait(() => document.querySelector('#course-piano') && document.activeElement?.dataset.instrument === 'piano', 'ArrowRight chooses Piano')
@@ -2035,7 +2048,10 @@ async function pianoChecks(width) {
   document.querySelector('.chordview-option[data-view="keyboard"]').click()
   await wait(() => document.querySelector('.chordview-option[data-view="keyboard"]')?.getAttribute('aria-checked') === 'true',
     'The 3D keyboard remains available as an explicit choice')
-  check(document.querySelectorAll('.score-bar').length === 8 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed with each chord'), 'An eight-bar score and lesson panel with its pedalling')
+  // The 3D keyboard puts the score in a new side-by-side layout, so the score is drawn again; wait for it.
+  await wait(() => document.querySelectorAll('.score-bar').length === 8, 'The score is drawn again beside the 3D keyboard')
+  check(document.querySelectorAll('.score-bar').length === 8 && document.querySelector('.lesson-panel')?.textContent.includes('Sustain, changed with each chord'),
+    `An eight-bar score and lesson panel with its pedalling (${document.querySelectorAll('.score-bar').length} bars; panel: ${document.querySelector('.lesson-panel')?.textContent})`)
   check(document.querySelector('.lesson-panel').getBoundingClientRect().height <= 260 && document.querySelector('.lesson-details') && !document.querySelector('.lesson-details').open,
     `The lesson panel stays compact, details behind a disclosure (${Math.round(document.querySelector('.lesson-panel').getBoundingClientRect().height)}px)`)
   // The score never shows finger numbers (they stay in the written part and on the keyboards).
