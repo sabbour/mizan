@@ -132,4 +132,3 @@ export function suggestSticking(song: Song): (Hand | undefined)[] {
   }
   return hands
 }
-
