@@ -42,7 +42,7 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
   const written = useMemo(() => notes.some((note) => note.finger), [notes])
   const fingers = useMemo(() => written
     ? new Map(notes.filter((note) => note.finger && note.hand).map((note) => [note, { hand: note.hand!, finger: note.finger! } as Finger]))
-    : suggestFingers(notes), [notes, written])
+    : suggestFingers(notes, song.pedals, { bpm: song.bpm }), [notes, written, song.pedals, song.bpm])
   const ordered = useMemo(() => [...notes].sort((a, b) => a.startBeat - b.startBeat), [notes])
   // Each key's strikes for the shared feedback: the same approach glow and hit pulse as the 3D piano and kit.
   const strikes = useMemo(() => {

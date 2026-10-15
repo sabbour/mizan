@@ -1,8 +1,8 @@
 import type { Overlay } from './kitRenderer'
 import type { MaterialView } from './kitAsset'
-import { keyOf, suggestFingers } from './fingers'
+import { keyOf, pedalCarries, suggestFingers } from './fingers'
 import type { PreparedPiano } from './pianoAsset'
-import type { PianoNote } from './song'
+import type { Pedal, PianoNote } from './song'
 import {
   createArm, createHandMesh, jointPoint, loadHandAssets, poseArm, padPoint, placeHand, poseAll, reachDigit, resetPose, skinHand,
   type Arm, type Finger, type HandAssets, type HandMesh, type HandSide,
@@ -27,22 +27,38 @@ export type PianoHandPlan = {
 const MIDDLE_C = 60
 
 /** Which hand and finger plays each note, in the music's own words first, and a plain suggestion where it is silent. */
-export function buildPianoHandPlan(notes: readonly PianoNote[], hasKey: (key: number) => boolean): PianoHandPlan {
+export function buildPianoHandPlan(
+  notes: readonly PianoNote[], hasKey: (key: number) => boolean, pedals?: readonly Pedal[], bpm?: number,
+): PianoHandPlan {
   const playable = notes.filter((note) => hasKey(keyOf(note.midi)))
   const placedByPitch = playable.length > 0 && playable.every((note) => !note.hand)
   const handed = playable.map((note) => ({ note, hand: note.hand ?? (note.midi < MIDDLE_C ? 'left' : 'right') as HandSide }))
   const asPlaced = handed.map(({ note, hand }) => note.hand === hand ? note : { ...note, hand })
   const fingersSuggested = !playable.some((note) => note.finger)
-  const suggestions = fingersSuggested ? suggestFingers(asPlaced) : new Map()
+  const suggestions = fingersSuggested ? suggestFingers(asPlaced, pedals, { bpm }) : new Map()
   const plan: PianoHandPlan = { left: [], right: [], placedByPitch, fingersSuggested }
   for (const side of ['left', 'right'] as const) {
     const mine = asPlaced.map((note, index) => ({ note, written: playable[index].finger })).filter(({ note }) => note.hand === side)
       .sort((a, b) => a.note.startBeat - b.note.startBeat || a.note.midi - b.note.midi)
     const active: PianoEvent[] = []
     const up = side === 'right' ? 1 : -1
+    // When a pedal carries a note, its key is let go as soon as a later note in this hand needs the finger; the sound is unchanged.
+    const releases = new Map<PianoNote, number>()
+    const release = (note: PianoNote) => {
+      const known = releases.get(note)
+      if (known !== undefined) return known
+      const end = note.startBeat + note.beats
+      let at = end
+      for (const { note: other } of mine) {
+        if (other.startBeat <= note.startBeat + 1e-6 || other.startBeat >= end - 1e-6) continue
+        if (pedalCarries(pedals, note.startBeat, end, other.startBeat)) { at = other.startBeat; break }
+      }
+      releases.set(note, at)
+      return at
+    }
     // A finger leaves room, in white keys, for notes that start while this one is held (the left thumb stays right of the other fingers).
     const viable = (note: PianoNote, finger: number) => mine.every(({ note: other }) => {
-      if (other === note || other.startBeat <= note.startBeat + 1e-6 || other.startBeat >= note.startBeat + note.beats - 1e-6) return true
+      if (other === note || other.startBeat <= note.startBeat + 1e-6 || other.startBeat >= release(note) - 1e-6) return true
       const apart = keyOf(other.midi) - keyOf(note.midi)
       const steps = Math.min(4, Math.max(1, Math.round(Math.abs(apart) * 7 / 12)))
       const reach = finger + up * Math.sign(apart) * steps
@@ -75,8 +91,9 @@ export function buildPianoHandPlan(notes: readonly PianoNote[], hasKey: (key: nu
         const ideal = near ? near.finger + up * Math.sign(key - near.key) * Math.max(1, Math.round(Math.abs(key - near.key) / 2)) : 3
         const pick = options.slice().sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal) || a - b)[0] ?? 3
         chosen[index] = pick; free.splice(free.indexOf(pick), 1); placed.push({ key, finger: pick }); taken.add(pick)
-      }      group.forEach(({ note }, index) => {
-        const event = { key: keyOf(note.midi), start: note.startBeat, end: note.startBeat + note.beats, finger: chosen[index] as Finger }
+      }
+      group.forEach(({ note }, index) => {
+        const event = { key: keyOf(note.midi), start: note.startBeat, end: release(note), finger: chosen[index] as Finger }
         plan[side].push(event); active.push(event)
       })
       first = last + 1

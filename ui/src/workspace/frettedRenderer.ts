@@ -974,6 +974,14 @@ export class FrettedRenderer {
         this.prefetchTargets.set(onset, target)
         if (this.prefetchTargets.size > 800) this.prefetchTargets.delete(this.prefetchTargets.keys().next().value!)
       }
+      // A grip the hand model could not reach is replaced by the plain index-first grip, as on screen.
+      if (target?.state === 'pressed' && this.handPoses.get(target.key)?.unavailable) {
+        const plain = this.poseTargetAt(plan, onset)
+        if (plain && plain.key !== target.key) {
+          target = plain
+          this.prefetchTargets.set(onset, target)
+        }
+      }
       if (!target || this.handPoses.has(target.key) || queued.has(target.key) || this.pendingHandPoses.get(target.key) === false) continue
       queued.add(target.key)
       const profile = this.neckProfile
@@ -1802,6 +1810,17 @@ export class FrettedRenderer {
       return [{ finger: 1, string: stringNumber, fret, barre: false, index: -1, x: 0, y: 0,
         center: point, surface: [point[0], point[1], point[2] + radius], radius }]
     }
+    const pressedContacts = (contacts: FrettedHandPlan['contacts']) => contacts.flatMap((contact): SolveContact[] => {
+      const note = handNotes.find((item) => item.index === contact.index)
+      if (!note?.position) return []
+      const point = this.stringPointAtX(contact.string, this.pressX(note.position))
+      if (!point) return []
+      const radius = this.config.strings[contact.string - 1].gaugeInches * 0.0254 / 2
+      const [x, y] = this.projected([point[0], point[1], point[2] + 0.0012], width, height)
+      return [{ finger: contact.finger, string: contact.string, fret: contact.fret,
+        barre: contact.barre, center: point, surface: [point[0], point[1], point[2] + radius], radius,
+        index: contact.index, x, y }]
+    })
     if (this.handsOn && relaxedFret !== null) solveContacts = relaxedContacts(relaxedFret)
     else if (this.handsOn && handNotes.length) {
       let grip: ReturnType<typeof planFrettedHand> = selectedHand.unavailable && handState === 'pressed'
@@ -1820,17 +1839,7 @@ export class FrettedRenderer {
           mapped.every((contact) => contact)) grip = { contacts: mapped as FrettedHandPlan['contacts'], unavailable: false }
       }
       handUnavailable = grip.unavailable
-      if (!grip.unavailable) for (const contact of grip.contacts) {
-        const note = handNotes.find((item) => item.index === contact.index)
-        if (!note?.position) continue
-        const point = this.stringPointAtX(contact.string, this.pressX(note.position))
-        if (!point) continue
-        const radius = this.config.strings[contact.string - 1].gaugeInches * 0.0254 / 2
-        const [x, y] = this.projected([point[0], point[1], point[2] + 0.0012], width, height)
-        solveContacts.push({ finger: contact.finger, string: contact.string, fret: contact.fret,
-          barre: contact.barre, center: point, surface: [point[0], point[1], point[2] + radius], radius,
-          index: contact.index, x, y })
-      }
+      if (!grip.unavailable) solveContacts = pressedContacts(grip.contacts)
     }
     const handAsset = this.handAssets?.[worldHand === 'right' ? 'left' : 'right']
     if (this.handsOn && solveContacts.length && !handAsset) handUnavailable = true
@@ -1854,6 +1863,19 @@ export class FrettedRenderer {
     }
     if (this.handsOn && handAsset) {
       if (solveContacts.length) resolvePose()
+      // The hand model cannot reach every fingering (a lone little finger on a low string can push the palm into the
+      // neck). Then the same notes are shown with the plain index-first grip, so the hand still frets them.
+      if (handUnavailable && handState === 'pressed' && solveContacts.length && !handPending) {
+        const plain = planFrettedHand(handNotes, this.config)
+        const fallback = plain.unavailable ? [] : pressedContacts(plain.contacts)
+        const fingering = (contacts: readonly SolveContact[]) =>
+          contacts.map((contact) => `${contact.string}/${contact.fret}/${contact.finger}`).sort().join()
+        if (fallback.length && fingering(fallback) !== fingering(solveContacts)) {
+          solveContacts = fallback
+          handUnavailable = false
+          resolvePose()
+        }
+      }
       if ((handUnavailable || !solveContacts.length) && !this.shownHand) {
         handState = 'relaxed'
         solveContacts = relaxedContacts(this.relaxedFret(plan, beat))
