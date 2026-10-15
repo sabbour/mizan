@@ -1,4 +1,5 @@
 import type { FrettedInstrumentConfig, FrettedTabNote } from './fretboard'
+import { fingerSequence, fingerShapes } from './frettedFingering'
 
 export type FrettedHandFinger = 1 | 2 | 3 | 4 | 5
 /** One colour per fretting finger (Okabe–Ito based, so they stay apart for common colour-blindness); numbers always accompany them. */
@@ -49,7 +50,15 @@ export type FrettedHandGeometry = {
 
 // Two fingers cannot be further apart than one fret more than their finger distance (index and ring: three frets).
 const tooWide = (contacts: readonly FrettedHandContact[]) => contacts.some((a) => contacts.some((b) =>
-  a.finger < b.finger && b.fret - a.fret > b.finger - a.finger + 1))
+  a.finger < b.finger && b.fret - a.fret > b.finger - a.finger + (a.finger === 1 ? 1 : 0)))
+
+/**
+ * Fingers for a whole part at once, so a run keeps its hand position and shifts only where it must. Seed the hand
+ * memory with this; fingers a lesson wrote are left alone and are not in the result.
+ */
+export function suggestFrettedFingers(notes: readonly FrettedTabNote[], config: FrettedInstrumentConfig): FrettedHandMemory {
+  return new Map(fingerSequence(notes, config) as Map<number, FrettedHandFinger>)
+}
 
 /**
  * Suggest a compact, playable grip; open strings need no finger and wide stretches stay unposed. A grip that the
@@ -63,10 +72,13 @@ export function planFrettedHand(
   const grip = buildGrip(notes, config, memory)
   // Barres belong to the index finger; a remembered middle or ring finger barring two strings is replanned too.
   const oddBarre = (contacts: readonly FrettedHandContact[]) => contacts.some((contact) => contact.barre && contact.finger > 1)
-  if (memory && (grip.unavailable || tooWide(grip.contacts) || oddBarre(grip.contacts))) {
+  const crossed = (contacts: readonly FrettedHandContact[]) => contacts.some((a) => contacts.some((b) =>
+    a.finger < 5 && b.finger < 5 && a.fret < b.fret && a.finger > b.finger))
+  if (memory && (grip.unavailable || tooWide(grip.contacts) || oddBarre(grip.contacts) || crossed(grip.contacts))) {
     const fresh = buildGrip(notes, config)
     if (!fresh.unavailable && !tooWide(fresh.contacts) &&
-      (grip.unavailable || tooWide(grip.contacts) || !oddBarre(fresh.contacts))) {
+      !crossed(fresh.contacts) &&
+      (grip.unavailable || tooWide(grip.contacts) || crossed(grip.contacts) || !oddBarre(fresh.contacts))) {
       for (const contact of fresh.contacts) {
         const note = notes.find((item) => item.index === contact.index)
         if (note && !note.finger) memory.set(contact.index, contact.finger)
@@ -98,7 +110,14 @@ function buildGrip(
 
   const byFret = new Map<number, Set<FrettedHandFinger>>()
   const fingerForIndex = new Map<number, FrettedHandFinger>()
-  for (const note of fretted) {
+  // With nothing written or remembered, the cheapest whole-grip shape is chosen (barres, one finger per fret, Simandl);
+  // if no shape fits, fingers are chosen fret by fret below.
+  const open = !fretted.some((note) => note.finger || memory?.has(note.index))
+  const shape = open ? fingerShapes(fretted.map((note) => ({
+    index: note.index, string: note.position!.string, fret: note.position!.fret,
+  })), config)[0] : undefined
+  if (shape) fretted.forEach((note, at) => fingerForIndex.set(note.index, shape.fingers[at] as FrettedHandFinger))
+  for (const note of shape ? [] : fretted) {
     const finger = note.finger
     if (finger === 5 && note.position!.conventionalStringNumber < config.strings.length - 1)
       return { contacts: [], unavailable: true }
@@ -112,7 +131,7 @@ function buildGrip(
   }
 
   const used = new Set([...byFret.values()].flatMap((fingers) => [...fingers].filter((finger) => finger < 5)))
-  for (const fret of frets) {
+  for (const fret of shape ? [] : frets) {
     const assigned = byFret.get(fret) ?? new Set<FrettedHandFinger>()
     if (!assigned.size) {
       const lower = frets.filter((item) => item < fret).flatMap((item) => [...(byFret.get(item) ?? [])])

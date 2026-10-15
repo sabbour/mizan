@@ -134,7 +134,83 @@ export function mapFrettedNote(midi: number, config: FrettedInstrumentConfig): F
   return positionsForMidi(midi, config)[0] ?? null
 }
 
-/** Deterministic maximum matching; notes in a chord never share a physical string. */
+type Layout = Map<number, FrettedPosition>
+type Moment = { indices: number[]; start: number; end: number; layouts: Layout[]; costs: number[] }
+
+/** Fretted frets of a layout, lowest to highest; open strings take no part in the hand position. */
+const frettedSpan = (layout: Layout) => {
+  let low = Infinity
+  let high = 0
+  for (const position of layout.values()) if (position.fret > 0) {
+    low = Math.min(low, position.fret)
+    high = Math.max(high, position.fret)
+  }
+  return high ? { low, high } : null
+}
+
+// How hard a layout is to hold: a wide stretch, a high position, and (a little) not using open strings.
+const layoutCost = (layout: Layout) => {
+  const span = frettedSpan(layout)
+  let cost = 0
+  for (const position of layout.values()) cost += position.fret * 0.04
+  if (span) cost += (span.high - span.low) * 0.6 + (span.high - span.low > 4 ? 8 : 0)
+  return cost
+}
+
+/**
+ * How hard it is to get the hand from one layout to the next: staying inside one hand position is nearly free, and a
+ * shift costs more the further it goes, less after a pause, and nothing across an open string (the hand moves unheard).
+ */
+const handMove = (from: Layout, to: Layout, gap: number) => {
+  const a = frettedSpan(from)
+  const b = frettedSpan(to)
+  if (!a || !b) return a || b ? 0.2 : 0
+  const reach = Math.max(a.high, b.high) - Math.min(a.low, b.low)
+  const ease = gap >= 1 ? 0.5 : gap >= 0.5 ? 0.7 : 1
+  const centre = Math.abs((b.low + b.high) / 2 - (a.low + a.high) / 2)
+  return reach <= 3 ? centre * 0.1 : (1 + (reach - 3) * 0.5) * ease + centre * 0.1
+}
+
+/** Every way to put these notes on distinct strings (capped), each with its cost, the cheapest few first. */
+function layoutsFor(
+  indices: readonly number[], candidates: Map<number, FrettedPosition[]>, greedy: Layout,
+): { layouts: Layout[]; costs: number[] } {
+  const order = [...indices].sort((a, b) => candidates.get(a)!.length - candidates.get(b)!.length || a - b)
+  const found: Layout[] = [greedy]
+  const taken = new Set<number>()
+  const current: Layout = new Map()
+  let visits = 0
+  const walk = (depth: number) => {
+    if (visits > 400) return
+    if (depth === order.length) {
+      visits++
+      found.push(new Map(current))
+      return
+    }
+    for (const position of candidates.get(order[depth])!) {
+      if (taken.has(position.string)) continue
+      taken.add(position.string)
+      current.set(order[depth], position)
+      walk(depth + 1)
+      current.delete(order[depth])
+      taken.delete(position.string)
+    }
+  }
+  walk(0)
+  const unique = new Map<string, { layout: Layout; cost: number }>()
+  for (const layout of found) {
+    const key = [...layout].sort((x, y) => x[0] - y[0]).map(([index, position]) => `${index}:${position.string}:${position.fret}`).join(',')
+    if (!unique.has(key)) unique.set(key, { layout, cost: layoutCost(layout) })
+  }
+  const ranked = [...unique.values()].sort((a, b) => a.cost - b.cost).slice(0, 10)
+  return { layouts: ranked.map((item) => item.layout), costs: ranked.map((item) => item.cost) }
+}
+
+/**
+ * Deterministic maximum matching; notes in a chord never share a physical string. Where a note can lie on several
+ * strings, the choice is made over the whole part (cheapest path: compact chords, few hand shifts) rather than
+ * by lowest fret each time, so a melody stays in one position.
+ */
 export function planFrettedTab(
   notes: readonly (MelodyNote & { string?: number; fret?: number })[],
   config: FrettedInstrumentConfig,
@@ -161,6 +237,7 @@ export function planFrettedTab(
     group.push(item.index)
     groups.set(item.startBeat, group)
   }
+  const moments: Moment[] = []
   for (const indices of groups.values()) {
     const candidates = new Map(indices.map((index) => [index, authored[index] ? [authored[index]!] : positionsForMidi(result[index].midi, config)]))
     const ordered = [...indices].sort((a, b) =>
@@ -185,10 +262,37 @@ export function planFrettedTab(
       if (!candidates.get(index)!.length) result[index].reason = 'outside-range'
       else if (!place(index, new Set())) result[index].reason = 'no-distinct-string'
     }
-    for (const [index, position] of assigned) {
+    if (!assigned.size) continue
+    const placed = [...assigned.keys()]
+    const ranked = layoutsFor(placed, candidates, assigned)
+    moments.push({
+      indices: placed, start: result[placed[0]].startBeat,
+      end: Math.max(...placed.map((index) => result[index].startBeat + result[index].beats)),
+      layouts: ranked.layouts, costs: ranked.costs,
+    })
+  }
+  moments.sort((a, b) => a.start - b.start || a.indices[0] - b.indices[0])
+  const cheapest: { cost: number; back: number }[][] = []
+  moments.forEach((moment, at) => {
+    const previous = moments[at - 1]
+    cheapest.push(moment.layouts.map((layout, slot) => {
+      let cost = Infinity
+      let back = 0
+      if (!previous) cost = 0
+      else previous.layouts.forEach((from, index) => {
+        const total = cheapest[at - 1][index].cost + handMove(from, layout, moment.start - previous.end)
+        if (total < cost) { cost = total; back = index }
+      })
+      return { cost: cost + moment.costs[slot], back }
+    }))
+  })
+  let slot = cheapest.at(-1)?.reduce((pick, state, index, all) => state.cost < all[pick].cost ? index : pick, 0) ?? 0
+  for (let at = moments.length - 1; at >= 0; at--) {
+    for (const [index, position] of moments[at].layouts[slot]) {
       result[index].position = position
       result[index].reason = undefined
     }
+    slot = cheapest[at][slot].back
   }
   return result
 }

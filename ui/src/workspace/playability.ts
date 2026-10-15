@@ -1,9 +1,9 @@
-import { keyOf, suggestFingers } from './fingers'
+import { keyOf, pedalCarries, suggestFingers } from './fingers'
 import {
   BASS, GUITAR, planFrettedTab, positionsForMidi,
   type FrettedInstrumentConfig, type FrettedPosition,
 } from './fretboard'
-import type { MelodyNote, PianoNote, Song, Track } from './song'
+import type { MelodyNote, Pedal, PianoNote, Song, Track } from './song'
 
 /**
  * Playability checks and repairs for transcribed music. Transcribers and importers split piano notes between the hands by
@@ -23,7 +23,7 @@ const JUMP_SEMITONES = 24
 const JUMP_SECONDS = 0.12
 /** Crossed hands are tolerated for a short moment. */
 const CROSS_SECONDS = 0.5
-/** A held note this far below the hand's newest notes is taken as carried by the sustain pedal. */
+/** Without written pedals, a held note this far below the hand's newest notes is taken as carried by the sustain pedal. */
 const PEDAL_GAP = 9
 const BEAM = 6
 
@@ -59,6 +59,8 @@ export type PianoPlayabilityOptions = {
   reach?: number
   wideReach?: number
   crossSeconds?: number
+  /** Written pedals: where there are any, they decide which held notes a pedal carries instead of the gap guess. */
+  pedals?: readonly Pedal[]
 }
 
 export function repairPiano(
@@ -70,6 +72,7 @@ export function repairPiano(
   const secondsPerBeat = 60 / (options.bpm && options.bpm > 0 ? options.bpm : 120)
   const crossBeats = (options.crossSeconds ?? CROSS_SECONDS) / secondsPerBeat
   const summary = empty('piano')
+  const written = !!options.pedals?.length
 
   const ids: number[] = []
   input.forEach((note, index) => { if (note.hand && Number.isFinite(note.midi) && note.beats > 0) ids.push(index) })
@@ -129,8 +132,9 @@ export function repairPiano(
 
   /**
    * How far a moment is from playable: surplus keys and surplus stretch, plus crossing where it has gone on too long.
-   * A bass note struck earlier and now at least a sixth below everything the hand has played since is taken as carried
-   * by the sustain pedal (the hand has left it), so it does not count against the hand.
+   * A held note the hand has left is taken as carried by the sustain pedal: where pedals are written, one that really carries
+   * it (sustain down for the rest of the note, or sostenuto pressed while it was held); otherwise a bass note struck earlier
+   * and now at least a sixth below everything the hand has played since is assumed to be pedalled.
    */
   const excess = (moment: number, allowed: number) => {
     const latest = [-Infinity, -Infinity]
@@ -146,7 +150,9 @@ export function repairPiano(
     const high = [-Infinity, -Infinity]
     for (const note of moments[moment]) {
       const side = hand[note]
-      if (start[note] < latest[side] - EPS && keys[note] <= latestLow[side] - PEDAL_GAP) continue
+      if (start[note] < latest[side] - EPS) {
+        if (written ? pedalCarries(options.pedals, start[note], end[note], latest[side]) : keys[note] <= latestLow[side] - PEDAL_GAP) continue
+      }
       if (keys[note] !== lastKey[side]) { counts[side]++; lastKey[side] = keys[note] }
       low[side] = Math.min(low[side], keys[note])
       high[side] = Math.max(high[side], keys[note])
@@ -299,7 +305,7 @@ export function repairPiano(
   const notes = input.map((note, index) => replaced.get(index) ?? note)
   // Written fingering stays where a note kept its hand; moved notes get a suggestion in place of the finger they lost.
   if (input.some((note) => note.finger)) {
-    const suggestions = suggestFingers(notes)
+    const suggestions = suggestFingers(notes, options.pedals, { bpm: options.bpm })
     for (const [index, note] of replaced) {
       if (!note.adjusted) continue
       const suggestion = suggestions.get(notes[index])
@@ -314,9 +320,12 @@ export function repairPiano(
 type Pos = { string: number; fret: number }
 export type FrettedNote = MelodyNote & { string?: number; fret?: number }
 
-/** Widest stretch in frets the fretting hand covers: frets are narrower from the seventh up on a guitar. */
+/**
+ * Widest stretch in frets the fretting hand covers (highest fret minus lowest). Frets are widest nearest the nut and
+ * on a bass, so the reach shrinks there, and narrower from the seventh up on a guitar, so it grows.
+ */
 export const frettedReach = (config: FrettedInstrumentConfig, lowestFret: number) =>
-  config.id === 'bass' ? 4 : lowestFret >= 7 ? 5 : 4
+  config.id === 'bass' ? (lowestFret <= 3 ? 3 : 4) : lowestFret <= 2 ? 3 : lowestFret >= 7 ? 5 : 4
 
 /** Whether one hand can hold these positions at once: free strings, four fingers (one may bar a fret), a reachable stretch. */
 export function shapeFits(items: readonly Pos[], config: FrettedInstrumentConfig): boolean {
@@ -543,11 +552,12 @@ export function applyPlayability(song: Song, target: PracticeTarget): Playable {
   }
   if (!source) return { song, summary: null }
   const notes: readonly (PianoNote | MelodyNote)[] = source === 'piano' ? song.piano : song.instrumentNotes![source]
-  const key = `${instrument}:${song.bpm}`
+  const pedalKey = song.pedals?.map((pedal) => `${pedal.controller}@${pedal.startBeat}+${pedal.beats}`).join() ?? ""
+  const key = `${instrument}:${song.bpm}:${pedalKey}`
   const cached = cache.get(notes)?.get(key)
   const result = cached ?? (() => {
     const made = instrument === 'piano'
-      ? repairPiano(notes as PianoNote[], { bpm: song.bpm })
+      ? repairPiano(notes as PianoNote[], { bpm: song.bpm, pedals: song.pedals })
       : repairFretted(notes, instrument === 'bass' ? BASS : GUITAR)
     const entry = { notes: made.notes as readonly unknown[], summary: made.summary }
     cache.set(notes, (cache.get(notes) ?? new Map()).set(key, entry))

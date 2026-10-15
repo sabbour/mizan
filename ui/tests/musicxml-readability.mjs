@@ -303,7 +303,7 @@ try {
   const limits = suggestFingers([...cluster, ...wide, ...octave, after])
   assert.ok(cluster.every((note) => !limits.has(note)), 'six keys in one hand get no finger suggestion')
   assert.ok(wide.every((note) => !limits.has(note)), 'a chord wider than an octave gets no finger suggestion')
-  assert.deepEqual(octave.map((note) => limits.get(note).finger), [1, 3, 5], 'an octave-wide triad is still fingered')
+  assert.deepEqual(octave.map((note) => limits.get(note).finger), [1, 2, 5], 'an octave-wide triad is still fingered (1-2-5: the third is a stretch for the middle finger)')
   assert.equal(limits.get(after), undefined, 'a note under an unfingered held chord is not guessed and does not throw')
   assert.equal(centerDelta({ top: 100, bottom: 700 }, { top: 900, bottom: 1100 }), 600,
     'the active line centre moves to the usable viewport centre')

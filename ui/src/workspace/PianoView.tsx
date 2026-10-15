@@ -215,7 +215,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     lastSignature.current = ''
   }, [scene, context, rendererReady])
   const geometry = useMemo<PianoGeometry | null>(() => scene && handsKit ? handsKit.geometry(scene.prepared) : null, [scene, handsKit])
-  const handPlan = useMemo<PianoHandPlan | null>(() => scene && handsKit ? handsKit.build(notes, (key) => scene.prepared.keys.has(key)) : null, [scene, handsKit, notes])
+  const handPlan = useMemo<PianoHandPlan | null>(() => scene && handsKit ? handsKit.build(notes, (key) => scene.prepared.keys.has(key), song.pedals, song.bpm) : null, [scene, handsKit, notes, song.pedals, song.bpm])
   const timelines = useMemo(() => handsKit && handPlan && geometry ? handsKit.instance.compile(handPlan, geometry) : null, [handsKit, handPlan, geometry])
   useEffect(() => {
     const current = renderer.current

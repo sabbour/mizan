@@ -778,7 +778,10 @@ export function poseFrettedHand(
       Math.max(-hoverLimit, Math.min(hoverLimit, base[1])), base[2] + 0.014]
     hoverTargets.set(finger, [computed])
   }
-  const thumbTarget = (): HandVector => [pressedX, 0, backZ(pressedX) - 0.005]
+  const lowestFinger = Math.min(...byFinger.keys())
+  const thumbX = lowestFinger <= 2 ? pressedX
+    : meanOf(byFinger.get(lowestFinger)!.map((contact) => contact.surface[0])) + (lowestFinger - 2) * 0.022
+  const thumbTarget = (): HandVector => [thumbX, 0, backZ(thumbX) - 0.005]
   const cubeRotations: Float32Array[] = []
   for (const order of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])
     for (const signs of [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]]) {

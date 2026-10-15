@@ -12,7 +12,7 @@ import {
   FrettedRenderer, type FrettedFrame,
 } from './frettedRenderer'
 import { loadFrettedHands } from './frettedHandAsset'
-import { planFrettedHand, selectHandNotes, type FrettedHandContact, type FrettedHandMemory } from './frettedHand'
+import { planFrettedHand, selectHandNotes, suggestFrettedFingers, type FrettedHandContact, type FrettedHandMemory } from './frettedHand'
 import { FrettedTabView, type FrettedPracticeProps } from './FrettedTabView'
 import type { Engine, Transport } from './engine'
 import './fretted.css'
@@ -527,9 +527,7 @@ export function FrettedInstrumentView({
   const source = notesForTrack(song, track, trackId)
   const plan = useMemo(() => planFrettedTab(source, config), [source, config])
   const latest = useRef({ beat, playing, countingIn, style, handedness, plan, feedback, song })
-  const handMemory = useRef<{ plan: readonly FrettedTabNote[]; assignments: FrettedHandMemory }>({
-    plan, assignments: new Map(),
-  })
+  const handMemory = useRef<{ plan: readonly FrettedTabNote[]; assignments: FrettedHandMemory } | null>(null)
   const lastOverlayKey = useRef('')
   const lastStaticFrame = useRef<string | null>(null)
   useEffect(() => {
@@ -566,8 +564,8 @@ export function FrettedInstrumentView({
       start: barStart(current.song, engine.loop.startBar - 1),
       end: barStart(current.song, engine.loop.endBar),
     } : null
-    if (handMemory.current.plan !== current.plan)
-      handMemory.current = { plan: current.plan, assignments: new Map() }
+    if (!handMemory.current || handMemory.current.plan !== current.plan)
+      handMemory.current = { plan: current.plan, assignments: suggestFrettedFingers(current.plan, config) }
     const guide = buildGuideFrame(current.plan, config, current.song, clock.beat,
       clock.countingIn, clock.playing, loop, current.feedback, handMemory.current.assignments)
     setGuideFrame((previous) => previous.key === guide.key ? previous : guide)
