@@ -2,6 +2,15 @@
 .SYNOPSIS
     Signs a local Mizan MSIX with Azure Trusted Signing and optionally uploads it.
 
+.DESCRIPTION
+    Discovers the Windows SDK, the NuGet global-packages folder, and the Trusted
+    Signing client from this machine's configuration. With -Build, it first
+    builds the package with the publisher from the active certificate profile,
+    then signs that exact output.
+
+.EXAMPLE
+    pwsh -NoProfile -File .\scripts\Publish-SignedMsix.ps1 -Version 0.1.0 -Architecture x64 -Build
+
 .EXAMPLE
     pwsh -NoProfile -File .\scripts\Publish-SignedMsix.ps1 -Version 0.1.0
 #>
@@ -16,6 +25,9 @@ param(
     [string]$MsixPath = "",
     [ValidateSet("arm64", "x64")]
     [string]$Architecture = "arm64",
+    [switch]$Build,
+    [string]$BuildId = "",
+    [string]$Python = "",
     [string]$Repository = "sabbour/mizan",
     [switch]$Upload,
     [string]$AzureEndpoint = "https://eus.codesigning.azure.net/",
@@ -29,32 +41,26 @@ $ErrorActionPreference = "Stop"
 if ($Upload -and ($env:MIZAN_BINARY_DISTRIBUTION_READY -cne "true")) {
     throw "Public installer uploads are blocked. Review docs\releasing.md, then set MIZAN_BINARY_DISTRIBUTION_READY=true only after the redistribution requirements are met."
 }
+Import-Module (Join-Path $PSScriptRoot "MizanBuildTools.psm1") -Force
 $root = Split-Path -Parent $PSScriptRoot
-if (-not $MsixPath) { $MsixPath = Join-Path $root "artifacts\Mizan_$($Version)_$($Architecture.ToLowerInvariant()).msix" }
-if (-not (Test-Path $MsixPath -PathType Leaf)) { throw "MSIX was not found: $MsixPath" }
-
-function Find-WindowsSdkTool([string]$Name) {
-    $tool = @(
-        "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\$Name"
-        "${env:ProgramFiles}\Windows Kits\10\bin\*\x64\$Name"
-    ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
-        Sort-Object -Descending | Select-Object -First 1
-    if (-not $tool) { throw "$Name was not found. Install the Windows SDK." }
-    $tool.Path
+if ($Build -and $MsixPath) { throw "Use -Build or -MsixPath, not both." }
+if (-not $MsixPath) {
+    $MsixPath = Get-MsixOutputPath -ArtifactsDirectory (Join-Path $root "artifacts") `
+        -Version $Version -Architecture $Architecture -BuildId $BuildId
 }
+if (-not $Build -and -not (Test-Path $MsixPath -PathType Leaf)) { throw "MSIX was not found: $MsixPath" }
+if ($DlibPath -and -not (Test-Path -LiteralPath $DlibPath -PathType Leaf)) { throw "The -DlibPath file was not found: $DlibPath" }
 
-az account show -o none
-if ($LASTEXITCODE -ne 0) { throw "Azure CLI is not authenticated. Run 'az login'." }
+$publisher = Get-TrustedSigningPublisher -ResourceGroupName $ResourceGroupName `
+    -AccountName $AzureCodeSigningAccountName -CertificateProfileName $AzureCertificateProfileName
 
-$accountId = az resource show --resource-group $ResourceGroupName `
-    --resource-type Microsoft.CodeSigning/codeSigningAccounts `
-    --name $AzureCodeSigningAccountName --query id -o tsv
-if ($LASTEXITCODE -ne 0 -or -not $accountId) { throw "Trusted Signing account lookup failed." }
-$profile = az resource show --ids "$accountId/certificateProfiles/$AzureCertificateProfileName" `
-    --api-version 2024-02-05-preview -o json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw "Trusted Signing certificate profile lookup failed." }
-$publisher = $profile.properties.certificates[0].subjectName
-if (-not $publisher) { throw "The Trusted Signing profile has no active certificate subject." }
+if ($Build) {
+    $buildArguments = @{ Version = $Version; Architecture = $Architecture; Publisher = $publisher; SkipSign = $true }
+    if ($BuildId) { $buildArguments.BuildId = $BuildId }
+    if ($Python) { $buildArguments.Python = $Python }
+    & (Join-Path $PSScriptRoot "Build-Msix.ps1") @buildArguments
+    if (-not (Test-Path $MsixPath -PathType Leaf)) { throw "The build did not produce the expected MSIX: $MsixPath" }
+}
 
 $work = Join-Path $env:TEMP "mizan-sign-$Version"
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
@@ -64,26 +70,11 @@ $makeAppx = Find-WindowsSdkTool "MakeAppx.exe"
 if ($LASTEXITCODE -ne 0) { throw "Could not inspect the MSIX manifest." }
 [xml]$manifest = Get-Content (Join-Path $work "unpacked\AppxManifest.xml") -Raw
 if ($manifest.Package.Identity.Publisher -ne $publisher) {
-    throw "Manifest publisher '$($manifest.Package.Identity.Publisher)' does not match '$publisher'."
+    throw "Manifest publisher '$($manifest.Package.Identity.Publisher)' does not match '$publisher'. Rebuild with -Build."
 }
 
-if (-not $DlibPath) {
-    $dlib = Get-ChildItem "$HOME\.nuget\packages\microsoft.trusted.signing.client" `
-        -Filter Azure.CodeSigning.Dlib.dll -Recurse -ErrorAction SilentlyContinue |
-        Where-Object FullName -Match '[\\/]x64[\\/]' |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if (-not $dlib) {
-        $bootstrap = Join-Path $work "signing-client"
-        dotnet new classlib --output $bootstrap --force | Out-Null
-        dotnet add (Join-Path $bootstrap "signing-client.csproj") package Microsoft.Trusted.Signing.Client
-        if ($LASTEXITCODE -ne 0) { throw "Trusted Signing client restore failed." }
-        $dlib = Get-ChildItem "$HOME\.nuget\packages\microsoft.trusted.signing.client" `
-            -Filter Azure.CodeSigning.Dlib.dll -Recurse |
-            Where-Object FullName -Match '[\\/]x64[\\/]' |
-            Sort-Object FullName -Descending | Select-Object -First 1
-    }
-    $DlibPath = $dlib.FullName
-}
+$DlibPath = Resolve-TrustedSigningDlib -DlibPath $DlibPath -WorkDirectory $work -RepositoryRoot $root
+Write-Host "Trusted Signing client: $DlibPath" -ForegroundColor Cyan
 
 $metadata = Join-Path $work "metadata.json"
 @{
@@ -92,7 +83,8 @@ $metadata = Join-Path $work "metadata.json"
     CertificateProfileName = $AzureCertificateProfileName
 } | ConvertTo-Json | Set-Content $metadata -Encoding utf8NoBOM
 
-$signTool = Find-WindowsSdkTool "SignTool.exe"
+# The Trusted Signing dlib is x64, so SignTool must be x64 too. ARM64 Windows runs it under emulation.
+$signTool = Find-WindowsSdkTool "SignTool.exe" -ToolArchitectures x64
 & $signTool sign /v /fd SHA256 /tr "http://timestamp.acs.microsoft.com" /td SHA256 `
     /dlib $DlibPath /dmdf $metadata $MsixPath
 if ($LASTEXITCODE -ne 0) { throw "Azure Trusted Signing failed." }

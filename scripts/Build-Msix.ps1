@@ -29,6 +29,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "MizanBuildTools.psm1") -Force
 $root = Split-Path -Parent $PSScriptRoot
 $artifacts = Join-Path $root "artifacts"
 $work = Join-Path $env:TEMP "mizan-msix-build-$PID"
@@ -44,25 +45,10 @@ if ($BuildId -notmatch '^\d{8}T\d{6}Z$') {
     throw "BuildId must be a UTC timestamp in yyyyMMddTHHmmssZ format."
 }
 $Architecture = $Architecture.ToLowerInvariant()
-$pythonPlatform = @{ arm64 = "win-arm64"; x64 = "win-amd64" }[$Architecture]
-$outputName = if ($taggedBuild) {
-    "Mizan_$($Version)_$($BuildId)_$Architecture.msix"
-} else {
-    "Mizan_$($Version)_$Architecture.msix"
-}
-$output = Join-Path $artifacts $outputName
+$pythonPlatform = Get-PythonPlatform $Architecture
+$output = Get-MsixOutputPath -ArtifactsDirectory $artifacts -Version $Version -Architecture $Architecture `
+    -BuildId $(if ($taggedBuild) { $BuildId } else { "" })
 Write-Host "Test build identity: $BuildId" -ForegroundColor Cyan
-
-function Find-WindowsSdkTool([string]$Name) {
-    $tool = @(
-        "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\$Name"
-        "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\arm64\$Name"
-        "${env:ProgramFiles}\Windows Kits\10\bin\*\x64\$Name"
-    ) | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } |
-        Sort-Object -Descending | Select-Object -First 1
-    if (-not $tool) { throw "$Name was not found. Install the Windows SDK." }
-    $tool.Path
-}
 
 function Invoke-Checked([scriptblock]$Command, [string]$Failure) {
     & $Command
@@ -107,9 +93,11 @@ function Add-YouTubeJavaScriptRuntime([string]$Destination) {
 }
 
 if (-not $Python) { $Python = Join-Path $root "host\.venv\Scripts\python.exe" }
-if (-not (Test-Path $Python -PathType Leaf)) { throw "$Architecture Python 3.12 was not found: $Python" }
-$pythonInfo = & $Python -c "import sys,sysconfig; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sysconfig.get_platform()}')"
-if ($pythonInfo.Trim() -ne "3.12|$pythonPlatform") { throw "Packaging requires Python 3.12 $pythonPlatform; found $pythonInfo." }
+if (-not (Test-Path $Python -PathType Leaf)) {
+    throw "$Architecture Python 3.12 was not found: $Python. Run scripts\Initialize-HostEnvironment.ps1 -Architecture $Architecture, or pass -Python."
+}
+$pythonInfo = Get-PythonIdentity $Python
+if ($pythonInfo -ne "3.12|$pythonPlatform") { throw "Packaging requires Python 3.12 $pythonPlatform; found '$pythonInfo' at $Python." }
 
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
