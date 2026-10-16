@@ -1,4 +1,4 @@
-"""Build a relocatable Python runtime from the active Mizan ARM64 environment."""
+"""Build a relocatable Python runtime from the active Mizan ARM64 or x64 environment."""
 
 from __future__ import annotations
 
@@ -38,7 +38,11 @@ def production_distributions() -> list[metadata.Distribution]:
         for dist in metadata.distributions()
         if dist.metadata.get("Name")
     }
-    todo = [Requirement(raw) for raw in project["dependencies"]]
+    todo = [
+        requirement
+        for requirement in map(Requirement, project["dependencies"])
+        if not requirement.marker or requirement.marker.evaluate()
+    ]
     selected: dict[str, metadata.Distribution] = {}
     extras: dict[str, set[str]] = {}
     while todo:
@@ -128,8 +132,8 @@ def main() -> None:
     destination.mkdir(parents=True)
 
     base = Path(sys.base_prefix)
-    if "arm64" not in sysconfig_platform():
-        raise RuntimeError("The MSIX Python runtime must be built with ARM64 Python.")
+    if sysconfig_platform() not in {"win-arm64", "win-amd64"}:
+        raise RuntimeError("The MSIX Python runtime must be built with Windows ARM64 or x64 Python.")
     for name in ("python.exe", "pythonw.exe", "python3.dll", "python312.dll",
                  "vcruntime140.dll", "vcruntime140_1.dll", "LICENSE.txt"):
         source = base / name

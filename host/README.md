@@ -4,9 +4,11 @@ The Python host manages jobs, the local library, and artifact downloads.
 The WinUI 3 shell communicates with the host through JSON standard input and
 output. The host also serves local audio and score files to WebView2.
 
-Development requires Windows ARM64, Python 3.12 ARM64, the .NET 10 SDK, Node.js,
+Development requires Windows ARM64 or x64, Python 3.12 for the same
+architecture, the .NET 10 SDK, Node.js,
 and the WebView2 Runtime. See the [repository prerequisites](../README.md#run-from-source)
-for the other tools. From the repository root, create the host environment:
+for the other tools. From the repository root, create the host environment
+(on x64, point `--python` at your x64 Python 3.12):
 
 ```powershell
 uv venv --seed --python "$env:LOCALAPPDATA\Programs\Python\Python312-arm64\python.exe" host\.venv
@@ -50,7 +52,8 @@ For an isolated development library that uses already-downloaded model weights,
 set `MIZAN_MODELS_DIR="$env:LOCALAPPDATA\Mizan\models"` alongside `MIZAN_HOME`.
 Only model files are shared; the song library and cached recordings stay isolated.
 
-Check `sysconfig.get_platform()` for `win-arm64`; `platform.machine()` can report
+Check `sysconfig.get_platform()` for `win-arm64` (or `win-amd64` on x64);
+`platform.machine()` can report
 ARM64 even for an emulated x64 interpreter. If `uv` downloads fail with a TLS
 handshake error, use the environment's configured pip feed:
 
