@@ -1,9 +1,12 @@
 <#
 .SYNOPSIS
-    Builds the ARM64 Mizan shell and packages it with the UI and Python host.
+    Builds the ARM64 or x64 Mizan shell and packages it with the UI and Python host.
 
 .EXAMPLE
     pwsh -NoProfile -File .\scripts\Build-Msix.ps1 -Version 0.1.0 -SkipSign
+
+.EXAMPLE
+    pwsh -NoProfile -File .\scripts\Build-Msix.ps1 -Version 0.1.0 -Architecture x64 -SkipSign
 #>
 
 #Requires -Version 7.0
@@ -13,6 +16,8 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version,
 
+    [ValidateSet("arm64", "x64")]
+    [string]$Architecture = "arm64",
     [ValidateRange(0, 65535)]
     [int]$PackageRevision = 0,
     [string]$Publisher = "CN=Ahmed Sabbour, O=Ahmed Sabbour, L=Redmond, S=Washington, C=US",
@@ -38,10 +43,12 @@ if (-not $BuildId) {
 if ($BuildId -notmatch '^\d{8}T\d{6}Z$') {
     throw "BuildId must be a UTC timestamp in yyyyMMddTHHmmssZ format."
 }
+$Architecture = $Architecture.ToLowerInvariant()
+$pythonPlatform = @{ arm64 = "win-arm64"; x64 = "win-amd64" }[$Architecture]
 $outputName = if ($taggedBuild) {
-    "Mizan_$($Version)_$($BuildId)_arm64.msix"
+    "Mizan_$($Version)_$($BuildId)_$Architecture.msix"
 } else {
-    "Mizan_$($Version)_arm64.msix"
+    "Mizan_$($Version)_$Architecture.msix"
 }
 $output = Join-Path $artifacts $outputName
 Write-Host "Test build identity: $BuildId" -ForegroundColor Cyan
@@ -63,9 +70,9 @@ function Invoke-Checked([scriptblock]$Command, [string]$Failure) {
 }
 
 if (-not $Python) { $Python = Join-Path $root "host\.venv\Scripts\python.exe" }
-if (-not (Test-Path $Python -PathType Leaf)) { throw "ARM64 Python 3.12 was not found: $Python" }
-$pythonInfo = & $Python -c "import platform,sys; print(f'{sys.version_info.major}.{sys.version_info.minor}|{platform.machine()}')"
-if ($pythonInfo.Trim() -ne "3.12|ARM64") { throw "Packaging requires Python 3.12 ARM64; found $pythonInfo." }
+if (-not (Test-Path $Python -PathType Leaf)) { throw "$Architecture Python 3.12 was not found: $Python" }
+$pythonInfo = & $Python -c "import sys,sysconfig; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sysconfig.get_platform()}')"
+if ($pythonInfo.Trim() -ne "3.12|$pythonPlatform") { throw "Packaging requires Python 3.12 $pythonPlatform; found $pythonInfo." }
 
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
@@ -88,7 +95,7 @@ finally {
 }
 
 Invoke-Checked {
-    dotnet publish $project -c Release -r win-arm64 --self-contained true -p:Version=$Version -o $publish
+    dotnet publish $project -c Release -r "win-$Architecture" --self-contained true -p:Version=$Version -o $publish
 } "The WinUI shell publish failed."
 
 Copy-Item (Join-Path $publish "*") $staging -Recurse -Force
@@ -98,7 +105,7 @@ Copy-Item (Join-Path $root "ui\dist") (Join-Path $staging "ui\dist") -Recurse -F
 Copy-Item (Join-Path $root "LICENSE"), (Join-Path $root "THIRD_PARTY_NOTICES.md") $staging
 Copy-Item (Join-Path $root "licenses") (Join-Path $staging "licenses") -Recurse
 
-Write-Host "Staging Python 3.12 ARM64 runtime..." -ForegroundColor Cyan
+Write-Host "Staging Python 3.12 $Architecture runtime..." -ForegroundColor Cyan
 Invoke-Checked {
     & $Python (Join-Path $root "scripts\package_python.py") (Join-Path $staging "Python")
 } "The Python runtime staging step failed."
@@ -141,6 +148,7 @@ $sourceIcon.Dispose()
 $manifest = Get-Content $manifestTemplate -Raw
 $manifest = $manifest -replace '(<Identity[^>]*?)Version="[^"]*"', "`$1Version=`"$Version.$PackageRevision`""
 $manifest = $manifest -replace '(<Identity[^>]*?)Publisher="[^"]*"', "`$1Publisher=`"$Publisher`""
+$manifest = $manifest -replace '(<Identity[^>]*?)ProcessorArchitecture="[^"]*"', "`$1ProcessorArchitecture=`"$Architecture`""
 [System.IO.File]::WriteAllText(
     (Join-Path $staging "AppxManifest.xml"),
     $manifest,

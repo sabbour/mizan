@@ -139,7 +139,8 @@ Cloud processing uses a GPU worker in an account that you control. See
 
 ## Run from source
 
-The app targets Windows ARM64. You need Windows, Python 3.12 ARM64, Node.js,
+The app targets Windows ARM64; x64 builds are also supported. You need Windows,
+Python 3.12 for the same architecture (ARM64 or x64), Node.js,
 .NET 10 SDK, Windows SDK, WebView2 Runtime, `uv`, and FFmpeg for YouTube audio.
 Install Git and PowerShell 7.
 
@@ -166,6 +167,9 @@ host\.venv\Scripts\python.exe -m pip install --no-deps "git+https://github.com/m
 
 Install MuScriptor without its upstream dependencies. Its unused server and
 `beat-this` dependencies require `torchaudio`, which has no Windows ARM64 wheel.
+On x64, use your x64 Python 3.12 (for example
+`$env:LOCALAPPDATA\Programs\Python\Python312\python.exe`); the host pins the
+matching x64 PyTorch wheel automatically.
 
 Install and build the interface:
 
@@ -190,13 +194,15 @@ $env:MIZAN_DEV_URL = "http://localhost:5173"
 dotnet run --project shell\Mizan.Shell\Mizan.Shell.csproj -r win-arm64
 ```
 
+On x64, use `-r win-x64`.
+
 The host stores the library and cache under `%LOCALAPPDATA%\Mizan`.
 Set `MIZAN_HOME` to use a separate development library.
 
 ## Build an MSIX
 
-The build needs Python 3.12 ARM64, Node.js, `uv`, the .NET 10 SDK, Windows SDK,
-and the host packages. It does not need FFmpeg.
+The build needs Python 3.12 for the target architecture, Node.js, `uv`, the
+.NET 10 SDK, Windows SDK, and the host packages. It does not need FFmpeg.
 The desktop package does not include FFmpeg.
 
 Build an unsigned package with your own publisher value:
@@ -206,6 +212,10 @@ $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
 $publisher = "CN=<your publisher>"
 pwsh -NoProfile -File .\scripts\Build-Msix.ps1 -Version $version -Publisher $publisher -SkipSign
 ```
+
+The default architecture is ARM64. Add `-Architecture x64` to build
+`Mizan_<version>_x64.msix` from an x64 host environment, and pass the same
+`-Architecture` to `Publish-SignedMsix.ps1` when signing it.
 
 This command creates an unsigned MSIX. It does not install the package.
 The MSIX workflow also builds pull requests and `v*` tags.

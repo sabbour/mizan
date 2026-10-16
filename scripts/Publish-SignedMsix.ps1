@@ -14,6 +14,8 @@ param(
     [string]$Version,
 
     [string]$MsixPath = "",
+    [ValidateSet("arm64", "x64")]
+    [string]$Architecture = "arm64",
     [string]$Repository = "sabbour/mizan",
     [switch]$Upload,
     [string]$AzureEndpoint = "https://eus.codesigning.azure.net/",
@@ -28,7 +30,7 @@ if ($Upload -and ($env:MIZAN_BINARY_DISTRIBUTION_READY -cne "true")) {
     throw "Public installer uploads are blocked. Review docs\releasing.md, then set MIZAN_BINARY_DISTRIBUTION_READY=true only after the redistribution requirements are met."
 }
 $root = Split-Path -Parent $PSScriptRoot
-if (-not $MsixPath) { $MsixPath = Join-Path $root "artifacts\Mizan_$($Version)_arm64.msix" }
+if (-not $MsixPath) { $MsixPath = Join-Path $root "artifacts\Mizan_$($Version)_$($Architecture.ToLowerInvariant()).msix" }
 if (-not (Test-Path $MsixPath -PathType Leaf)) { throw "MSIX was not found: $MsixPath" }
 
 function Find-WindowsSdkTool([string]$Name) {
