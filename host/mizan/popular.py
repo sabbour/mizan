@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 from .errors import PopularChartUnavailable
+
+logger = logging.getLogger(__name__)
 
 HIT_LIST_ID = "RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs"
 HIT_LIST_URL = f"https://music.youtube.com/playlist?list={HIT_LIST_ID}"
@@ -118,7 +121,7 @@ def _fetch_playlist(section: dict) -> dict:
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "extract_flat": False,
+            "extract_flat": "in_playlist",
             "playlistend": POPULAR_PLAYLIST_LIMIT,
             "socket_timeout": 8,
             "retries": 0,
@@ -140,11 +143,19 @@ def _fetch_playlist(section: dict) -> dict:
             "status": "available",
             **parsed,
         }
-    except (DownloadError, OSError, TimeoutError, PopularChartUnavailable):
+    except (DownloadError, OSError, TimeoutError, PopularChartUnavailable) as exc:
+        logger.warning("YouTube Music playlist %s could not load: %s", section["id"], exc)
+        message = "YouTube Music could not load this playlist. Retry or search for a song instead."
+        if isinstance(exc, DownloadError) and "not a bot" in str(exc).lower():
+            message = (
+                "YouTube is asking Mizan to confirm it is not a bot. "
+                "Retry later or search for a song instead. "
+                "Your browser's YouTube sign-in is not shared with Mizan."
+            )
         return {
             **section,
             "status": "unavailable",
-            "message": "YouTube Music could not load this playlist.",
+            "message": message,
             "rows": [],
             "description": "",
             "chartDate": "",

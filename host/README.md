@@ -103,7 +103,9 @@ error status visible.
 
 The Library has separate **Discover**, **Local song catalog**, and **Course**
 tabs. Discover lazily fetches four public YouTube Music playlists in parallel
-through yt-dlp, without credentials or media downloads. The lead
+through yt-dlp, without credentials or media downloads. Browsing uses flat
+playlist metadata rather than inspecting each video's playback formats, so a
+video's playback restrictions do not prevent its playlist from loading. The lead
 editorial shelf is **Today's Biggest Hits — The Hit List**; its playlist order
 is not presented as a chart. The secondary editorial shelves are **Pop's
 Biggest Hits**, **Classic Rock's Greatest Hits**, and **All-Time Alt**, in
@@ -113,7 +115,10 @@ shelves are published by YouTube Music; their descriptions and playlist order
 are editorial, not chart rankings. Each shelf reports its own failure, so one
 unavailable playlist does not hide the others. Successful responses are cached
 in memory for six hours; a complete refresh failure shows the last successful
-snapshot and its date. A card's **Preview** opens one inline YouTube player on
+snapshot and its date. A failed initial load is not cached for six hours.
+Playlist failures are written to the host log; bot-verification responses are
+explained in the shelf error. Mizan does not share your browser's YouTube
+sign-in. A card's **Preview** opens one inline YouTube player on
 that selected card; its **Stop** control removes the player. The video title
 and the playlist link remain available as YouTube fallbacks. Only the explicit
 **Transcribe** button starts work. The player sends the app's origin and

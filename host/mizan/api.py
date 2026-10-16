@@ -487,10 +487,12 @@ class Api:
                         return {"ok": True, **cached[1],
                                 "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
                     raise
-                if (cached and songs.get("sections")
+                if (songs.get("sections")
                         and all(section.get("status") == "unavailable" for section in songs["sections"])):
-                    return {"ok": True, **cached[1],
-                            "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
+                    if cached:
+                        return {"ok": True, **cached[1],
+                                "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
+                    return {"ok": True, **songs, "fetchedAt": datetime.now(timezone.utc).isoformat()}
                 fetched_at = datetime.now(timezone.utc).isoformat()
                 result = {**songs, "fetchedAt": fetched_at}
                 with self._popular_songs_lock:
