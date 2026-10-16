@@ -44,7 +44,9 @@ def test_dev_window_configuration_without_gui(monkeypatch):
     monkeypatch.setattr(app, "ArtifactServer", Mock(return_value=artifacts))
     set_app_id = Mock()
     monkeypatch.setattr(app, "_set_app_user_model_id", set_app_id)
+    monkeypatch.setitem(app.webview.settings, "OPEN_EXTERNAL_LINKS_IN_BROWSER", False)
     app.main()
+    assert app.webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
     args, kwargs = create_window.call_args
     assert args == ("Mizan",)
     assert kwargs["url"] == "http://localhost:5173"
@@ -60,15 +62,19 @@ def test_dev_window_configuration_without_gui(monkeypatch):
     runner.close.assert_called_once()
 
 
-def test_built_ui_path_without_gui(monkeypatch):
+def test_built_ui_path_without_gui(monkeypatch, caplog):
     monkeypatch.delenv("MIZAN_DEV_URL", raising=False)
-    monkeypatch.setattr(app.Path, "is_file", lambda path: True)
+    expected = app.Path(app.__file__).resolve().parents[2] / "ui" / "dist" / "index.html"
+    real_is_file = app.Path.is_file
+    monkeypatch.setattr(app.Path, "is_file",
+                        lambda path: path == expected or real_is_file(path))
     create_window = Mock()
     monkeypatch.setattr(app.webview, "create_window", create_window)
     monkeypatch.setattr(app.webview, "start", Mock())
     monkeypatch.setattr(app, "JobRunner", Mock())
     monkeypatch.setattr(app, "ArtifactServer", Mock())
     monkeypatch.setattr(app, "_set_app_user_model_id", Mock())
+    caplog.set_level("INFO", logger="mizan.logging_setup")
     app.main()
-    expected = app.Path(app.__file__).resolve().parents[2] / "ui" / "dist" / "index.html"
     assert create_window.call_args.kwargs["url"] == str(expected)
+    assert "version=development build_id=source" in caplog.text

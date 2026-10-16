@@ -86,9 +86,9 @@ strokes remain unsuggested.
 
 ## Guitar and bass practice
 
-Course includes 85 catalog lessons each for guitar and four-string bass.
-Each instrument has 25 course exercises across five levels and 55 studies
-across 11 genres, plus five original studies inspired by well-known players.
+Course shows 80 lessons each for guitar and four-string bass: 25 course
+exercises across five levels and 55 studies across 11 genres. Artist-inspired
+guitar and bass studies are not listed in Course.
 These studies teach playing techniques; they are not song transcriptions.
 Scales includes 15 families in all 12 keys, with three patterns for each scale:
 an ascending and descending run, broken thirds, and three-note sequences.
@@ -139,8 +139,12 @@ select **Save path**.
 
 Models and account settings show Hugging Face access before model choices.
 The access section opens by default when no token is saved.
-Save a read-access token and accept the model terms before downloading
-MuScriptor models.
+Links open Hugging Face account creation and its new read-token page; Hugging
+Face asks the user to sign in first if needed. Save a read-access token and
+accept the model terms before downloading MuScriptor models.
+
+Web links open in the default browser, where the user is usually already signed
+in. Mizan's own pages stay in the app window.
 
 ## Cloud setup
 

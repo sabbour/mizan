@@ -171,16 +171,23 @@ The listed providers supply the Windows executables.
 Create the host environment and install its development dependencies:
 
 ```powershell
-uv venv --seed --python "$env:LOCALAPPDATA\Programs\Python\Python312-arm64\python.exe" host\.venv
-uv pip install --python host\.venv\Scripts\python.exe -e "host[dev]"
-host\.venv\Scripts\python.exe -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
+pwsh -NoProfile -File .\scripts\Initialize-HostEnvironment.ps1
 ```
 
-Install MuScriptor without its upstream dependencies. Its unused server and
-`beat-this` dependencies require `torchaudio`, which has no Windows ARM64 wheel.
-On x64, use your x64 Python 3.12 (for example
-`$env:LOCALAPPDATA\Programs\Python\Python312\python.exe`); the host pins the
-matching x64 PyTorch wheel automatically.
+The script finds an installed Python 3.12 that matches this PC's architecture.
+Add `-Architecture x64` or `-Architecture arm64` to choose another target, or
+`-Python <path to python.exe>` to use a specific interpreter. It creates
+`host\.venv`, installs `host[dev]`, and installs MuScriptor without its
+upstream dependencies. Those dependencies require `torchaudio`, which has no
+Windows ARM64 wheel. The host pins the matching PyTorch wheel for ARM64 or x64.
+
+pip uses your existing pip configuration for its package index, proxy, and
+credentials. The script does not pass an index URL. pywebview, MuScriptor, and
+PyTorch are pinned as direct GitHub and `download-r2.pytorch.org` URLs, so the
+PC also needs access to those hosts. If the inherited `GIT_EXEC_PATH` belongs
+to a different Git than the one on `PATH`, the script ignores it for that run
+only. It does not install Python, change `PATH`, or edit Git or pip settings.
+An existing `host\.venv` with the wrong Python is reported, not replaced.
 
 Install and build the interface:
 
@@ -212,8 +219,8 @@ Set `MIZAN_HOME` to use a separate development library.
 
 ## Build an MSIX
 
-The build needs Python 3.12 for the target architecture, Node.js, `uv`, the
-.NET 10 SDK, Windows SDK, and the host packages. It does not need FFmpeg.
+The build needs the host environment for the target architecture, Node.js, the
+.NET 10 SDK, and the Windows SDK. It does not need FFmpeg.
 The desktop package does not include FFmpeg.
 
 Build an unsigned package with your own publisher value:
@@ -239,18 +246,37 @@ They do not upload installers.
 
 To sign a package, provide your own certificate or Trusted Signing account
 values. The signing script contains maintainer-specific defaults. Override
-them before use. Public installer uploads require `-Upload` and explicit
+them before use. Sign in with `az login`, then build and sign in one step:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Publish-SignedMsix.ps1 -Version $version -Architecture x64 -Build
+```
+
+`-Build` reads the publisher from the active certificate profile, builds the
+package with it, and signs that exact file. Add `-BuildId` to sign a
+BuildId-tagged package. Without `-Build`, the script signs the existing
+`artifacts\Mizan_<version>_<architecture>.msix`, or the file passed with
+`-MsixPath`.
+
+The script finds the newest Windows SDK tools that run on this PC; SignTool is
+always the x64 build because the Trusted Signing client is x64. It finds the
+Trusted Signing client in the NuGet global-packages folder reported by
+`dotnet nuget locals global-packages --list`, which honors `NUGET_PACKAGES`
+and `nuget.config`. If the client is missing, it restores it from your
+configured NuGet sources into a temporary project. Pass `-DlibPath` to use a
+specific `Azure.CodeSigning.Dlib.dll`.
+
+Public installer uploads require `-Upload` and explicit
 redistribution approval. See the [release guide](docs/releasing.md).
 
 ## Tests
 
-Run Python tests from `host`. The test suite uses paths relative to that
-directory.
+Run Python tests from the repository root. Some tests import the root
+`scripts` package, so put both the repository root and `host` on `PYTHONPATH`.
 
 ```powershell
-Push-Location host
-.\.venv\Scripts\python.exe -m pytest tests -q
-Pop-Location
+$env:PYTHONPATH = "$PWD\host;$PWD"
+.\host\.venv\Scripts\python.exe -m pytest host\tests -q
 ```
 
 Run UI checks from `ui`:

@@ -47,6 +47,8 @@ def main() -> None:
     runner = JobRunner(JobStore())
     artifacts = ArtifactServer()
     icon = Path(__file__).with_name("assets") / "mizan.ico"
+    # Open web links in the default browser, where the user is already signed in.
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     try:
         webview.create_window("Mizan", url=url, js_api=Api(runner, artifacts),
                               width=1440, height=900, min_size=(1024, 640))

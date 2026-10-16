@@ -30,9 +30,26 @@ def test_onnx_runtime_pin_matches_cuda_12_4_base():
     assert "['ldd', str(provider)]" in image and "'not found'" in image
 
 
+def container_storage():
+    """Load storage.py as the top-level module the container's /app/worker.py imports."""
+    storage_spec = importlib.util.spec_from_file_location("storage", WORKER.with_name("storage.py"))
+    module = importlib.util.module_from_spec(storage_spec)
+    storage_spec.loader.exec_module(module)
+    return module
+
+
+def test_container_layout_ships_storage_beside_worker():
+    image = DOCKERFILE.read_text(encoding="utf-8")
+    assert "COPY worker.py /app/worker.py" in image
+    assert "COPY storage.py /app/storage.py" in image
+    assert 'ENTRYPOINT ["python", "/app/worker.py"]' in image
+    assert not worker.__package__
+
+
 @pytest.fixture
-def workdir():
-    work = Path("host/tests/.aca-worker-test").resolve()
+def workdir(monkeypatch):
+    monkeypatch.setitem(sys.modules, "storage", container_storage())
+    work = Path(__file__).resolve().parent / ".aca-worker-test"
     work.mkdir()
     previous = Path.cwd()
     os.chdir(work)
