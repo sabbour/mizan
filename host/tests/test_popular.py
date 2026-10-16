@@ -130,6 +130,56 @@ def test_playlist_fetches_are_independent_and_preserve_partial_errors(monkeypatc
     assert all("rank" not in row for section in result["sections"][1:] for row in section["rows"])
 
 
+def test_playlist_fetch_uses_metadata_without_extracting_video_playback(monkeypatch):
+    from yt_dlp.utils import DownloadError
+
+    class Playlist:
+        def __init__(self, options):
+            self.options = options
+            assert options["skip_download"]
+            assert options["playlistend"] == popular.POPULAR_PLAYLIST_LIMIT
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            assert url == popular.HIT_LIST_URL
+            assert download is False
+            if self.options["extract_flat"] != "in_playlist":
+                raise DownloadError("Sign in to confirm you're not a bot")
+            return fixture_payloads()["hitList"]
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", Playlist)
+    result = popular._fetch_playlist(popular._PLAYLISTS[0])
+
+    assert result["status"] == "available"
+    assert [row["videoId"] for row in result["rows"]] == ["78wrful9cVU", "nUsrYVxrDwI"]
+
+
+@pytest.mark.parametrize("error, expected", [
+    ("Sign in to confirm you're not a bot", "not a bot"),
+    ("Network offline", "Retry or search for a song"),
+])
+def test_playlist_failure_is_logged_and_explained(monkeypatch, caplog, error, expected):
+    from yt_dlp.utils import DownloadError
+
+    def unavailable(options):
+        raise DownloadError(error)
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", unavailable)
+    result = popular._fetch_playlist(popular._PLAYLISTS[0])
+
+    assert result["status"] == "unavailable"
+    assert result["rows"] == []
+    assert expected in result["message"]
+    assert "hit-list" in caplog.text and error in caplog.text
+    if "not a bot" in error:
+        assert "browser's YouTube sign-in is not shared" in result["message"]
+
+
 def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
@@ -173,6 +223,8 @@ def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
         assert stale["fetchedAt"] == refreshed["fetchedAt"]
     finally:
         runner.close()
+
+
 def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
@@ -189,5 +241,33 @@ def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch)
         result = bridge.popular_songs()
         assert result["ok"]
         assert [section["status"] for section in result["sections"]] == ["unavailable"] * 4
+    finally:
+        runner.close()
+
+
+def test_failed_initial_playlist_load_is_not_cached(monkeypatch):
+    runner = JobRunner(JobStore(), lambda *_args: None)
+    bridge = Api(runner)
+    attempts = []
+
+    def fetch():
+        attempts.append(1)
+        if len(attempts) == 1:
+            return {"title": "YouTube Music", "sections": [
+                {"id": "hit-list", "status": "unavailable", "rows": []},
+            ]}
+        return {"title": "YouTube Music", "sections": [
+            {"id": "hit-list", "status": "available", "rows": [{"videoId": "78wrful9cVU"}]},
+        ]}
+
+    monkeypatch.setattr("mizan.api.fetch_popular_songs", fetch)
+    try:
+        failed = bridge.popular_songs()
+        assert failed["ok"] and failed["sections"][0]["status"] == "unavailable"
+        recovered = bridge.popular_songs()
+        assert recovered["ok"] and recovered["sections"][0]["status"] == "available"
+        assert len(attempts) == 2
+        assert bridge.popular_songs() == recovered
+        assert len(attempts) == 2
     finally:
         runner.close()
