@@ -1793,6 +1793,14 @@
     "group": "Host/engine libraries"
   },
   {
+    "name": "yt-dlp-ejs",
+    "version": "0.8.0",
+    "license": "Unlicense AND MIT AND ISC",
+    "author": "Project contributors",
+    "url": "https://github.com/yt-dlp/ejs",
+    "group": "Host/engine libraries"
+  },
+  {
     "name": "Beat This! final0 ONNX weights",
     "version": "e2c0d4376fac8141905a8312c1b327849751d59c",
     "license": "MIT",
@@ -1836,6 +1844,15 @@
     "url": "https://developer.microsoft.com/microsoft-edge/webview2/",
     "group": "Tools",
     "note": "Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime."
+  },
+  {
+    "name": "Node.js JavaScript runtime",
+    "version": "24.22.0",
+    "license": "MIT",
+    "author": "Copyright Node.js contributors",
+    "url": "https://nodejs.org/",
+    "group": "Tools",
+    "note": "A Windows x64/ARM64 runtime is bundled in the MSIX for yt-dlp's YouTube challenge solver."
   },
   {
     "name": "Python",

@@ -17,7 +17,7 @@ import warnings
 from scipy.io.wavfile import WavFileWarning
 
 from ..errors import (DownloadFailed, FFmpegProbeTimedOut, FFmpegUnavailable, InsufficientDisk,
-                      UnsupportedMedia, VideoUnavailable, YoutubeSignInRequired)
+                      UnsupportedMedia, VideoUnavailable, YoutubeExtractionFailed, YoutubeSignInRequired)
 from ..paths import home
 from ..youtube_auth import youtube_auth_status, youtube_cookies_for_operation
 from .audio import read_audio
@@ -215,6 +215,9 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
             process = subprocess.Popen(command, stdout=output, stderr=errors,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
+            if error_type is DownloadFailed:
+                logger.warning("yt-dlp could not start executable=%s error=%s",
+                               Path(command[0]).name, exc)
             raise error_type(f"Cannot start {Path(command[0]).name}: {exc}") from exc
         try:
             while process.poll() is None:
@@ -236,29 +239,48 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
             text = output.read()
             if process.returncode:
                 errors.seek(0)
-                message = errors.read()[-3000:].strip()
-                lowered = message.lower()
-                if error_type is DownloadFailed and any(phrase in lowered for phrase in
-                        ("sign in to confirm", "confirm you're not a bot",
-                         "confirm you are not a bot", "not a bot")):
-                    if youtube_auth_status()["signedIn"]:
+                raw_message = errors.read()
+                lowered = raw_message.lower()
+                message = _redact_cookie_entries(raw_message)[-3000:].strip()
+                if error_type is DownloadFailed:
+                    logger.warning("yt-dlp failed exit_code=%d stderr=%s", process.returncode, message)
+                    if any(phrase in lowered for phrase in (
+                            "sign in to confirm", "confirm you're not a bot",
+                            "confirm you are not a bot", "confirm this isn't a bot",
+                            "confirm this is not a bot", "sign in to confirm your age",
+                            "sign in to view this video")):
+                        if youtube_auth_status()["signedIn"]:
+                            raise YoutubeSignInRequired(
+                                "YouTube rejected the saved sign-in. Sign in again, then retry this analysis.")
                         raise YoutubeSignInRequired(
-                            "YouTube rejected the saved sign-in. Sign in again, then retry this analysis.")
-                    raise YoutubeSignInRequired(
-                        "YouTube requires sign-in. Sign in, then retry this analysis.")
-                if error_type is DownloadFailed and "--cookies" in command:
-                    if "http error 403" in lowered:
-                        raise DownloadFailed("HTTP Error 403")
-                    if any(word in lowered for word in
-                           ("private video", "video unavailable", "removed", "sign in",
-                            "not available", "copyright")):
-                        raise VideoUnavailable("This YouTube video is unavailable.")
-                    raise DownloadFailed(
-                        "YouTube could not use the saved sign-in or load this video. "
-                        "Sign in again or retry.")
-                if error_type is DownloadFailed and any(word in message.lower() for word in
-                        ("private video", "video unavailable", "removed", "sign in", "not available", "copyright")):
-                    raise VideoUnavailable(message)
+                            "YouTube requires sign-in. Sign in, then retry this analysis.")
+                    if (re.search(r"\brate[- ]limit(?:ed|ing)?\b", lowered)
+                            or "too many requests" in lowered or "http error 429" in lowered):
+                        raise DownloadFailed(
+                            "YouTube is temporarily rate-limiting requests. Wait a while, then retry.")
+                    if any(phrase in lowered for phrase in (
+                            "video unavailable", "this video is unavailable", "private video",
+                            "this video is private", "video has been removed", "video was removed",
+                            "video is no longer available",
+                            "this video is not available",
+                            "the uploader has not made this video available in your country",
+                            "not available in your country", "not available in your location")):
+                        raise VideoUnavailable()
+                    if any(phrase in lowered for phrase in (
+                            "no supported javascript runtime", "javascript runtime could not be found",
+                            "signature solving failed", "signature extraction failed",
+                            "n challenge solving failed", "n-challenge solving failed",
+                            "only images are available", "requested format is not available",
+                            "requested format is unavailable", "no video formats found")):
+                        raise YoutubeExtractionFailed()
+                    if "--cookies" in command:
+                        if "http error 403" in lowered:
+                            raise DownloadFailed("HTTP Error 403")
+                        raise DownloadFailed(
+                            "YouTube could not use the saved sign-in or load this video. "
+                            "Sign in again or retry.")
+                    if any(phrase in lowered for phrase in ("http error 403", "http error 429")):
+                        raise DownloadFailed(message[-300:].strip())
                 raise error_type(message or f"Media command exited with code {process.returncode}.")
             return text
         finally:
@@ -267,8 +289,33 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
                 process.wait()
 
 
+def _redact_cookie_entries(message: str) -> str:
+    lines = []
+    for line in message.splitlines():
+        for separator in (r"\t", "\t"):
+            first_separator = line.find(separator)
+            if first_separator < 0:
+                continue
+            record_start = line.rfind(" ", 0, first_separator) + 1
+            fields = line[record_start:].split(separator)
+            if (len(fields) == 7 and fields[1].upper() in ("TRUE", "FALSE")
+                    and fields[3].upper() in ("TRUE", "FALSE") and fields[5]):
+                quote = fields[6][-1] if fields[6].endswith(("'", '"')) else ""
+                fields[6] = f"[redacted]{quote}"
+                line = line[:record_start] + separator.join(fields)
+                break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _youtube_js_runtime_args() -> list[str]:
+    bundled = Path(sys.executable).parent / "js-runtime" / "node.exe"
+    runtime = str(bundled) if bundled.is_file() else shutil.which("node")
+    return ["--js-runtimes", f"node:{runtime}"] if runtime else []
+
+
 def inspect_video(url: str, directory: Path, cancelled: Event) -> dict:
-    command = [sys.executable, "-m", "yt_dlp", "--ignore-config"]
+    command = [sys.executable, "-m", "yt_dlp", *_youtube_js_runtime_args(), "--ignore-config"]
     with youtube_cookies_for_operation() as cookies:
         if cookies:
             command.extend(["--cookies", str(cookies)])
@@ -302,7 +349,8 @@ def preflight(metadata: dict, directory: Path) -> list[str]:
 
 
 def download_video(url: str, directory: Path, cancelled: Event, progress=None) -> Path:
-    command = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
+    command = [sys.executable, "-m", "yt_dlp", *_youtube_js_runtime_args(),
+               "--ignore-config", "--no-playlist",
                "--ffmpeg-location", ffmpeg_path()]
     with youtube_cookies_for_operation() as cookies:
         if cookies:

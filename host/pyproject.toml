@@ -17,6 +17,7 @@ dependencies = [
     "wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap==2.3.0",
     "mido==1.3.3",
     "yt-dlp==2026.8.19",
+    "yt-dlp-ejs==0.8.0",
     "torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp312-cp312-win_arm64.whl#sha256=420e7dbed969bbd045b34105fa90d1ccf3e5c09c4e9b0d0a5f9df25df9d02d2e ; platform_machine == 'ARM64'",
     "torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp312-cp312-win_amd64.whl#sha256=738cd9237bf63443a5e5f9652e5115f7b0510b089636a43d4011e9fccede714f ; platform_machine == 'AMD64'",
     "safetensors==0.8.0",

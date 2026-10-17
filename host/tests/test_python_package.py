@@ -15,12 +15,25 @@ def test_production_stage_includes_cpu_inference_without_gated_weights(tmp_path)
                      for dist in package_python.production_distributions()}
     assert distributions["torch"].version == "2.14.0+cpu"
     assert {"safetensors", "einops", "huggingface-hub", "packaging", "mido"} <= distributions.keys()
+    assert distributions["yt-dlp-ejs"].version == "0.8.0"
     assert "muscriptor" not in distributions
 
     package_python.copy_muscriptor_source(tmp_path)
     assert (tmp_path / "muscriptor" / "transcription_model.py").is_file()
     assert (tmp_path / "muscriptor" / "LICENSE").is_file()
     assert not list(tmp_path.rglob("*.safetensors"))
+
+
+def test_msix_bundles_checksum_pinned_node_runtime():
+    build_script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "Build-Msix.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert 'nodeVersion = "24.22.0"' in build_script
+    assert "node-v24.22.0-win-arm64.zip" in build_script
+    assert "node-v24.22.0-win-x64.zip" in build_script
+    assert "Get-FileHash -Path $archivePath -Algorithm SHA256" in build_script
+    assert 'Join-Path $Destination "js-runtime"' in build_script
 
 
 def test_package_rejects_different_official_source_commit(monkeypatch, tmp_path):
