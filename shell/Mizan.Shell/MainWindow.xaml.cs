@@ -22,7 +22,7 @@ public sealed class MainWindow : Window
     private const int MinHeight = 640;
     private const uint WmGetMinMaxInfo = 0x0024;
     private const int SubclassId = 1;
-    private readonly WorkerProcess _worker = new();
+    private readonly WorkerProcess _worker = new(WorkerDataDirectory);
     private readonly AppWindow _appWindow;
     private readonly SubclassProc _subclassProc;
     private readonly Grid _root = new();
@@ -414,6 +414,24 @@ public sealed class MainWindow : Window
                 directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Mizan");
             Directory.CreateDirectory(directory);
             return directory;
+        }
+    }
+
+    private static string WorkerDataDirectory
+    {
+        get
+        {
+            var configured = Environment.GetEnvironmentVariable("MIZAN_HOME");
+            if (!string.IsNullOrWhiteSpace(configured))
+                return configured;
+
+            var windowsApps = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps")
+                + Path.DirectorySeparatorChar;
+            if (AppContext.BaseDirectory.StartsWith(windowsApps, StringComparison.OrdinalIgnoreCase))
+                return Path.Combine(ApplicationData.Current.LocalCacheFolder.Path, "Local", "Mizan");
+
+            return DataDirectory;
         }
     }
 

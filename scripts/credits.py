@@ -353,6 +353,19 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             ),
         },
         {
+            "name": "Node.js JavaScript runtime",
+            "version": "24.22.0",
+            "license": "MIT",
+            "author": "Copyright Node.js contributors",
+            "url": "https://nodejs.org/",
+            "group": "Tools",
+            "note": "A Windows x64/ARM64 runtime is bundled in the MSIX for yt-dlp's YouTube challenge solver.",
+            "_license": save_license(
+                "tool-nodejs-runtime",
+                (ROOT / "scripts" / "licenses" / "nodejs-runtime.txt").read_text(encoding="utf-8"),
+            ),
+        },
+        {
             "name": ".NET Runtime",
             "version": "10",
             "license": "LicenseRef-Microsoft-.NET-Library",
