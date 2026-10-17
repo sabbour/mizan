@@ -2073,6 +2073,50 @@ def test_existing_gpu_job_update_requires_current_consent_and_preserves_other_se
     assert cloud._setting("cloud_job_created") == image
 
 
+def test_job_update_plan_does_not_duplicate_case_insensitive_existing_identity():
+    identity = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
+                "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mizan-job-identity")
+    existing_identity = identity.replace("resourceGroups", "resourcegroups")
+    environment = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
+                   "/providers/Microsoft.App/managedEnvironments/mizan-aca-env")
+    image = "mizanregistry.azurecr.io/mizan-aca-gpu@sha256:" + "a" * 64
+    previous = {
+        "identity": {
+            "type": "UserAssigned",
+            "userAssignedIdentities": {existing_identity: {}},
+        },
+        "properties": {
+            "environmentId": environment,
+            "workloadProfileName": cloud.GPU_PROFILE,
+            "configuration": {
+                "triggerType": "Manual",
+                "secrets": [{"name": "hf-token"}],
+                "registries": [{"server": "mizanregistry.azurecr.io", "identity": identity}],
+            },
+            "template": {
+                "containers": [{
+                    "name": "mizan-worker",
+                    "image": image,
+                    "resources": cloud.JOB_RESOURCES,
+                    "env": [
+                        {"name": "HF_TOKEN", "secretRef": "hf-token"},
+                        {"name": "AZURE_STORAGE_BLOB_URL",
+                         "value": "https://mizanblob.blob.core.windows.net"},
+                        {"name": "AZURE_STORAGE_CONTAINER", "value": "jobs"},
+                        {"name": "AZURE_CLIENT_ID", "value": "managed-client"},
+                    ],
+                }],
+            },
+        },
+    }
+
+    plan = cloud._job_update_plan(
+        CONFIG["jobName"], previous, image, environment, identity, "managed-client", SETUP)
+
+    assert plan["changes"] == []
+    assert plan["patch"] == {}
+
+
 def test_job_resources_match_azure_empty_ephemeral_storage_only():
     assert cloud._job_resources_match(
         {"cpu": 2, "memory": "8Gi", "ephemeralStorage": ""}, cloud.JOB_RESOURCES)
