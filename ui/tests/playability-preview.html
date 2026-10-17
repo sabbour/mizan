@@ -15,6 +15,7 @@
       import React from 'react'
       import { createRoot } from 'react-dom/client'
       import { Workspace } from '/src/workspace/Workspace.tsx'
+      import { AnalysisNotice } from '/src/workspace/AnalysisNotice.tsx'
       import { buildSong } from '/src/workspace/song.ts'
       import '/src/index.css'
 
@@ -48,8 +49,21 @@
         }
       }
       const defaults = { piano: query.get('view') ?? 'keyboard', guitar: query.get('view') ?? 'tab', click: false }
+      // ?notice=decoding | status | long adds the saved-song notices above the practice view.
+      const long = 'Updating analysis · Separating the guitar, bass, piano, drums, vocals and other parts from the full mix with the large model · 37% step'
+      const notices = {
+        decoding: { decodingHeadline: 'Best-effort transcription · 1 decoding error' },
+        status: { decodingHeadline: 'Best-effort transcription · 12 decoding errors',
+          status: { headline: 'Older analysis', detail: 'You are viewing the saved result. Redo analysis with the selected model. Saved audio tracks are reused when possible; this result stays available.',
+            action: React.createElement('button', { className: 'btn' }, 'Redo analysis') } },
+        long: { decodingHeadline: 'Best-effort transcription · 1234567 decoding errors',
+          status: { headline: long, detail: `You are viewing the saved result. ${'Keep practicing while it updates; new tracks appear when you open the finished result. '.repeat(6)}`,
+            action: React.createElement('button', { className: 'btn' }, 'View progress') },
+          error: 'Analysis could not be queued: the analysis host stopped responding while it was saving the request. Try again after the current job finishes.' },
+      }[query.get('notice')]
+      const analysisNotice = notices && React.createElement(AnalysisNotice, notices)
       createRoot(document.getElementById('root')).render(
-        React.createElement(Workspace, { song, songId: `playability-${kind}`, note: 'Playability preview', defaults }),
+        React.createElement(Workspace, { song, songId: `playability-${kind}`, note: 'Playability preview', defaults, analysisNotice }),
       )
     </script>
   </body>

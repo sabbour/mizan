@@ -436,7 +436,7 @@ export function Workspace({
       const target = e.target as HTMLElement
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable ||
         !!target.closest('[role="dialog"]') ||
-        (target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))
+        ((target.tagName === 'BUTTON' || target.tagName === 'SUMMARY') && (e.key === ' ' || e.key === 'Enter'))
       if (editing || e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key
       if (/^[0-9]$/.test(k)) {
@@ -551,8 +551,11 @@ export function Workspace({
           onOriginalOnly={originalOnly}
         />
         </div>
-        {analysisNotice}
-        {playable.summary && <PlayabilityNote summary={playable.summary} song={chosen} engine={engine} asTranscribed={asTranscribed} onToggle={setAsTranscribed} />}
+        {/* Notices share one compact row under the controls, wrapping only when the window is narrow. */}
+        {(analysisNotice || playable.summary) && <div className="ws-notices">
+          {analysisNotice}
+          {playable.summary && <PlayabilityNote summary={playable.summary} song={chosen} engine={engine} asTranscribed={asTranscribed} onToggle={setAsTranscribed} />}
+        </div>}
       </header>
 
       {audioError && <div className="audio-error" role="alert">{audioError}</div>}

@@ -1,6 +1,7 @@
 import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
+import { AnalysisNotice } from './workspace/AnalysisNotice'
 import { Library, type LibraryTab } from './library/Library'
 import { JobPanel } from './library/JobPanel'
 import { Credits } from './Credits'
@@ -198,25 +199,18 @@ export default function App() {
           }}
           onBack={back}
           analysisNotice={decodingHeadline || hasAnalysisStatus ? (
-            <aside className="analysis-notice" aria-label={decodingHeadline ? 'Transcription warning' : 'Analysis status'}>
-              <div>
-                {decodingHeadline && <>
-                  <strong role="status">{decodingHeadline}</strong>
-                  <p>Some notes may be missing or cut short. Check this saved draft against the recording.</p>
-                </>}
-                {hasAnalysisStatus && <>
-                  <strong role={decodingHeadline ? undefined : 'status'}>
-                    {updating ? analysisProgress(updating) : updated ? 'Updated analysis is ready' : 'Older analysis'}
-                  </strong>
-                  <p>You are viewing the saved result. {updating ? 'Keep practicing while it updates; new tracks appear when you open the finished result.' :
-                    updated ? 'Open the updated result to see its tracks.' : 'Redo analysis with the selected model. Saved audio tracks are reused when possible; this result stays available.'}</p>
-                </>}
-                {analysisError && <p role="alert">{analysisError}</p>}
-              </div>
-              {hasAnalysisStatus && (updating ? <button className="btn" onClick={() => setView({ kind: 'job', id: updating.id, opened })}>View progress</button> :
-                updated ? <button className="btn" onClick={() => { queue.clearFinished(); void open(opened.entry.id) }}>Open updated analysis</button> :
-                  <button className="btn" disabled={reprocessing} onClick={() => void reprocess()}>{reprocessing ? 'Queuing...' : 'Redo analysis'}</button>)}
-            </aside>
+            <AnalysisNotice
+              decodingHeadline={decodingHeadline}
+              status={hasAnalysisStatus ? {
+                headline: updating ? analysisProgress(updating) : updated ? 'Updated analysis is ready' : 'Older analysis',
+                detail: `You are viewing the saved result. ${updating ? 'Keep practicing while it updates; new tracks appear when you open the finished result.' :
+                  updated ? 'Open the updated result to see its tracks.' : 'Redo analysis with the selected model. Saved audio tracks are reused when possible; this result stays available.'}`,
+                action: updating ? <button className="btn" onClick={() => setView({ kind: 'job', id: updating.id, opened })}>View progress</button> :
+                  updated ? <button className="btn" onClick={() => { queue.clearFinished(); void open(opened.entry.id) }}>Open updated analysis</button> :
+                    <button className="btn" disabled={reprocessing} onClick={() => void reprocess()}>{reprocessing ? 'Queuing...' : 'Redo analysis'}</button>,
+              } : null}
+              error={analysisError}
+            />
           ) : undefined}
           />
         </WorkspaceBoundary>

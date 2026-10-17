@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test:youtube-signin": "node tests/youtube-signin.mjs",
+    "test:practice-notices": "node tests/practice-notices.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
