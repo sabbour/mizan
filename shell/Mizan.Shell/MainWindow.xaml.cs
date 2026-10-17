@@ -30,6 +30,10 @@ public sealed class MainWindow : Window
     private readonly Grid _errorPanel = new();
     private readonly TextBlock _errorMessage = new();
     private readonly Queue<string> _pendingMidiFiles = new();
+    private Uri _appOrigin = new("https://mizan.local");
+    private YouTubeSignInWindow? _youtubeSignInWindow;
+    private readonly CancellationTokenSource _youtubeRefreshCancellation = new();
+    private Task? _youtubeRefreshTask;
     private bool _webReady;
 
     public MainWindow()
@@ -73,6 +77,67 @@ public sealed class MainWindow : Window
                 {
                     using var request = JsonDocument.Parse(args.WebMessageAsJson);
                     var root = request.RootElement;
+                    if (TryGetShellRequest(root, "youtube_sign_in", out var signInId))
+                    {
+                        YouTubeSignInWindow? signInWindow = null;
+                        try
+                        {
+                            signInWindow = _youtubeSignInWindow ??= new YouTubeSignInWindow(DataDirectory);
+                            signInWindow.Activate();
+                            var signedIn = await signInWindow.Completion;
+                            _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+                            {
+                                id = signInId,
+                                ok = true,
+                                result = new { ok = true, signedIn },
+                            }));
+                        }
+                        catch (Exception error)
+                        {
+                            ShellLog.Write($"YouTube sign-in failed: {error.Message}");
+                            PostBridgeError(signInId, "youtube_sign_in_failed",
+                                "The YouTube sign-in window could not open. Try again.");
+                        }
+                        finally
+                        {
+                            if (signInWindow is not null && ReferenceEquals(_youtubeSignInWindow, signInWindow))
+                                _youtubeSignInWindow = null;
+                        }
+                        return;
+                    }
+                    if (TryGetShellRequest(root, "youtube_sign_out", out var signOutId))
+                    {
+                        try
+                        {
+                            _youtubeRefreshCancellation.Cancel();
+                            if (_youtubeRefreshTask is not null)
+                                await _youtubeRefreshTask;
+                            _youtubeSignInWindow?.Cancel();
+                            _youtubeSignInWindow = null;
+                            File.Delete(Path.Combine(DataDirectory, "youtube-cookies.txt"));
+                            File.Delete(Path.Combine(DataDirectory, "youtube-cookies-source.txt"));
+                            await YouTubeSignInWindow.ClearProfileCookiesAsync(
+                                DataDirectory, WindowNative.GetWindowHandle(this));
+                            _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+                            {
+                                id = signOutId,
+                                ok = true,
+                                result = new { ok = true, signedIn = false, source = (string?)null },
+                            }));
+                        }
+                        catch (Exception error)
+                        {
+                            ShellLog.Write($"YouTube sign-out failed: {error.Message}");
+                            PostBridgeError(signOutId, "youtube_sign_out_failed",
+                                "Mizan could not clear the YouTube sign-in. Try again.");
+                        }
+                        return;
+                    }
+                    if (TryGetShellRequest(root, "browse_youtube_cookies", out var browseCookiesId))
+                    {
+                        await BrowseYoutubeCookiesAsync(browseCookiesId);
+                        return;
+                    }
                     if (root.ValueKind == JsonValueKind.Object
                         && root.TryGetProperty("method", out var method)
                         && method.ValueKind == JsonValueKind.String
@@ -94,7 +159,22 @@ public sealed class MainWindow : Window
                     ShowError("Could not send a request to Mizan's background host.");
                 }
             };
-            _browser.CoreWebView2.NavigationStarting += (_, _) => _webReady = false;
+            _browser.CoreWebView2.NewWindowRequested += (_, args) =>
+            {
+                args.Handled = true;
+                if (!IsAppUri(args.Uri))
+                    OpenExternally(args.Uri);
+            };
+            _browser.CoreWebView2.NavigationStarting += (_, args) =>
+            {
+                if (!IsAppUri(args.Uri))
+                {
+                    args.Cancel = true;
+                    OpenExternally(args.Uri);
+                    return;
+                }
+                _webReady = false;
+            };
             _browser.CoreWebView2.NavigationCompleted += (_, _) =>
             {
                 _webReady = true;
@@ -105,7 +185,10 @@ public sealed class MainWindow : Window
             var devUrl = Environment.GetEnvironmentVariable("MIZAN_DEV_URL");
             if (!string.IsNullOrWhiteSpace(devUrl))
             {
-                _browser.Source = new Uri(devUrl);
+                var dev = new Uri(devUrl);
+                _appOrigin = new Uri(dev.GetLeftPart(UriPartial.Authority));
+                _browser.Source = dev;
+                StartYoutubeSessionRefresh();
                 return;
             }
 
@@ -113,10 +196,81 @@ public sealed class MainWindow : Window
             _browser.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "mizan.local", ui, CoreWebView2HostResourceAccessKind.DenyCors);
             _browser.Source = new Uri("https://mizan.local/index.html");
+            StartYoutubeSessionRefresh();
         }
         catch (Exception error)
         {
             ShowError(error.Message);
+        }
+    }
+
+    private void StartYoutubeSessionRefresh() =>
+        _youtubeRefreshTask ??= YouTubeSignInWindow.RefreshSavedSessionAsync(
+            DataDirectory, WindowNative.GetWindowHandle(this), _youtubeRefreshCancellation.Token);
+
+    private bool IsAppUri(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var target)) return false;
+        if (target.AbsoluteUri == "about:blank") return true;
+        return string.Equals(target.Scheme, _appOrigin.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(target.IdnHost, _appOrigin.IdnHost, StringComparison.OrdinalIgnoreCase)
+            && target.Port == _appOrigin.Port;
+    }
+
+    private static void OpenExternally(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var target)
+            || target.Scheme is not ("http" or "https"))
+        {
+            ShellLog.Write($"Blocked a non-web link: {uri}");
+            return;
+        }
+        _ = Windows.System.Launcher.LaunchUriAsync(target);
+    }
+
+    private static bool TryGetShellRequest(JsonElement root, string methodName, out int requestId)
+    {
+        requestId = 0;
+        return root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("method", out var method)
+            && method.ValueKind == JsonValueKind.String
+            && method.GetString() == methodName
+            && root.TryGetProperty("args", out var requestArgs)
+            && requestArgs.ValueKind == JsonValueKind.Array
+            && requestArgs.GetArrayLength() == 0
+            && root.TryGetProperty("id", out var id)
+            && id.ValueKind == JsonValueKind.Number
+            && id.TryGetInt32(out requestId);
+    }
+
+    private void PostBridgeError(int id, string code, string message) =>
+        _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+        {
+            id,
+            ok = false,
+            error = new { code, message },
+        }));
+
+    private async Task BrowseYoutubeCookiesAsync(int id)
+    {
+        try
+        {
+            var picker = new FileOpenPicker(_appWindow.Id);
+            picker.FileTypeFilter.Add(".txt");
+            picker.CommitButtonText = "Select cookies.txt";
+            var file = await picker.PickSingleFileAsync();
+            _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                id,
+                ok = true,
+                result = new { ok = true, path = file?.Path },
+            }));
+        }
+        catch (Exception error)
+        {
+            ShellLog.Write($"YouTube cookies file picker failed: {error.Message}");
+            PostBridgeError(id, "youtube_cookies_picker_failed",
+                "Could not open the file picker. Enter the full path to cookies.txt instead.");
         }
     }
 
@@ -232,7 +386,12 @@ public sealed class MainWindow : Window
 
     private async void OnClosed(object sender, WindowEventArgs args)
     {
+        _youtubeRefreshCancellation.Cancel();
+        _youtubeSignInWindow?.Cancel();
         RemoveWindowSubclass(WindowNative.GetWindowHandle(this), _subclassProc, SubclassId);
+        if (_youtubeRefreshTask is not null)
+            await _youtubeRefreshTask;
+        _youtubeRefreshCancellation.Dispose();
         await _worker.DisposeAsync();
     }
 
@@ -242,11 +401,19 @@ public sealed class MainWindow : Window
     {
         get
         {
+            return Path.Combine(DataDirectory, "window.json");
+        }
+    }
+
+    private static string DataDirectory
+    {
+        get
+        {
             var directory = Environment.GetEnvironmentVariable("MIZAN_HOME");
             if (string.IsNullOrWhiteSpace(directory))
                 directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Mizan");
             Directory.CreateDirectory(directory);
-            return Path.Combine(directory, "window.json");
+            return directory;
         }
     }
 

@@ -48,6 +48,8 @@ FIXES = {
     "youtube_search_failed": "Check your connection and retry.",
     "youtube_music_search_failed": "Check your connection and retry.",
     "popular_playlist_unavailable": "Try again later.",
+    "youtube_sign_in_required": "Sign in to YouTube, then retry the analysis.",
+    "invalid_youtube_cookies": "Export a Netscape cookies.txt file with an active YouTube sign-in session, then choose it here.",
 }
 
 
@@ -343,6 +345,18 @@ class Api:
         from .engine.media import ffmpeg_status
         return response(lambda: {"ok": True, **ffmpeg_status()})
 
+    def youtube_auth_status(self) -> dict[str, Any]:
+        from .youtube_auth import youtube_auth_status
+        return response(lambda: {"ok": True, **youtube_auth_status()})
+
+    def import_youtube_cookies(self, path: str) -> dict[str, Any]:
+        from .youtube_auth import import_youtube_cookies
+        return response(lambda: {"ok": True, **import_youtube_cookies(path)})
+
+    def youtube_sign_out(self) -> dict[str, Any]:
+        from .youtube_auth import youtube_sign_out
+        return response(lambda: {"ok": True, **youtube_sign_out()})
+
     def set_ffmpeg_path(self, path: str) -> dict[str, Any]:
         from .engine.media import ffmpeg_status, validate_ffmpeg_executable
 
@@ -487,16 +501,17 @@ class Api:
                         return {"ok": True, **cached[1],
                                 "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
                     raise
-                if (songs.get("sections")
-                        and all(section.get("status") == "unavailable" for section in songs["sections"])):
-                    if cached:
-                        return {"ok": True, **cached[1],
-                                "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
-                    return {"ok": True, **songs, "fetchedAt": datetime.now(timezone.utc).isoformat()}
+                all_unavailable = bool(songs.get("sections")) and all(
+                    section.get("status") == "unavailable" for section in songs["sections"]
+                )
+                if cached and all_unavailable:
+                    return {"ok": True, **cached[1],
+                            "warning": "YouTube Music could not refresh; showing the last playlist snapshot and its date."}
                 fetched_at = datetime.now(timezone.utc).isoformat()
                 result = {**songs, "fetchedAt": fetched_at}
-                with self._popular_songs_lock:
-                    self._popular_songs_cache = (monotonic(), result)
+                if not all_unavailable:
+                    with self._popular_songs_lock:
+                        self._popular_songs_cache = (monotonic(), result)
                 return {"ok": True, **result}
         return response(get_songs)
 

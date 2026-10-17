@@ -108,7 +108,8 @@ try {
     return input.labels?.length > 0 && link?.target === '_blank'
       && link.rel.includes('noopener') && section.textContent.includes('ffmpeg.exe')
       && section.textContent.includes('Gyan or BtbN')
-  })()`), 'Path has an accessible label, accurate setup instructions, and the official Windows download page')
+      && section.querySelector('.ffmpeg-install-command')?.textContent === 'winget install Gyan.FFmpeg'
+  })()`), 'Path has an accessible label, a WinGet install command, and the official Windows download page')
   assert.equal(await evaluate('document.querySelector("#ffmpeg-path").value'), 'ffmpeg',
     'The initial field shows the detected executable')
 

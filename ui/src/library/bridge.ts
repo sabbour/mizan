@@ -104,6 +104,7 @@ export type FfmpegStatus = {
   available: boolean
   issue: string | null
 }
+export type YouTubeAuthStatus = { signedIn: boolean; source: 'app' | 'file' | null }
 export type CloudStatusFor<P extends CloudProvider> = Omit<CloudStatus, 'provider' | 'config'> & {
   provider?: P
   config?: CloudProviderSettingsById[P]
@@ -221,6 +222,8 @@ export type PopularShelf = {
   sourceUrl: string
   kind: 'editorial' | 'chart'
   status: 'available' | 'unavailable'
+  requiresAuth?: boolean
+  stale?: boolean
   description: string
   chartDate: string
   rows: PopularChartRow[]
@@ -415,7 +418,15 @@ async function call<T = object>(name: string, ...args: unknown[]): Promise<T> {
   const api = await ready
   if (window.__mizanNativeShell && api === (mockHost as unknown as Api))
     throw new HostError({ code: 'host_unavailable', message: 'Mizan host is unavailable. Restart the app.' })
-  const reply = (await api[name](...args)) as Reply<T>
+  const response = await api[name](...args)
+  if (!response || typeof response !== 'object'
+    || typeof (response as { ok?: unknown }).ok !== 'boolean') {
+    throw new HostError({
+      code: 'invalid_host_response',
+      message: 'Mizan returned an unexpected response. Restart the app and try again.',
+    })
+  }
+  const reply = response as Reply<T>
   if (!reply.ok) throw new HostError(reply.error)
   return reply as T
 }
@@ -477,6 +488,11 @@ export const host = {
   ffmpegStatus: () => call<FfmpegStatus>('ffmpeg_status'),
   setFfmpegPath: (path: string) => call<FfmpegStatus>('set_ffmpeg_path', path),
   browseFfmpegPath: () => call<{ path: string | null }>('browse_ffmpeg_path'),
+  youtubeAuthStatus: () => call<YouTubeAuthStatus>('youtube_auth_status'),
+  youtubeSignIn: () => call<{ signedIn: boolean }>('youtube_sign_in'),
+  youtubeSignOut: () => call<YouTubeAuthStatus>('youtube_sign_out'),
+  importYoutubeCookies: (path: string) => call<YouTubeAuthStatus>('import_youtube_cookies', path),
+  browseYoutubeCookies: () => call<{ path: string | null }>('browse_youtube_cookies'),
   hfTokenStatus: () => call<{ configured: boolean }>('hf_token_status').then((r) => r.configured),
   setHfToken: (token: string) => call<{ configured: boolean }>('set_hf_token', token).then((r) => r.configured),
   clearHfToken: () => call<{ configured: boolean }>('clear_hf_token').then((r) => r.configured),
