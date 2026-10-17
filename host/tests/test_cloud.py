@@ -1795,6 +1795,7 @@ def test_existing_pilot_needs_valid_secret_binding_and_never_overwrites(signed_i
             "workloadProfileName": cloud.GPU_PROFILE,
             "configuration": {"triggerType": "Manual", "secrets": []},
             "template": {"containers": [{
+                "name": "mizan-worker",
                 "image": tagged_image,
                 "resources": {"cpu": 2, "memory": "8Gi", "ephemeralStorage": ""},
                 "env": []}]},
@@ -1819,7 +1820,7 @@ def test_existing_pilot_needs_valid_secret_binding_and_never_overwrites(signed_i
 
     monkeypatch.setattr(cloud, "_Azure", Azure)
     monkeypatch.setattr(cloud, "_roles_ready", lambda *args: None)
-    with pytest.raises(cloud.CloudError, match="pinned image"):
+    with pytest.raises(cloud.CloudError, match="will not transfer a token"):
         cloud.finish(image, "hf_" + "s" * 40)
     assert not cloud.status()["jobCreated"]
     cloud._setting("cloud_reuse", "yes")
@@ -1831,11 +1832,10 @@ def test_existing_pilot_needs_valid_secret_binding_and_never_overwrites(signed_i
     with pytest.raises(cloud.CloudError, match="will not transfer a token"):
         cloud.finish(image, "hf_" + "s" * 40)
     result = cloud.finish(image, "")
-    assert result["jobCreated"]
+    assert result["requiresJobUpdateConsent"]
     assert job["properties"]["template"]["containers"][0]["image"] == tagged_image
-    assert (tagged_image.rsplit(":", 1)[-1], cloud.SUPPORTED_WORKER_DIGEST) in manifest_checks
-    assert cloud._setting("cloud_job_created") == image
-    assert json.loads(cloud._setting("cloud_job_resources")) == cloud.JOB_RESOURCES
+    assert manifest_checks == [(image.rsplit("@", 1)[-1], image.rsplit("@", 1)[-1])]
+    assert not cloud._setting("cloud_job_created")
 
 
 @pytest.mark.parametrize("resources", cloud.EXISTING_JOB_RESOURCES)
@@ -1853,18 +1853,27 @@ def test_finish_adopts_matching_pinned_job_without_reuse_or_token_read(signed_in
     environment = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
                    "/providers/Microsoft.App/managedEnvironments/mizan-aca-env")
     job = {
-        "identity": {"userAssignedIdentities": {identity: {}}},
+        "identity": {"type": "UserAssigned", "userAssignedIdentities": {identity: {}}},
         "properties": {
             "environmentId": environment,
             "workloadProfileName": cloud.GPU_PROFILE,
             "configuration": {
                 "triggerType": "Manual",
                 "secrets": [{"name": "hf-token"}],
+                "registries": [{"server": f"{SETUP['registry']}.azurecr.io",
+                                "identity": identity}],
             },
             "template": {"containers": [{
+                "name": "mizan-worker",
                 "image": image,
                 "resources": {**resources, "ephemeralStorage": ""},
-                "env": [{"name": "HF_TOKEN", "secretRef": "hf-token"}],
+                "env": [
+                    {"name": "HF_TOKEN", "secretRef": "hf-token"},
+                    {"name": "AZURE_STORAGE_BLOB_URL",
+                     "value": f"https://{CONFIG['storageAccount']}.blob.core.windows.net"},
+                    {"name": "AZURE_STORAGE_CONTAINER", "value": CONFIG["container"]},
+                    {"name": "AZURE_CLIENT_ID", "value": "managed-client"},
+                ],
             }]},
         },
     }
@@ -1918,6 +1927,150 @@ def test_finish_adopts_matching_pinned_job_without_reuse_or_token_read(signed_in
     assert json.loads(cloud._setting("cloud_job_resources")) == resources
     assert not provider_calls
     assert requests and all(method == "GET" for method, _ in requests)
+
+
+def test_existing_gpu_job_update_requires_current_consent_and_preserves_other_settings(
+        signed_in, monkeypatch):
+    from mizan import hf_credentials
+
+    cloud.configure(SETUP)
+    cloud._setting("cloud_prepared", json.dumps(SETUP))
+    image = "mizanregistry.azurecr.io/mizan-aca-gpu@sha256:" + "a" * 64
+    cloud._setting("cloud_built_image", json.dumps({
+        "image": image, "sourceHash": cloud._worker_source()[1]}))
+    identity = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
+                "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mizan-job-identity")
+    old_identity = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-other"
+                    "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mizan-job-identity")
+    environment = (f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
+                   "/providers/Microsoft.App/managedEnvironments/mizan-aca-env")
+    job = {
+        "location": "italynorth",
+        "tags": {"owner": "mizan"},
+        "identity": {"type": "UserAssigned", "userAssignedIdentities": {old_identity: {}}},
+        "properties": {
+            "environmentId": environment + "-old",
+            "workloadProfileName": "old-profile",
+            "configuration": {
+                "triggerType": "Manual", "replicaTimeout": 7200,
+                "secrets": [{"name": "hf-token"}],
+                "registries": [
+                    {"server": "other.azurecr.io", "identity": old_identity},
+                    {"server": "mizanregistry.azurecr.io", "identity": old_identity},
+                ],
+            },
+            "template": {
+                "volumes": [{"name": "scratch", "storageType": "EmptyDir"}],
+                "containers": [{
+                    "name": "mizan-worker",
+                    "image": "mizanregistry.azurecr.io/mizan-aca-gpu:previous-pilot",
+                    "resources": {"cpu": 1, "memory": "4Gi"},
+                    "env": [
+                        {"name": "HF_TOKEN", "secretRef": "hf-token"},
+                        {"name": "AZURE_STORAGE_BLOB_URL", "value": "https://old.blob.core.windows.net"},
+                        {"name": "AZURE_STORAGE_CONTAINER", "value": "old"},
+                        {"name": "AZURE_CLIENT_ID", "value": "old-client"},
+                        {"name": "CUSTOM_SETTING", "value": "keep-me"},
+                    ],
+                }],
+            },
+        },
+    }
+    patches = []
+    manifest_checks = []
+    manifest_state = {"fail": False}
+
+    def verify_manifest(config, reference, digest):
+        manifest_checks.append((reference, digest))
+        if manifest_state["fail"]:
+            raise cloud.CloudError("The target image digest is no longer available in ACR.")
+
+    def merge_patch(target, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                merge_patch(target[key], value)
+            else:
+                target[key] = json.loads(json.dumps(value))
+
+    class Azure:
+        base = f"/subscriptions/{CONFIG['subscriptionId']}/resourceGroups/rg-mizan"
+
+        def __init__(self, config):
+            pass
+
+        def request(self, path, version, method="GET", body=None):
+            if "/Microsoft.ManagedIdentity/" in path:
+                return {"properties": {"clientId": "managed-client", "principalId": "managed-principal"}}
+            if "/managedEnvironments/" in path:
+                return {"properties": {"provisioningState": "Succeeded"}}
+            if "/Microsoft.App/jobs/" in path:
+                if method == "PATCH":
+                    patches.append(body)
+                    merge_patch(job, body)
+                return json.loads(json.dumps(job))
+            return None
+
+        def create(self, *args, **kwargs):
+            pytest.fail("An existing GPU Job must be patched only after approval, never recreated")
+
+    monkeypatch.setattr(cloud, "_Azure", Azure)
+    monkeypatch.setattr(cloud, "_roles_ready", lambda *args: None)
+    monkeypatch.setattr(cloud, "_registry_manifest", verify_manifest)
+    monkeypatch.setattr(hf_credentials, "get_hf_token",
+                        lambda: pytest.fail("Updating an existing Job must not read or transfer a token"))
+    runner = JobRunner(JobStore(), pipeline=lambda *args: {})
+    try:
+        api = Api(runner)
+        preview = api.finish_cloud(image, False, "azure")
+        assert preview["requiresJobUpdateConsent"]
+        assert preview["jobUpdate"]["changes"]
+        assert not patches
+        assert manifest_checks == [(image.rsplit("@", 1)[-1], image.rsplit("@", 1)[-1])]
+        identity_change = next(
+            change for change in preview["jobUpdate"]["changes"]
+            if change["field"] == "Managed identity")
+        assert old_identity in identity_change["current"]
+        assert identity in identity_change["target"]
+
+        confirmation = preview["jobUpdate"]["confirmationId"]
+        job["properties"]["environmentId"] += "-changed-after-review"
+        stale = api.finish_cloud(image, False, "azure", True, confirmation)
+        assert stale["ok"] is False
+        assert "changed after review" in stale["error"]["message"]
+        assert not patches
+        job["properties"]["environmentId"] = environment + "-old"
+
+        manifest_state["fail"] = True
+        unavailable = api.finish_cloud(image, False, "azure", True, confirmation)
+        assert unavailable["ok"] is False
+        assert "no longer available in ACR" in unavailable["error"]["message"]
+        assert not patches
+        manifest_state["fail"] = False
+
+        result = api.finish_cloud(image, False, "azure", True, confirmation)
+    finally:
+        runner.close()
+
+    assert result["jobCreated"] and not result["configured"]
+    assert len(patches) == 1
+    assert set(patches[0]) == {"identity", "properties"}
+    assert "secrets" not in patches[0]["properties"].get("configuration", {})
+    assert patches[0]["properties"]["configuration"]["registries"][0] == {
+        "server": "other.azurecr.io", "identity": old_identity}
+    assert job["properties"]["template"]["containers"][0]["image"] == image
+    assert job["properties"]["environmentId"] == environment
+    assert job["properties"]["workloadProfileName"] == cloud.GPU_PROFILE
+    assert job["properties"]["template"]["containers"][0]["resources"] == cloud.JOB_RESOURCES
+    assert job["identity"]["userAssignedIdentities"][identity] == {}
+    assert job["properties"]["configuration"]["secrets"] == [{"name": "hf-token"}]
+    assert {"name": "HF_TOKEN", "secretRef": "hf-token"} in job["properties"]["template"]["containers"][0]["env"]
+    assert {"name": "CUSTOM_SETTING", "value": "keep-me"} in job["properties"]["template"]["containers"][0]["env"]
+    assert job["properties"]["template"]["volumes"] == [{"name": "scratch", "storageType": "EmptyDir"}]
+    assert job["tags"] == {"owner": "mizan"}
+    assert patches[0]["properties"]["template"]["containers"][0]["env"]
+    assert all(item.get("name") != "hf-token" for item in patches[0]["properties"].get(
+        "configuration", {}).get("secrets", []))
+    assert cloud._setting("cloud_job_created") == image
 
 
 def test_job_resources_match_azure_empty_ephemeral_storage_only():
@@ -2391,6 +2544,27 @@ def test_cloud_selection_returns_saved_snapshot_without_live_readiness(signed_in
     assert result["configured"] is False
     assert "userObjectId" not in result["config"]
     assert cloud._setting("processing_mode") == "cloud"
+
+
+def test_new_worker_image_keeps_registered_job_available_for_review(signed_in, monkeypatch):
+    config = {**SETUP, "userObjectId": "dddddddd-dddd-dddd-dddd-dddddddddddd"}
+    old_image = f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@sha256:" + "a" * 64
+    new_image = f"{SETUP['registry']}.azurecr.io/mizan-aca-gpu@sha256:" + "b" * 64
+    cloud._setting("cloud_config", json.dumps(config))
+    cloud._setting("cloud_prepared", json.dumps(config))
+    cloud._setting("cloud_environment_ready", "yes")
+    cloud._setting("cloud_job_created", old_image)
+    cloud._setting("cloud_job_resources", json.dumps(cloud.JOB_RESOURCES))
+    cloud._setting("cloud_built_image", json.dumps({
+        "image": new_image, "sourceHash": cloud._worker_source()[1]}))
+    monkeypatch.setattr(cloud, "_job_capabilities", lambda *_args: None)
+
+    result = cloud.status()
+
+    assert result["jobCreated"]
+    assert result["workerImage"] == new_image
+    assert not result["configured"]
+    assert "newer worker image is built" in result["issue"]
 
 
 def test_local_selection_succeeds_with_malformed_saved_cloud_config():
