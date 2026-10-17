@@ -69,6 +69,43 @@ function Invoke-Checked([scriptblock]$Command, [string]$Failure) {
     if ($LASTEXITCODE -ne 0) { throw $Failure }
 }
 
+function Add-YouTubeJavaScriptRuntime([string]$Destination) {
+    $nodeVersion = "24.22.0"
+    $archives = @{
+        arm64 = @{
+            name = "node-v24.22.0-win-arm64.zip"
+            sha256 = "3a5c209a5bc59e65b3bc0fa13ed5e166a26bd3d55332847f498b76b037408d61"
+        }
+        x64 = @{
+            name = "node-v24.22.0-win-x64.zip"
+            sha256 = "f9683a19877e12a9b167305c8db71040d812876359de21f0d2e97c3f321f80c3"
+        }
+    }
+    $archive = $archives[$Architecture]
+    $archivePath = Join-Path $work $archive.name
+    $archiveUrl = "https://nodejs.org/dist/v$nodeVersion/$($archive.name)"
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
+    $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $archive.sha256) {
+        throw "The Node.js $nodeVersion runtime archive failed SHA-256 verification."
+    }
+
+    $unpacked = Join-Path $work "node-runtime"
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $unpacked
+    $source = Join-Path $unpacked "node-v$nodeVersion-win-$Architecture"
+    $runtime = Join-Path $Destination "js-runtime"
+    New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+    Copy-Item (Join-Path $source "node.exe") $runtime
+    Get-ChildItem $source -Filter "*.dll" -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $runtime
+    }
+    $node = Join-Path $runtime "node.exe"
+    $reportedVersion = & $node --version
+    if ($LASTEXITCODE -ne 0 -or $reportedVersion.Trim() -ne "v$nodeVersion") {
+        throw "The bundled Node.js runtime failed its version check."
+    }
+}
+
 if (-not $Python) { $Python = Join-Path $root "host\.venv\Scripts\python.exe" }
 if (-not (Test-Path $Python -PathType Leaf)) { throw "$Architecture Python 3.12 was not found: $Python" }
 $pythonInfo = & $Python -c "import sys,sysconfig; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sysconfig.get_platform()}')"
@@ -109,6 +146,8 @@ Write-Host "Staging Python 3.12 $Architecture runtime..." -ForegroundColor Cyan
 Invoke-Checked {
     & $Python (Join-Path $root "scripts\package_python.py") (Join-Path $staging "Python")
 } "The Python runtime staging step failed."
+Write-Host "Bundling the YouTube JavaScript challenge runtime..." -ForegroundColor Cyan
+Add-YouTubeJavaScriptRuntime (Join-Path $staging "Python")
 $buildInfoPath = Join-Path $staging "Python\Lib\site-packages\mizan\build_info.json"
 $buildInfo = @{ version = $Version; buildId = $BuildId } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText(

@@ -46,6 +46,11 @@ class DownloadFailed(MizanError):
     message = "The video could not be downloaded."
 
 
+class YoutubeExtractionFailed(DownloadFailed):
+    code = "youtube_extraction_failed"
+    message = "YouTube could not provide a downloadable audio format. Update Mizan and try again."
+
+
 class YoutubeSignInRequired(DownloadFailed):
     code = "youtube_sign_in_required"
     message = "YouTube requires sign-in to continue."

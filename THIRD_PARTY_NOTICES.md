@@ -239,6 +239,7 @@ Development and probe-only packages installed in the venv are excluded.
 | winrt-Windows.Web.Http | 3.2.1 | [MIT](licenses/host-winrt-windows-web-http.txt) | Copyright (c) Microsoft Corporation | https://github.com/pywinrt/pywinrt |
 | winrt-Windows.Web.Http.Filters | 3.2.1 | [MIT](licenses/host-winrt-windows-web-http-filters.txt) | Copyright (c) Microsoft Corporation | https://github.com/pywinrt/pywinrt |
 | winrt-Windows.Web.Http.Headers | 3.2.1 | [MIT](licenses/host-winrt-windows-web-http-headers.txt) | Copyright (c) Microsoft Corporation | https://github.com/pywinrt/pywinrt |
+| yt-dlp-ejs | 0.8.0 | [Unlicense AND MIT AND ISC](licenses/host-yt-dlp-ejs.txt) | Project contributors | https://github.com/yt-dlp/ejs |
 
 ## Models
 
@@ -259,6 +260,8 @@ Development and probe-only packages installed in the venv are excluded.
 |  |  |  |  | *The ARM64 runtime is bundled in the MSIX.* |
 | Microsoft Edge WebView2 Runtime | System installed | LicenseRef-Microsoft-WebView2-Runtime | Microsoft Corporation | https://developer.microsoft.com/microsoft-edge/webview2/ |
 |  |  |  |  | *Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime.* |
+| Node.js JavaScript runtime | 24.22.0 | [MIT](licenses/tool-nodejs-runtime.txt) | Copyright Node.js contributors | https://nodejs.org/ |
+|  |  |  |  | *A Windows x64/ARM64 runtime is bundled in the MSIX for yt-dlp's YouTube challenge solver.* |
 | Python | 3.12 | [PSF-2.0](licenses/tool-python.txt) | Python Software Foundation | https://www.python.org/ |
 |  |  |  |  | *The ARM64 runtime is bundled in the MSIX.* |
 | Qualcomm QNN execution provider | Catalog acquired | LicenseRef-Qualcomm-QNN | Qualcomm Technologies, Inc. | https://learn.microsoft.com/windows/ai/new-windows-ml/supported-execution-providers |

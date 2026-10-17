@@ -228,6 +228,10 @@ The default architecture is ARM64. Add `-Architecture x64` to build
 `Mizan_<version>_x64.msix` from an x64 host environment, and pass the same
 `-Architecture` to `Publish-SignedMsix.ps1` when signing it.
 
+The build also downloads the pinned Node.js 24.22.0 runtime for the selected
+architecture, verifies its SHA-256 checksum, and includes it for yt-dlp's
+YouTube JavaScript challenge solver.
+
 This command creates an unsigned MSIX. It does not install the package.
 The MSIX workflow also builds pull requests and `v*` tags.
 Pull requests use a development publisher when no publisher secret is set.
