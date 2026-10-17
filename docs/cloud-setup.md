@@ -163,12 +163,23 @@ The Azure wizard keeps the existing Container Apps GPU Job path:
 8. Select **Approve and provision infrastructure**.
 9. Select **Build GPU worker in my registry**.
 10. Select **Check existing Job**.
-11. If no matching Job exists, approve the separate token transfer.
-12. If no matching Job exists, select **Create manual GPU Job**.
-13. After the access check passes, select **Use Cloud**.
+11. If the existing Mizan Job differs from the verified worker or required
+    Azure settings, review the exact change list. Mizan will not update it
+    until you separately approve that list.
+12. An approved update changes only that Job's digest-pinned image,
+    Container Apps environment, GPU profile, CPU/memory, required managed
+    identity and worker settings. It preserves the Hugging Face secret and
+    other Job settings; it does not change other Azure resources or start an
+    analysis.
+13. If no matching Mizan Job exists, approve the separate token transfer and
+    select **Create manual GPU Job**.
+14. After the access check passes, select **Use Cloud**.
 
 The wizard builds the worker in your Azure registry. It does not require the
-shared GHCR image. Job creation does not start an analysis.
+shared GHCR image. Existing-job updates require a fresh worker build, verify
+its SHA-256 digest in the selected registry, and use a partial Azure update so
+the existing Job secret is not replaced. Job creation or update does not start
+an analysis.
 
 ## Shared image for Google Cloud and AWS
 

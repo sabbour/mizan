@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from 'react'
-import { host, type AwsCloudSettings, type AzureCloudPrepared, type AzureSubscription, type CloudConfig, type CloudProvider, type CloudProviderSettingsById, type CloudReadinessProgress, type CloudSetupProgress, type CloudStatus, type CloudStatusFor, type GcpCloudSettings, type GcpProject } from './bridge'
+import { host, type AwsCloudSettings, type AzureCloudPrepared, type AzureJobUpdatePlan, type AzureSubscription, type CloudConfig, type CloudProvider, type CloudProviderSettingsById, type CloudReadinessProgress, type CloudSetupProgress, type CloudStatus, type CloudStatusFor, type GcpCloudSettings, type GcpProject } from './bridge'
 import { runWithCloudOperation, type AcquireCloudOperation, type ReleaseCloudOperation } from './cloudOperation'
 
 type Props = {
@@ -85,6 +85,10 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
   const [image, setImage] = useState(status?.workerImage ?? '')
   const [hfConfigured, setHfConfigured] = useState<boolean | null>(null)
   const [approveHfTransfer, setApproveHfTransfer] = useState(false)
+  const [jobUpdatePlan, setJobUpdatePlan] = useState<AzureJobUpdatePlan | null>(
+    status?.jobUpdate ?? null,
+  )
+  const [approveJobUpdate, setApproveJobUpdate] = useState(false)
   const [config, setConfig] = useState<CloudConfig>(() => ({
     ...defaultConfig(status?.config?.subscriptionId ?? ''),
     ...status?.config,
@@ -107,6 +111,7 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
   const resumePartial = Boolean(status?.config && !status.existingPilot && !config.existingPilot && (
     ['subscriptionId', 'resourceGroup', 'storageAccount', 'container', 'jobName', 'registry', 'identity', 'environment'] as const
   ).every((key) => config[key] === status.config?.[key]))
+  const existingJob = Boolean(status?.existingPilot || status?.jobCreated)
   const recovering = Boolean(status?.workerImage && !status.prepared && !prepared && !status.existingPilot)
 
   useEffect(() => {
@@ -212,6 +217,8 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
   const update = (key: keyof CloudConfig, value: string) => {
     setApproveCosts(false)
     setApproveHfTransfer(false)
+    setApproveJobUpdate(false)
+    setJobUpdatePlan(null)
     setApproveRecovery(false)
     setJobCheckComplete(false)
     setLoggingConsent(false)
@@ -221,6 +228,8 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
     setNetworkMode(mode)
     setApproveCosts(false)
     setApproveHfTransfer(false)
+    setApproveJobUpdate(false)
+    setJobUpdatePlan(null)
     setApproveRecovery(false)
     setJobCheckComplete(false)
     setLoggingConsent(false)
@@ -263,6 +272,8 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
         values.resumePartial = resumePartial
         setJobCheckComplete(false)
         setApproveHfTransfer(false)
+        setApproveJobUpdate(false)
+        setJobUpdatePlan(null)
         const result = await host.configureCloud(values, 'azure')
         if (!isCurrent()) return
         if (!result.config)
@@ -316,12 +327,41 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
         const result = await host.finishCloud(image.trim(), createJob, 'azure')
         if (!isCurrent()) return
         onStatus(result)
-        setJobCheckComplete(Boolean(result.requiresHfTokenConsent))
+        setJobUpdatePlan(result.requiresJobUpdateConsent ? result.jobUpdate ?? null : null)
+        setApproveJobUpdate(false)
+        setJobCheckComplete(Boolean(result.requiresHfTokenConsent
+          || result.jobCreated && !result.requiresJobUpdateConsent))
         setNotice(result.next ?? null)
       } catch (reason) {
         if (isCurrent()) setError(reason instanceof Error ? reason.message : 'Azure Job check failed.')
       } finally {
         if (isCurrent()) setApproveHfTransfer(false)
+      }
+    })
+  }
+
+  const updateExistingJob = async () => {
+    if (!jobUpdatePlan || !approveJobUpdate) return
+    setNotice(null)
+    setProgress(null)
+    await runOperation('Updating Azure GPU Job…', async (isCurrent) => {
+      try {
+        const result = await host.finishCloud(
+          image.trim(), false, 'azure', true, jobUpdatePlan.confirmationId)
+        if (!isCurrent()) return
+        onStatus(result)
+        setJobUpdatePlan(null)
+        setJobCheckComplete(Boolean(result.jobCreated && !result.requiresJobUpdateConsent))
+        setNotice(result.next ?? null)
+      } catch (reason) {
+        if (isCurrent()) {
+          setError(reason instanceof Error ? reason.message : 'The Azure GPU Job update failed.')
+          setJobUpdatePlan(null)
+          setApproveJobUpdate(false)
+          setJobCheckComplete(false)
+        }
+      } finally {
+        if (isCurrent()) setApproveJobUpdate(false)
       }
     })
   }
@@ -379,6 +419,9 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
   const buildWorker = async () => {
     setNotice(null)
     setProgress(null)
+    setJobUpdatePlan(null)
+    setApproveJobUpdate(false)
+    setJobCheckComplete(false)
     await runOperation('Building GPU worker in Azure…', async (isCurrent) => {
       try {
         const built = await host.buildCloudWorker('azure')
@@ -486,10 +529,20 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
             {status.warning && <p role="status">{status.warning}</p>}
             <p>This does not start a GPU Job or analyze a song.</p>
           </div>
-        ) : step === 3 && status?.jobCreated ? (
+        ) : step === 3 && jobUpdatePlan ? (
           <div className="cloud-guide">
-            <p>The GPU Job exists and is left unchanged. Mizan will only check its configuration and Azure access; it will not recreate the Job or transfer your Hugging Face token.</p>
-            {status.issue && <p className="cloud-error" role="alert">{status.issue}</p>}
+            <h3>Review this existing Mizan GPU Job update</h3>
+            <p>Mizan verified the built worker image. Approving will update only this GPU Job’s image, Container Apps environment, GPU profile, CPU/memory, managed identity and required worker settings listed below. The Hugging Face secret, other Job settings, and other Azure resources will remain unchanged. This does not start an analysis.</p>
+            <div className="cloud-resource-summary">
+              <strong>Changes to <code>{config.jobName}</code></strong>
+              {jobUpdatePlan.changes.map((change) => <span key={change.field}>
+                <strong>{change.field}:</strong> <code>{change.current}</code> to <code>{change.target}</code>
+              </span>)}
+            </div>
+            <label className="cloud-consent"><input type="checkbox" checked={approveJobUpdate}
+              onChange={(event) => setApproveJobUpdate(event.target.checked)} />
+              I approve these exact changes to this Azure GPU Job. Keep its Hugging Face secret and all other Azure resources unchanged.
+            </label>
           </div>
         ) : step === 3 && recovering ? (
           <div className="cloud-guide">
@@ -502,26 +555,26 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
           </div>
         ) : step === 3 ? (
           <form id="cloud-image-form" onSubmit={(event) => void finish(event)}>
-            <p>{status?.existingPilot
-              ? 'Your existing Azure resources are ready. Mizan will check and register the existing GPU Job; this will not start an analysis.'
+            <p>{existingJob
+              ? 'An existing Mizan Azure GPU Job is registered. Mizan will check it and show any required changes before updating; this will not start an analysis.'
               : image
                 ? 'Your Azure resources and GPU worker are ready. Mizan will check for a matching Job before creating one.'
                 : 'Your Azure resources are ready. Build the GPU worker, then create the Job that will analyze songs. Neither step starts an analysis.'}</p>
-            {!status?.existingPilot && <p>Building the worker in your registry may incur Azure charges.</p>}
-            {!status?.existingPilot && <button className="btn" type="button" disabled={busy}
+            {(!existingJob || !status?.configured) && <p>Building or rebuilding the worker in your registry may incur Azure charges.</p>}
+            {(!existingJob || !status?.configured) && <button className="btn" type="button" disabled={busy}
               onClick={() => void buildWorker()}>
               {busy ? 'Building GPU worker…' : image ? 'Rebuild GPU worker' : 'Build GPU worker in my registry'}
             </button>}
-            {status?.existingPilot ? (
+            {existingJob ? (
               <>
                 <p>Approved worker digest</p>
                 <code>{image || 'Preparing the approved worker digest…'}</code>
-                <p>Mizan checks that the existing Job image resolves to this digest in your registry. It will not change the Job or its image.</p>
+                <p>Mizan checks the existing Job against this verified digest. If settings differ, it shows the exact changes and waits for your separate approval before updating this Job.</p>
               </>
             ) : (
               <p>{image ? 'GPU worker built and ready for the Job.' : 'Build the GPU worker before creating the Job.'}</p>
             )}
-            {!status?.existingPilot && <>
+            {!existingJob && <>
               <p role="status">{hfConfigured === null ? 'Checking your saved Hugging Face token…'
                 : hfConfigured ? 'Hugging Face token saved in Windows Credential Manager.'
                   : 'No Hugging Face token saved. Close setup, save one under Hugging Face account & access, then return.'}</p>
@@ -535,11 +588,11 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
               <summary>Permissions and Job details</summary>
               <p>Your Azure account and Job identity need access to the private storage; the Job also needs access to your registry. If creating the Job fails because of permissions, ask an Azure administrator to grant the roles Mizan names in the error.</p>
               {prepared && <p>Job identity <code>{prepared.identityPrincipalId}</code> needs Blob Data Contributor on <code>{prepared.containerScope}</code> and AcrPull on <code>{prepared.registryScope}</code>. Your account needs Blob Data Contributor on the container.</p>}
-              {status?.existingPilot
-                ? <p>Mizan checks that the existing Job image resolves to the approved digest in your registry. A mismatch keeps Cloud disabled. Mizan will not change the Job or replace its Hugging Face secret.</p>
+              {existingJob
+                ? <p>Mizan verifies the built digest and existing Hugging Face secret. If needed, a separately approved update changes only this Job’s image, environment, GPU profile, CPU/memory, managed identity and required worker settings. It does not change the secret or other Azure resources.</p>
                 : <p>Mizan pins the built worker image, sends the saved token only with your approval, and keeps it in Azure as a Job secret. Existing pilot Jobs must already have that secret; Mizan will not replace it.</p>}
             </details>
-            <p className="cloud-setup-note" role="status">Check for an existing matching Job first. Processing stays Local until Azure access and the Job pass preflight.</p>
+            <p className="cloud-setup-note" role="status">Check the existing Job first. Any update requires a separate approval. Processing stays Local until Azure access and the Job pass preflight.</p>
           </form>
         ) : (
           <form ref={form} id="cloud-setup-form" onSubmit={(event) => void save(event)}
@@ -736,14 +789,19 @@ function AzureCloudSetup({ status, onStatus, onClose, acquireOperation }: Omit<P
               onClick={() => void retryEnvironment()}>
               {busy ? 'Retrying GPU environment…' : 'Retry GPU environment'}
             </button>
-          ) : status?.jobCreated ? (
+          ) : jobUpdatePlan ? (
+            <button className="btn btn-primary" type="button" disabled={busy || !approveJobUpdate}
+              onClick={() => void updateExistingJob()}>
+              {busy ? 'Updating Azure GPU Job…' : 'Approve and update existing GPU Job'}
+            </button>
+          ) : status?.jobCreated && jobCheckComplete ? (
             <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void checkCloudAccess()}>
               {busy ? 'Checking Azure access…' : 'Retry Azure access check'}
             </button>
           ) : (
             <button className="btn btn-primary" type="submit" form="cloud-image-form"
               disabled={busy || !image || (!prepared && !status?.prepared)
-                || (!status?.existingPilot && jobCheckComplete
+                || (!existingJob && jobCheckComplete
                   && (hfConfigured !== true || !approveHfTransfer))}>
               {busy ? 'Checking Job…' : status?.existingPilot || !jobCheckComplete
                 ? 'Check existing Job' : 'Create manual GPU Job'}

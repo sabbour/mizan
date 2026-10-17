@@ -88,6 +88,8 @@ export type CloudStatus = {
   prepared?: boolean
   jobCreated?: boolean
   requiresHfTokenConsent?: boolean
+  requiresJobUpdateConsent?: boolean
+  jobUpdate?: AzureJobUpdatePlan
   verified?: boolean
   verifiedModels?: TranscriptionModel[]
   /** Missing means model support is unknown; an explicit list is authoritative. */
@@ -97,6 +99,10 @@ export type CloudStatus = {
   workerImage?: string | null
   loggingConfigured?: boolean
   loggingLocation?: string
+}
+export type AzureJobUpdatePlan = {
+  confirmationId: string
+  changes: { field: string; current: string; target: string }[]
 }
 export type FfmpegStatus = {
   configuredPath: string | null
@@ -471,8 +477,11 @@ export const host = {
       'build_cloud_worker', provider ?? null),
   importCloudImage: <P extends CloudProvider>(sourceImage: string, provider: P) =>
     call<CloudImageImportResult<P>>('import_cloud_image', sourceImage, provider),
-  finishCloud: <P extends CloudProvider>(image: string, useSavedToken: boolean, provider: P) =>
-    call<CloudStatusFor<P> & { next?: string }>('finish_cloud', image, useSavedToken, provider),
+  finishCloud: <P extends CloudProvider>(image: string, useSavedToken: boolean, provider: P,
+    updateExistingJob?: boolean, jobUpdateConfirmation?: string) =>
+    call<CloudStatusFor<P> & { next?: string }>(
+      'finish_cloud', image, useSavedToken, provider, updateExistingJob ?? false,
+      jobUpdateConfirmation ?? null),
   setProcessingMode: async (mode: ProcessingMode, provider?: CloudProvider) =>
     (await call<ProcessingModeResult>('set_processing_mode', mode, provider ?? null)).mode,
   setProcessingModeWithStatus: (mode: ProcessingMode, provider?: CloudProvider) =>

@@ -1537,6 +1537,132 @@ test('prepared environment without a worker resumes the saved worker-only path',
   entry.unmount()
 })
 
+test('Azure existing pilot can rebuild its worker and requires separate approval to update its Job', async () => {
+  const previousImage = 'registry.azurecr.io/mizan-aca-gpu@sha256:previous'
+  const rebuiltImage = 'registry.azurecr.io/mizan-aca-gpu@sha256:rebuilt'
+  const plan = {
+    confirmationId: 'a'.repeat(64),
+    changes: [
+      { field: 'Worker image (SHA-256 digest)', current: previousImage, target: rebuiltImage },
+      { field: 'Container Apps environment', current: 'old-environment', target: 'mizan-aca-env' },
+    ],
+  }
+  const initial = {
+    ...savedCloudSetup, mode: 'local', configured: false, existingPilot: true,
+    prepared: true, jobCreated: false, workerImage: previousImage,
+  }
+  const finishCalls = []
+  const refreshedPlan = { ...plan, confirmationId: 'b'.repeat(64) }
+  let previews = 0
+  let updateAttempts = 0
+  const h = harness({
+    buildCloudWorker: async () => ({ image: rebuiltImage }),
+    cloudStatus: async () => ({ ...initial, workerImage: rebuiltImage }),
+    cloudSetupProgress: async () => ({ operation: null, stage: 'idle', completed: 0, total: 0, detail: null }),
+    finishCloud: async (...args) => {
+      finishCalls.push(args)
+      if (args[3]) {
+        updateAttempts++
+        if (updateAttempts === 1) throw new Error('The GPU Job changed after review.')
+        return { ...initial, workerImage: rebuiltImage, jobCreated: true, configured: false, next: 'Updated.' }
+      }
+      previews++
+      return { ...initial, workerImage: rebuiltImage, jobCreated: false,
+        requiresJobUpdateConsent: true, jobUpdate: previews === 1 ? plan : refreshedPlan,
+        next: 'Review the update.' }
+    },
+  }, { loadCloudSetup: true })
+  const props = { status: initial, onStatus() {}, onClose() {}, acquireOperation: () => () => {} }
+  const entry = h.render(h.load('CloudSetup.tsx').CloudSetup, props)
+  const view = h.render(entry.tree.type, entry.tree.props)
+
+  assert.ok(button(view.tree, 'Rebuild GPU worker'),
+    'Existing-pilot mode still exposes the worker build required for a verified update')
+  button(view.tree, 'Rebuild GPU worker').props.onClick()
+  await view.settle(); await view.settle()
+  nodes(view.tree, (node) => node.type === 'form' && node.props.id === 'cloud-image-form')[0]
+    .props.onSubmit({ preventDefault() {} })
+  await view.settle(); await view.settle()
+
+  assert.deepEqual(finishCalls, [[rebuiltImage, false, 'azure']],
+    'The first check only returns a preview')
+  assert.match(text(view.tree), /Review this existing Mizan GPU Job update/)
+  assert.match(text(view.tree), /Keep its Hugging Face secret and all other Azure resources unchanged/)
+  const approve = nodes(view.tree, (node) => node.type === 'input' && node.props.type === 'checkbox')[0]
+  const confirm = button(view.tree, 'Approve and update existing GPU Job')
+  assert.equal(confirm.props.disabled, true)
+  approve.props.onChange({ target: { checked: true } })
+  view.update()
+  assert.equal(button(view.tree, 'Approve and update existing GPU Job').props.disabled, false)
+  button(view.tree, 'Approve and update existing GPU Job').props.onClick()
+  await view.settle(); await view.settle()
+
+  assert.match(text(view.tree), /changed after review/)
+  assert.equal(nodes(view.tree, (node) => node.type === 'h3'
+    && text(node) === 'Review this existing Mizan GPU Job update').length, 0)
+  assert.ok(button(view.tree, 'Check existing Job'),
+    'A rejected approval clears the stale plan and lets the user request a fresh preview')
+  nodes(view.tree, (node) => node.type === 'form' && node.props.id === 'cloud-image-form')[0]
+    .props.onSubmit({ preventDefault() {} })
+  await view.settle(); await view.settle()
+  assert.match(text(view.tree), /Review this existing Mizan GPU Job update/)
+  const refreshedApproval = nodes(view.tree, (node) => node.type === 'input'
+    && node.props.type === 'checkbox')[0]
+  refreshedApproval.props.onChange({ target: { checked: true } })
+  view.update()
+  button(view.tree, 'Approve and update existing GPU Job').props.onClick()
+  await view.settle(); await view.settle()
+
+  assert.deepEqual(finishCalls, [
+    [rebuiltImage, false, 'azure'],
+    [rebuiltImage, false, 'azure', true, plan.confirmationId],
+    [rebuiltImage, false, 'azure'],
+    [rebuiltImage, false, 'azure', true, refreshedPlan.confirmationId],
+  ])
+  view.unmount(); entry.unmount()
+})
+
+test('registered Azure Job can rebuild its worker and request a separately approved update', async () => {
+  const previousImage = 'registry.azurecr.io/mizan-aca-gpu@sha256:previous'
+  const rebuiltImage = 'registry.azurecr.io/mizan-aca-gpu@sha256:rebuilt'
+  const initial = {
+    ...savedCloudSetup, mode: 'local', configured: false, existingPilot: false,
+    prepared: true, jobCreated: true, workerImage: previousImage,
+    issue: 'A newer worker image is built.',
+  }
+  const finishCalls = []
+  const plan = {
+    confirmationId: 'c'.repeat(64),
+    changes: [{ field: 'Worker image (SHA-256 digest)', current: previousImage, target: rebuiltImage }],
+  }
+  const h = harness({
+    buildCloudWorker: async () => ({ image: rebuiltImage }),
+    cloudStatus: async () => ({ ...initial, workerImage: rebuiltImage }),
+    cloudSetupProgress: async () => ({ operation: null, stage: 'idle', completed: 0, total: 0, detail: null }),
+    finishCloud: async (...args) => {
+      finishCalls.push(args)
+      return { ...initial, workerImage: rebuiltImage, jobCreated: true,
+        requiresJobUpdateConsent: true, jobUpdate: plan, next: 'Review the update.' }
+    },
+  }, { loadCloudSetup: true })
+  const props = { status: initial, onStatus() {}, onClose() {}, acquireOperation: () => () => {} }
+  const entry = h.render(h.load('CloudSetup.tsx').CloudSetup, props)
+  const view = h.render(entry.tree.type, entry.tree.props)
+
+  assert.ok(button(view.tree, 'Rebuild GPU worker'))
+  assert.doesNotMatch(text(view.tree), /Hugging Face token saved|Approve sending my saved Hugging Face token/)
+  button(view.tree, 'Rebuild GPU worker').props.onClick()
+  await view.settle(); await view.settle()
+  nodes(view.tree, (node) => node.type === 'form' && node.props.id === 'cloud-image-form')[0]
+    .props.onSubmit({ preventDefault() {} })
+  await view.settle(); await view.settle()
+
+  assert.deepEqual(finishCalls, [[rebuiltImage, false, 'azure']])
+  assert.match(text(view.tree), /Review this existing Mizan GPU Job update/)
+  assert.ok(button(view.tree, 'Approve and update existing GPU Job'))
+  view.unmount(); entry.unmount()
+})
+
 test('Cloud intent is saved during blocked readiness without claiming Azure is ready', async () => {
   const status = deferred(), chosen = [], cancelled = []
   const h = harness({

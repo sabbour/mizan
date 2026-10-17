@@ -367,8 +367,20 @@ def build_cloud_image(*, provider=None):
     return _provider_result(dispatch("build_cloud_image", provider=selected), selected)
 
 
-def finish(image, hf_token=None, *, hf_token_provider=None, provider=None):
+def finish(image, hf_token=None, *, hf_token_provider=None, provider=None,
+           update_existing_job=False, job_update_confirmation=None):
     selected = resolve_provider(provider)
+    if type(update_existing_job) is not bool:
+        raise CloudError("Review and confirm the existing GPU Job update before applying it.")
+    if not update_existing_job and job_update_confirmation is not None:
+        raise CloudError("Check the existing GPU Job before using its update confirmation.")
+    if update_existing_job:
+        if selected != "azure":
+            raise CloudError("Only an Azure GPU Job can use the reviewed existing-Job update.")
+        return _provider_result(dispatch(
+            "finish", image, hf_token, hf_token_provider=hf_token_provider,
+            update_existing_job=True, job_update_confirmation=job_update_confirmation,
+            provider=selected), selected)
     return _provider_result(dispatch("finish", image, hf_token,
                                      hf_token_provider=hf_token_provider,
                                      provider=selected), selected)
