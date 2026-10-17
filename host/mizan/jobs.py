@@ -30,6 +30,18 @@ Pipeline = Callable[[Job, Callable[[str, float], None], Event], dict | None]
 logger = logging.getLogger(__name__)
 
 
+def _smaller_retry_model(job: Job, model: str) -> str:
+    if job["kind"] != "transcribe":
+        raise MizanError("Only transcription jobs can be retried with a smaller MuScriptor model.")
+    if model not in TRANSCRIPTION_MODELS:
+        raise InvalidTranscriptionModel()
+    if job["transcription_model"] not in TRANSCRIPTION_MODELS:
+        raise InvalidTranscriptionModel()
+    if TRANSCRIPTION_MODELS.index(model) >= TRANSCRIPTION_MODELS.index(job["transcription_model"]):
+        raise MizanError("Choose a smaller MuScriptor model for this retry.")
+    return model
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -349,10 +361,12 @@ class JobStore:
                                    [(index, now(), value) for index, value in enumerate(ids)])
         return self.get(job_id)
 
-    def retry(self, job_id: str) -> Job:
+    def retry(self, job_id: str, transcription_model: str | None = None) -> Job:
         job = self.get(job_id)
         if job["status"] not in ("failed", "cancelled"):
             raise MizanError("Only failed or cancelled jobs can be retried.")
+        model = (_smaller_retry_model(job, transcription_model)
+                 if transcription_model is not None else job["transcription_model"])
         with closing(self._connect()) as connection, connection:
             timestamp = now()
             order = connection.execute(
@@ -365,10 +379,11 @@ class JobStore:
                         "activeStage", "diagnostics"):
                 details.pop(key, None)
             connection.execute("""
-                UPDATE jobs SET status = 'queued', stage = ?, progress = 0, order_index = ?,
-                    dismissed = 0, error_code = NULL, error_message = NULL, updated_at = ?, details = ?
+                UPDATE jobs SET transcription_model = ?, status = 'queued', stage = ?, progress = 0,
+                    order_index = ?, dismissed = 0, error_code = NULL, error_message = NULL,
+                    updated_at = ?, details = ?
                 WHERE id = ?
-            """, ("align" if job["kind"] == "align" else "inspect", order, timestamp,
+            """, (model, "align" if job["kind"] == "align" else "inspect", order, timestamp,
                   json.dumps(details, allow_nan=False), job_id))
         return self.get(job_id)
 
@@ -477,22 +492,29 @@ class JobRunner:
                 self._condition.notify()
             return self.store.get(job_id)
 
-    def retry(self, job_id: str) -> Job:
+    def retry(self, job_id: str, transcription_model: str | None = None) -> Job:
         job = self.store.get(job_id)
         if job["kind"] == "transcribe":
             if job["transcription_model"] not in TRANSCRIPTION_MODELS:
                 raise InvalidTranscriptionModel()
+            if transcription_model is not None:
+                _smaller_retry_model(job, transcription_model)
+                if job["details"].get("processingMode") == "cloud":
+                    raise MizanError("Smaller-model retries are only available for Local jobs.")
+            model = transcription_model or job["transcription_model"]
             if job["details"].get("processingMode") != "cloud":
                 from .engine.muscriptor import check_model_resources
-                check_model_resources(job["transcription_model"])
+                check_model_resources(model)
             else:
+                if transcription_model is not None:
+                    raise MizanError("Smaller-model retries are only available for Local jobs.")
                 from .cloud import provider_for_job, validate_provider_target
                 provider = provider_for_job(job["details"].get("cloudProvider"))
                 target = job["details"].get("cloudTarget")
                 if target is not None:
                     validate_provider_target(target, provider)
         with self._condition:
-            job = self.store.retry(job_id)
+            job = self.store.retry(job_id, transcription_model)
             self._events[job_id] = Event()
             self._condition.notify()
             return job
