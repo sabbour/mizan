@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ArrowUp, AudioLines, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileMusic, FolderOpen, FolderPlus, GripVertical, Info, Link2, Play, Plus, RotateCcw, Search, Settings2, Trash2, X } from 'lucide-react'
-import { host, HostError, IMPORTABLE, liveMidiPreview, onMidiFileOpened, toBase64, type CloudProvider, type CloudProviderInfo, type CloudReadinessProgress, type CloudStatus, type Entry, type FfmpegStatus, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeResult } from './bridge'
+import { host, HostError, IMPORTABLE, liveMidiPreview, onMidiFileOpened, toBase64, type CloudProvider, type CloudProviderInfo, type CloudReadinessProgress, type CloudStatus, type Entry, type FfmpegStatus, type Folder, type MidiSearchResult, type ModelDownloads, type ModelPreflight, type PopularChart, type ProcessingMode, type QueueJob, type ResourceUsage, type TranscriptionModel, type YouTubeAuthStatus, type YouTubeResult } from './bridge'
 import { foldSearchText } from './searchText'
 import { CloudSetup } from './CloudSetup'
 import { createCloudOperationGate } from './cloudOperation'
@@ -13,7 +13,7 @@ import { FRETTED_BROWSE_LESSONS } from '../course/fretted'
 import { PIANO_INSPIRED } from '../course/pianoInspired'
 import './library.css'
 
-type Problem = { message: string; fix: string | null }
+type Problem = { message: string; fix: string | null; code?: string }
 type SettingsSection = 'audio' | 'models' | 'cloud'
 type GettingStartedStep = 'welcome' | 'audio' | 'access' | 'model'
 type MidiOffer =
@@ -21,7 +21,11 @@ type MidiOffer =
   | { name: string; dataBase64: string; result?: never; file?: never; permissionConfirmed?: boolean }
   | { name: string; result: MidiSearchResult; file?: never; dataBase64?: never; permissionConfirmed?: boolean }
 const problem = (e: unknown): Problem =>
-  e instanceof HostError ? { message: e.message, fix: e.fix } : { message: 'Something went wrong talking to Mizan.', fix: 'Try again.' }
+  e instanceof HostError ? { message: e.message, fix: e.fix, code: e.code } : { message: 'Something went wrong talking to Mizan.', fix: 'Try again.' }
+const requiresYoutubeSignIn = (job: Pick<QueueJob, 'errorCode' | 'errorMessage'>) =>
+  job.errorCode === 'youtube_sign_in_required'
+  || (job.errorCode === 'download_failed'
+    && /sign in to confirm|confirm (?:you're|you are) not a bot|wants to confirm this isn't a bot/i.test(job.errorMessage ?? ''))
 
 type Props = {
   jobs: QueueJob[]
@@ -148,6 +152,12 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
   const [ffmpegBrowsing, setFfmpegBrowsing] = useState(false)
   const [ffmpegError, setFfmpegError] = useState<string | null>(null)
   const [ffmpegLoadError, setFfmpegLoadError] = useState<string | null>(null)
+  const [youtubeAuth, setYoutubeAuth] = useState<YouTubeAuthStatus | null>(null)
+  const [youtubeAuthLoading, setYoutubeAuthLoading] = useState(true)
+  const [youtubeAuthBusy, setYoutubeAuthBusy] = useState(false)
+  const [youtubeCookiesPath, setYoutubeCookiesPath] = useState('')
+  const [youtubeAuthError, setYoutubeAuthError] = useState<string | null>(null)
+  const [youtubeAuthMessage, setYoutubeAuthMessage] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<ModelDownloads | null>(null)
   const [preflight, setPreflight] = useState<ModelPreflight | null>(null)
   const [preflightError, setPreflightError] = useState<string | null>(null)
@@ -374,6 +384,19 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
         setFfmpegLoading(false)
       },
     )
+    setYoutubeAuthLoading(true)
+    void host.youtubeAuthStatus().then(
+      (status) => {
+        if (!active) return
+        setYoutubeAuth(status)
+        setYoutubeAuthError(null)
+      },
+      (reason) => {
+        if (active) setYoutubeAuthError(problem(reason).message)
+      },
+    ).finally(() => {
+      if (active) setYoutubeAuthLoading(false)
+    })
     void host.getTranscriptionModel().then(
       (selected) => { if (active) { setModel(selected); setModelError(null) } },
       (reason) => { if (active) { setModel(null); setModelError(problem(reason).message) } },
@@ -503,6 +526,97 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
       setFfmpegError(problem(reason).message)
     } finally {
       setFfmpegBrowsing(false)
+    }
+  }
+  const refreshYoutubeAuth = async (): Promise<YouTubeAuthStatus | null> => {
+    setYoutubeAuthLoading(true)
+    setYoutubeAuthError(null)
+    try {
+      const status = await host.youtubeAuthStatus()
+      setYoutubeAuth(status)
+      return status
+    } catch (reason) {
+      setYoutubeAuthError(problem(reason).message)
+      return null
+    } finally {
+      setYoutubeAuthLoading(false)
+    }
+  }
+  const signInToYoutube = async (): Promise<boolean> => {
+    if (youtubeAuthBusy) return false
+    setYoutubeAuthError(null)
+    setYoutubeAuthMessage(null)
+    if (!window.__mizanNativeShell) {
+      setYoutubeAuthMessage('YouTube sign-in is available only in the Windows app. You can import cookies.txt below.')
+      return false
+    }
+    setYoutubeAuthBusy(true)
+    try {
+      const savedSession = await refreshYoutubeAuth()
+      if (savedSession?.signedIn) {
+        setYoutubeAuthMessage("You're already signed in to YouTube.")
+        return true
+      }
+      const result = await host.youtubeSignIn()
+      const status = await refreshYoutubeAuth()
+      if (!result.signedIn) {
+        setYoutubeAuthMessage('YouTube sign-in was not completed.')
+        return false
+      }
+      if (!status?.signedIn) {
+        setYoutubeAuthError('Mizan could not confirm the saved YouTube sign-in. Try again.')
+        return false
+      }
+      setYoutubeAuthMessage('YouTube sign-in is ready for video analysis.')
+      return true
+    } catch (reason) {
+      setYoutubeAuthError(problem(reason).message)
+      return false
+    } finally {
+      setYoutubeAuthBusy(false)
+    }
+  }
+  const signOutYoutube = async () => {
+    if (youtubeAuthBusy) return
+    setYoutubeAuthBusy(true)
+    setYoutubeAuthError(null)
+    setYoutubeAuthMessage(null)
+    try {
+      setYoutubeAuth(await host.youtubeSignOut())
+      setYoutubeAuthMessage('YouTube sign-in and saved cookies were cleared.')
+    } catch (reason) {
+      setYoutubeAuthError(problem(reason).message)
+    } finally {
+      setYoutubeAuthBusy(false)
+    }
+  }
+  const browseYoutubeCookies = async () => {
+    if (youtubeAuthBusy) return
+    setYoutubeAuthBusy(true)
+    setYoutubeAuthError(null)
+    try {
+      const result = await host.browseYoutubeCookies()
+      if (result.path !== null) setYoutubeCookiesPath(result.path)
+    } catch (reason) {
+      setYoutubeAuthError(problem(reason).message)
+    } finally {
+      setYoutubeAuthBusy(false)
+    }
+  }
+  const importYoutubeCookies = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (youtubeAuthBusy) return
+    setYoutubeAuthBusy(true)
+    setYoutubeAuthError(null)
+    setYoutubeAuthMessage(null)
+    try {
+      const status = await host.importYoutubeCookies(youtubeCookiesPath)
+      setYoutubeAuth(status)
+      setYoutubeAuthMessage('YouTube cookies imported and ready for video analysis.')
+    } catch (reason) {
+      setYoutubeAuthError(problem(reason).message)
+    } finally {
+      setYoutubeAuthBusy(false)
     }
   }
   const retryFfmpegStatus = async () => {
@@ -1048,9 +1162,13 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                     disabled={ffmpegLoading || ffmpegActionBusy} aria-busy={ffmpegBrowsing || undefined}
                     onClick={() => void browseFfmpegPath()}>{ffmpegBrowsing ? 'Opening…' : 'Browse…'}</button>
                 </div>
-                <p id="ffmpeg-path-help">Get a Windows build from <a
-                  href="https://ffmpeg.org/download.html#build-windows" target="_blank" rel="noopener noreferrer">FFmpeg's Windows build links</a>.
-                  Choose a build linked there, such as Gyan or BtbN. Extract the ZIP, then browse for or enter the full path to <code>bin\ffmpeg.exe</code>.</p>
+                <div id="ffmpeg-path-help">
+                  <p>Easiest: open Terminal or PowerShell and run <code className="ffmpeg-install-command">winget install Gyan.FFmpeg</code>,
+                    then select <strong>Check again</strong>. Mizan finds it automatically. You don't need to restart Mizan or enter a path.</p>
+                  <p>Or download it yourself from <a
+                    href="https://ffmpeg.org/download.html#build-windows" target="_blank" rel="noopener noreferrer">FFmpeg's Windows build links</a>
+                    (for example, Gyan or BtbN). Extract the ZIP, then browse for <code>bin\ffmpeg.exe</code>.</p>
+                </div>
                 <p id="ffmpeg-status" className="ffmpeg-settings-status" role="status" aria-live="polite">
                   {ffmpegLoading ? 'Checking FFmpeg status…'
                     : ffmpegBrowsing ? 'Opening the Windows file picker…'
@@ -1064,10 +1182,52 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                   </button>
                   <button type="button" className="btn" disabled={ffmpegLoading || ffmpegActionBusy || !ffmpeg?.configuredPath}
                     onClick={() => void resetFfmpegPath()}>Use automatic detection</button>
-                  {ffmpegLoadError && <button type="button" className="btn" disabled={ffmpegLoading}
-                    onClick={() => void retryFfmpegStatus()}>Retry status check</button>}
+                  {(ffmpegLoadError || (!ffmpegLoading && ffmpeg && !ffmpeg.available)) && <button type="button" className="btn"
+                    disabled={ffmpegLoading || ffmpegActionBusy}
+                    onClick={() => void retryFfmpegStatus()}>Check again</button>}
                 </div>
                 {ffmpegError && <p className="model-settings-error" role="alert">{ffmpegError}</p>}
+              </form>
+            </section>}
+            {(gettingStartedStep === 'audio' || !gettingStartedStep && settingsSection === 'audio') && <section className="model-settings-youtube" aria-labelledby="youtube-sign-in-title">
+              <h3 id="youtube-sign-in-title">YouTube sign-in</h3>
+              <p>Some networks require a signed-in YouTube session before Mizan can download audio.</p>
+              <p id="youtube-auth-status" className="youtube-auth-status" role="status" aria-live="polite">
+                {youtubeAuthLoading ? 'Checking YouTube sign-in…'
+                  : youtubeAuth?.signedIn
+                    ? youtubeAuth.source === 'app' ? 'Signed in to YouTube in the Mizan app.'
+                      : 'YouTube cookies.txt is imported.'
+                    : 'Not signed in to YouTube.'}
+              </p>
+              {youtubeAuthMessage && <p className="youtube-auth-message" role="status">{youtubeAuthMessage}</p>}
+              {youtubeAuthError && <p className="model-settings-error" role="alert">{youtubeAuthError}</p>}
+              <div className="youtube-auth-actions">
+                {youtubeAuth?.signedIn
+                  ? <button type="button" className="btn btn-primary" disabled={youtubeAuthBusy || youtubeAuthLoading}
+                    onClick={() => void signOutYoutube()}>{youtubeAuthBusy ? 'Signing out…' : 'Sign out'}</button>
+                  : <button type="button" className="btn btn-primary"
+                    disabled={youtubeAuthLoading || youtubeAuthBusy}
+                    aria-busy={youtubeAuthBusy || undefined} onClick={() => void signInToYoutube()}>
+                    {youtubeAuthLoading ? 'Checking…' : youtubeAuthBusy ? 'Working…' : 'Sign in to YouTube'}
+                  </button>}
+              </div>
+              <form className="youtube-cookies-import" onSubmit={(event) => void importYoutubeCookies(event)}>
+                <label htmlFor="youtube-cookies-path">Import cookies.txt from a file path</label>
+                <div className="youtube-cookies-path-row">
+                  <input id="youtube-cookies-path" type="text" value={youtubeCookiesPath}
+                    autoComplete="off" spellCheck={false} disabled={youtubeAuthBusy}
+                    aria-describedby="youtube-cookies-help youtube-auth-status"
+                    onChange={(event) => setYoutubeCookiesPath(event.target.value)} />
+                  <button type="button" className="btn" disabled={youtubeAuthBusy}
+                    onClick={() => void browseYoutubeCookies()}>Browse…</button>
+                  <button type="submit" className="btn" disabled={youtubeAuthBusy || !youtubeCookiesPath.trim()}>
+                    Import cookies.txt
+                  </button>
+                </div>
+                <p id="youtube-cookies-help">
+                  Export cookies for youtube.com from a private browser window with a cookies.txt extension.
+                  The file contains sign-in credentials; keep it private. Importing replaces the saved cookies.
+                </p>
               </form>
             </section>}
             {!gettingStartedStep && settingsSection === 'cloud' && <section className="model-settings-cloud" aria-labelledby="cloud-settings-title">
@@ -1137,7 +1297,7 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
                 <ChevronDown size={16} aria-hidden />
               </summary>
               <div className="model-settings-access-body">
-              <p><a href="https://huggingface.co/join" target="_blank" rel="noopener noreferrer">Create a Hugging Face account</a>, sign in, and accept the terms for the model you choose. Then <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">create a read-access token</a> and save it here. Mizan stores it on this PC in Windows Credential Manager.</p>
+              <p><a href="https://huggingface.co/join" target="_blank" rel="noopener noreferrer">Create a Hugging Face account</a>, sign in, and accept the terms for the model you choose. Then <a href="https://huggingface.co/settings/tokens/new?tokenType=read" target="_blank" rel="noopener noreferrer">create a read-access token</a> and save it here. Mizan stores it on this PC in Windows Credential Manager.</p>
               {gettingStartedStep === 'access' && <ul className="model-settings-terms">
                 {modelChoices.map((choice) => <li key={choice.id}><a href={`https://huggingface.co/MuScriptor/${choice.id}`}
                   target="_blank" rel="noopener noreferrer">Accept {choice.label} terms</a></li>)}
@@ -1426,11 +1586,14 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
 
         <div role="tabpanel" id="lib-panel-discover" aria-labelledby="lib-tab-discover" hidden={tab !== 'discover'}>
           {tab === 'discover' && !query.trim() && !selectedJob && <PopularMusic jobs={jobs} busy={busy}
-            pendingLinks={pendingLinks} onTranscribe={addLink} />}
+            pendingLinks={pendingLinks} onTranscribe={addLink} onSignInYoutube={signInToYoutube}
+            youtubeAuthBusy={youtubeAuthBusy} />}
         </div>
 
         <div role="tabpanel" id="lib-panel-catalog" aria-labelledby="lib-tab-catalog" hidden={tab !== 'catalog'}>
-        {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails} onOpen={(id) => entries && onOpenId(id, entries, onOpen)} />}
+        {queueJobs.length > 0 && <Queue jobs={queueJobs} selected={selectedJob} onChange={onQueueChange} onDetails={onDetails}
+          onOpen={(id) => entries && onOpenId(id, entries, onOpen)} onSignInYoutube={signInToYoutube}
+          youtubeAuthBusy={youtubeAuthBusy} />}
         {empty && (
           <p className="library-first-note">
             <FileMusic size={19} aria-hidden />
@@ -1647,14 +1810,17 @@ function mergeVideoResults(youtube: YouTubeResult[], music: YouTubeResult[]): Un
   return [...merged.values()]
 }
 
-function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
+function PopularMusic({ jobs, busy, pendingLinks, onTranscribe, onSignInYoutube, youtubeAuthBusy }: {
   jobs: QueueJob[]
   busy: boolean
   pendingLinks: string[]
   onTranscribe: (url: string) => Promise<void>
+  onSignInYoutube: () => Promise<boolean>
+  youtubeAuthBusy: boolean
 }) {
   const [chart, setChart] = useState<PopularChart | null>(null)
   const [error, setError] = useState<Problem | null>(null)
+  const [signInNotice, setSignInNotice] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
   const [activePreview, setActivePreview] = useState<{
@@ -1669,7 +1835,24 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
     setLoading(true)
     setError(null)
     void host.popularSongs(retry > 0).then(
-      (result) => { if (!stale) setChart(result) },
+      (result) => {
+        if (stale) return
+        setChart((current) => {
+          if (!current) return result
+          const sections = result.sections.map((section) => {
+            const previous = current.sections.find((item) => item.id === section.id)
+            if (section.status !== 'unavailable' || !previous?.rows.length) return section
+            return {
+              ...previous,
+              status: 'available' as const,
+              message: section.message ?? 'Could not refresh this playlist; showing earlier results.',
+              requiresAuth: section.requiresAuth,
+              stale: true,
+            }
+          })
+          return { ...result, sections }
+        })
+      },
       (reason) => { if (!stale) setError(problem(reason)) },
     ).finally(() => { if (!stale) setLoading(false) })
     return () => { stale = true }
@@ -1680,8 +1863,20 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
     if (track) track.scrollBy({ left: direction * track.clientWidth * 0.8, behavior: 'smooth' })
   }
   const retryPlaylists = () => {
+    if (loading) return
     setActivePreview(null)
+    setError(null)
+    setSignInNotice(null)
+    setLoading(true)
     setRetry((value) => value + 1)
+  }
+  const signInAndRetry = async () => {
+    if (loading || youtubeAuthBusy) return
+    setSignInNotice(null)
+    if (await onSignInYoutube()) retryPlaylists()
+    else setSignInNotice(
+      'YouTube sign-in was not completed. Retry the playlists or import cookies in Song analysis settings.',
+    )
   }
 
   return (
@@ -1698,17 +1893,30 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
         </div>
       </div>
 
-      {loading && !chart && <p className="songs-note" role="status">Loading YouTube Music playlists…</p>}
+      {loading && <p className="songs-note" role="status" aria-live="polite">
+        {chart ? 'Refreshing YouTube Music playlists…' : 'Loading YouTube Music playlists…'}
+      </p>}
+      {signInNotice && <p className="popular-chart-warning" role="status">{signInNotice}</p>}
       {error && (
         <div className="popular-chart-error" role="alert">
           <span>{error.message}</span>
-          <button className="btn btn-quiet" onClick={retryPlaylists}>Retry playlists</button>
+          {error.code === 'youtube_sign_in_required' && (
+            <button className="btn btn-primary" disabled={loading || youtubeAuthBusy}
+              aria-busy={youtubeAuthBusy || undefined} onClick={() => void signInAndRetry()}>
+              {youtubeAuthBusy ? 'Signing in…' : 'Sign in to YouTube'}
+            </button>
+          )}
+          <button className="btn btn-quiet" disabled={loading} onClick={retryPlaylists}>
+            {loading ? 'Loading…' : 'Retry playlists'}
+          </button>
         </div>
       )}
       {chart?.warning && (
         <p className="popular-chart-warning" role="status">
           {chart.warning}{' '}
-          <button className="btn btn-quiet" onClick={retryPlaylists}>Retry playlists</button>
+          <button className="btn btn-quiet" disabled={loading} onClick={retryPlaylists}>
+            {loading ? 'Loading…' : 'Retry playlists'}
+          </button>
         </p>
       )}
 
@@ -1737,10 +1945,32 @@ function PopularMusic({ jobs, busy, pendingLinks, onTranscribe }: {
           {section.status === 'unavailable' ? (
             <div className="popular-chart-error" role="alert">
               <span>{section.title} unavailable — {section.message ?? 'YouTube Music could not load this playlist.'}</span>
-              <button className="btn btn-quiet" onClick={retryPlaylists}>Retry</button>
+              {section.requiresAuth && (
+                <button className="btn btn-primary" disabled={loading || youtubeAuthBusy}
+                  aria-busy={youtubeAuthBusy || undefined} onClick={() => void signInAndRetry()}>
+                  {youtubeAuthBusy ? 'Signing in…' : 'Sign in to YouTube'}
+                </button>
+              )}
+              <button className="btn btn-quiet" disabled={loading} onClick={retryPlaylists}>
+                {loading ? 'Loading…' : 'Retry'}
+              </button>
             </div>
           ) : (
             <>
+              {section.stale && (
+                <div className="popular-shelf-stale" role="status">
+                  <span>{section.message}</span>
+                  {section.requiresAuth && (
+                    <button className="btn btn-primary" disabled={loading || youtubeAuthBusy}
+                      aria-busy={youtubeAuthBusy || undefined} onClick={() => void signInAndRetry()}>
+                      {youtubeAuthBusy ? 'Signing in…' : 'Sign in to YouTube'}
+                    </button>
+                  )}
+                  <button className="btn btn-quiet" disabled={loading} onClick={retryPlaylists}>
+                    {loading ? 'Loading…' : 'Retry'}
+                  </button>
+                </div>
+              )}
               <ol ref={(node) => {
                 if (node) shelves.current.set(section.id, node)
                 else shelves.current.delete(section.id)
@@ -2284,10 +2514,19 @@ function Thumb({ entry }: { entry: Pick<Entry, 'thumbnail' | 'source'> }) {
   )
 }
 
-function Queue({ jobs, selected, onChange, onDetails, onOpen }: { jobs: QueueJob[]; selected?: string; onChange: () => void; onDetails: (j: QueueJob) => void; onOpen: (songId: string) => void }) {
+function Queue({ jobs, selected, onChange, onDetails, onOpen, onSignInYoutube, youtubeAuthBusy }: {
+  jobs: QueueJob[]
+  selected?: string
+  onChange: () => void
+  onDetails: (j: QueueJob) => void
+  onOpen: (songId: string) => void
+  onSignInYoutube: () => Promise<boolean>
+  youtubeAuthBusy: boolean
+}) {
   const actionInFlight = useRef(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<Problem | null>(null)
+  const [youtubeSignInNotice, setYoutubeSignInNotice] = useState<{ jobId: string; message: string } | null>(null)
   const act = async (action: () => Promise<unknown>) => {
     if (actionInFlight.current) return
     actionInFlight.current = true
@@ -2364,6 +2603,9 @@ function Queue({ jobs, selected, onChange, onDetails, onOpen }: { jobs: QueueJob
                   </div>
                 )}
                 {j.status === 'failed' && j.fix && <p className="job-fix">{j.fix}</p>}
+                {youtubeSignInNotice?.jobId === j.id && (
+                  <p className="job-fix" role="status">{youtubeSignInNotice.message}</p>
+                )}
               </div>
               <div className="job-actions">
                 {j.status === 'done' && j.songId && (
@@ -2374,6 +2616,21 @@ function Queue({ jobs, selected, onChange, onDetails, onOpen }: { jobs: QueueJob
                 {j.status === 'failed' && (
                   <button className="btn" disabled={actionBusy} onClick={() => void act(() => host.retry(j.id))}>
                     <RotateCcw size={15} aria-hidden /> Retry
+                  </button>
+                )}
+                {j.status === 'failed' && requiresYoutubeSignIn(j) && (
+                  <button className="btn btn-primary" disabled={actionBusy || youtubeAuthBusy}
+                    aria-busy={youtubeAuthBusy || undefined}
+                    onClick={() => void act(async () => {
+                      const signedIn = await onSignInYoutube()
+                      setYoutubeSignInNotice({
+                        jobId: j.id,
+                        message: signedIn
+                          ? 'YouTube sign-in is ready. Retry this analysis when you are ready.'
+                          : 'YouTube sign-in was not completed. Retry is still available.',
+                      })
+                    })}>
+                    {youtubeAuthBusy ? 'Signing in…' : 'Sign in to YouTube'}
                   </button>
                 )}
                 {place > 0 && (

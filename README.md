@@ -6,6 +6,9 @@ Mizan (ميزان, pronounced **mee-ZAHN**) means *balance* or *scale* in Arabic
 
 Mizan turns a YouTube recording into draft scores, chords, and separate audio
 tracks for practice. It also imports MIDI and MusicXML scores.
+If YouTube asks to confirm you're not a bot, use **YouTube sign-in** in Song
+analysis settings or import a private-window `cookies.txt` file. The sign-in
+window closes automatically after Mizan saves an active YouTube session.
 
 Mizan runs as a Windows ARM64 desktop app. Local processing is the default.
 You can also send a job to one cloud provider in an account that you own.
@@ -144,11 +147,19 @@ Python 3.12 for the same architecture (ARM64 or x64), Node.js,
 .NET 10 SDK, Windows SDK, WebView2 Runtime, `uv`, and FFmpeg for YouTube audio.
 Install Git and PowerShell 7.
 
-Open the [official FFmpeg download page](https://ffmpeg.org/download.html#build-windows).
-Choose a Windows build from one of the providers listed there.
-Download a ZIP package.
-Extract the package.
-Enter the full path to `bin\ffmpeg.exe` in Song analysis settings.
+The easiest way to install FFmpeg is WinGet:
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Mizan finds the WinGet install automatically. Select **Check again** in Song
+analysis settings, or restart Mizan.
+
+To install it manually instead, open the
+[official FFmpeg download page](https://ffmpeg.org/download.html#build-windows),
+download a Windows ZIP build from a listed provider, extract it, and enter the
+full path to `bin\ffmpeg.exe` in Song analysis settings.
 Mizan uses that saved path before `MIZAN_FFMPEG`, `PATH`, and WinGet discovery.
 The first executable check allows up to 30 seconds for a slow Windows start.
 Successful checks are reused while that executable is unchanged. If the check

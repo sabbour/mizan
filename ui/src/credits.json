@@ -1,5 +1,13 @@
 [
   {
+    "name": "@isaacs/fs-minipass",
+    "version": "4.0.1",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/fs-minipass",
+    "group": "App UI libraries"
+  },
+  {
     "name": "@types/vexflow",
     "version": "1.2.42",
     "license": "MIT",
@@ -8,11 +16,195 @@
     "group": "App UI libraries"
   },
   {
+    "name": "abbrev",
+    "version": "4.0.0",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/abbrev-js",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "base64-js",
+    "version": "1.5.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Jameson Little",
+    "url": "https://github.com/beatgammit/base64-js",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "bindings",
+    "version": "1.5.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2012 Nathan Rajlich &lt;nathan@tootallnate.net&gt;",
+    "url": "https://github.com/TooTallNate/node-bindings",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "bit-twiddle",
+    "version": "1.0.2",
+    "license": "MIT",
+    "author": "Copyright (c) 2013 Mikola Lysenko",
+    "url": "https://github.com/mikolalysenko/bit-twiddle",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "bl",
+    "version": "4.1.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2013-2019 bl contributors",
+    "url": "https://github.com/rvagg/bl",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "buffer",
+    "version": "5.7.1",
+    "license": "MIT",
+    "author": "Copyright (c) Feross Aboukhadijeh, and other contributors.",
+    "url": "https://github.com/feross/buffer",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "chownr",
+    "version": "1.1.4",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/isaacs/chownr",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "chownr",
+    "version": "3.0.0",
+    "license": "BlueOak-1.0.0",
+    "author": "copyright in it.",
+    "url": "https://github.com/isaacs/chownr",
+    "group": "App UI libraries"
+  },
+  {
     "name": "core-util-is",
     "version": "1.0.3",
     "license": "MIT",
     "author": "Copyright Node.js contributors. All rights reserved.",
     "url": "https://github.com/isaacs/core-util-is",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "decompress-response",
+    "version": "6.0.0",
+    "license": "MIT",
+    "author": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)",
+    "url": "https://github.com/sindresorhus/decompress-response",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "deep-extend",
+    "version": "0.6.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2013-2018, Viacheslav Lotsmanov",
+    "url": "https://github.com/unclechu/node-deep-extend",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "detect-libc",
+    "version": "2.1.2",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/lovell/detect-libc",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "end-of-stream",
+    "version": "1.4.5",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Mathias Buus",
+    "url": "https://github.com/mafintosh/end-of-stream",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "env-paths",
+    "version": "2.2.1",
+    "license": "MIT",
+    "author": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)",
+    "url": "https://github.com/sindresorhus/env-paths",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "expand-template",
+    "version": "2.0.3",
+    "license": "MIT OR WTFPL",
+    "author": "Copyright (c) 2018 Lars-Magnus Skog",
+    "url": "https://github.com/ralphtheninja/expand-template",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "exponential-backoff",
+    "version": "3.1.3",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/coveooss/exponential-backoff",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "fdir",
+    "version": "6.5.0",
+    "license": "MIT",
+    "author": "Copyright 2023 Abdullah Atta",
+    "url": "https://github.com/thecodrr/fdir",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "file-uri-to-path",
+    "version": "1.0.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net>",
+    "url": "https://github.com/TooTallNate/file-uri-to-path",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "fs-constants",
+    "version": "1.0.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2018 Mathias Buus",
+    "url": "https://github.com/mafintosh/fs-constants",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "github-from-package",
+    "version": "0.0.0",
+    "license": "MIT",
+    "author": "COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+    "url": "https://github.com/substack/github-from-package",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "gl",
+    "version": "9.0.0-rc.10",
+    "license": "BSD-2-Clause",
+    "author": "Mikola Lysenko",
+    "url": "https://github.com/stackgl/headless-gl",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "glsl-tokenizer",
+    "version": "2.1.5",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 [Chris Dickinson](http://github.com/chrisdickinson)",
+    "url": "https://github.com/gl-modules/glsl-tokenizer",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "graceful-fs",
+    "version": "4.2.11",
+    "license": "ISC",
+    "author": "Copyright (c) 2011-2022 Isaac Z. Schlueter, Ben Noordhuis, and Contributors",
+    "url": "https://github.com/isaacs/node-graceful-fs",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "ieee754",
+    "version": "1.2.1",
+    "license": "BSD-3-Clause",
+    "author": "Copyright 2008 Fair Oaks Labs, Inc.",
+    "url": "https://github.com/feross/ieee754",
     "group": "App UI libraries"
   },
   {
@@ -32,11 +224,35 @@
     "group": "App UI libraries"
   },
   {
+    "name": "ini",
+    "version": "1.3.8",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/isaacs/ini",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "isarray",
+    "version": "0.0.1",
+    "license": "MIT",
+    "author": "Copyright (c) 2013 Julian Gruber &lt;julian@juliangruber.com&gt;",
+    "url": "https://github.com/juliangruber/isarray",
+    "group": "App UI libraries"
+  },
+  {
     "name": "isarray",
     "version": "1.0.0",
     "license": "MIT",
     "author": "Copyright (c) 2013 Julian Gruber &lt;julian@juliangruber.com&gt;",
     "url": "https://github.com/juliangruber/isarray",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "isexe",
+    "version": "4.0.0",
+    "license": "BlueOak-1.0.0",
+    "author": "copyright in it.",
+    "url": "https://github.com/isaacs/isexe",
     "group": "App UI libraries"
   },
   {
@@ -73,6 +289,94 @@
     "group": "App UI libraries"
   },
   {
+    "name": "mimic-response",
+    "version": "3.1.0",
+    "license": "MIT",
+    "author": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)",
+    "url": "https://github.com/sindresorhus/mimic-response",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "minimist",
+    "version": "1.2.8",
+    "license": "MIT",
+    "author": "COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+    "url": "https://github.com/minimistjs/minimist",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "minipass",
+    "version": "7.1.3",
+    "license": "BlueOak-1.0.0",
+    "author": "copyright in it.",
+    "url": "https://github.com/isaacs/minipass",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "minizlib",
+    "version": "3.1.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2017-2023 Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/isaacs/minizlib",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "mkdirp-classic",
+    "version": "0.5.3",
+    "license": "MIT",
+    "author": "Copyright (c) 2020 James Halliday (mail@substack.net) and Mathias Buus",
+    "url": "https://github.com/mafintosh/mkdirp-classic",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "nan",
+    "version": "2.29.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2018 [NAN contributors](<https://github.com/nodejs/nan#wg-members--collaborators>)",
+    "url": "https://github.com/nodejs/nan",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "napi-build-utils",
+    "version": "2.0.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2018 inspiredware",
+    "url": "https://github.com/inspiredware/napi-build-utils",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "node-abi",
+    "version": "3.96.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2016 Lukas Geiger",
+    "url": "https://github.com/electron/node-abi",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "node-gyp",
+    "version": "12.4.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2012 Nathan Rajlich <nathan@tootallnate.net>",
+    "url": "https://github.com/nodejs/node-gyp",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "nopt",
+    "version": "9.0.0",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/nopt",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "once",
+    "version": "1.4.0",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/isaacs/once",
+    "group": "App UI libraries"
+  },
+  {
     "name": "opensheetmusicdisplay",
     "version": "2.1.2",
     "license": "BSD-3-Clause",
@@ -89,11 +393,51 @@
     "group": "App UI libraries"
   },
   {
+    "name": "picomatch",
+    "version": "4.0.7",
+    "license": "MIT",
+    "author": "Copyright (c) 2017-present, Jon Schlinkert.",
+    "url": "https://github.com/micromatch/picomatch",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "prebuild-install",
+    "version": "7.1.3",
+    "license": "MIT",
+    "author": "Copyright (c) 2015 Mathias Buus",
+    "url": "https://github.com/prebuild/prebuild-install",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "proc-log",
+    "version": "6.1.0",
+    "license": "ISC",
+    "author": "Copyright (c) GitHub, Inc.",
+    "url": "https://github.com/npm/proc-log",
+    "group": "App UI libraries"
+  },
+  {
     "name": "process-nextick-args",
     "version": "2.0.1",
     "license": "MIT",
     "author": "Copyright Calvin Metcalf and contributors",
     "url": "https://github.com/calvinmetcalf/process-nextick-args",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "pump",
+    "version": "3.0.4",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Mathias Buus",
+    "url": "https://github.com/mafintosh/pump",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "rc",
+    "version": "1.2.8",
+    "license": "BSD-2-Clause OR MIT OR Apache-2.0",
+    "author": "Copyright (c) 2011 Dominic Tarr",
+    "url": "https://github.com/dominictarr/rc",
     "group": "App UI libraries"
   },
   {
@@ -114,7 +458,23 @@
   },
   {
     "name": "readable-stream",
+    "version": "1.0.34",
+    "license": "MIT",
+    "author": "Copyright Joyent, Inc. and other Node contributors. All rights reserved.",
+    "url": "https://github.com/isaacs/readable-stream",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "readable-stream",
     "version": "2.3.8",
+    "license": "MIT",
+    "author": "Copyright Node.js contributors. All rights reserved.",
+    "url": "https://github.com/nodejs/readable-stream",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "readable-stream",
+    "version": "3.6.2",
     "license": "MIT",
     "author": "Copyright Node.js contributors. All rights reserved.",
     "url": "https://github.com/nodejs/readable-stream",
@@ -137,11 +497,43 @@
     "group": "App UI libraries"
   },
   {
+    "name": "semver",
+    "version": "7.8.5",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/node-semver",
+    "group": "App UI libraries"
+  },
+  {
     "name": "setimmediate",
     "version": "1.0.5",
     "license": "MIT",
     "author": "Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola",
     "url": "https://github.com/YuzuJS/setImmediate",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "simple-concat",
+    "version": "1.0.1",
+    "license": "MIT",
+    "author": "Copyright (c) Feross Aboukhadijeh",
+    "url": "https://github.com/feross/simple-concat",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "simple-get",
+    "version": "4.0.1",
+    "license": "MIT",
+    "author": "Copyright (c) Feross Aboukhadijeh",
+    "url": "https://github.com/feross/simple-get",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "string_decoder",
+    "version": "0.10.31",
+    "license": "MIT",
+    "author": "Copyright Joyent, Inc. and other Node contributors.",
+    "url": "https://github.com/rvagg/string_decoder",
     "group": "App UI libraries"
   },
   {
@@ -153,11 +545,75 @@
     "group": "App UI libraries"
   },
   {
+    "name": "strip-json-comments",
+    "version": "2.0.1",
+    "license": "MIT",
+    "author": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)",
+    "url": "https://github.com/sindresorhus/strip-json-comments",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "tar",
+    "version": "7.5.22",
+    "license": "BlueOak-1.0.0",
+    "author": "copyright in it.",
+    "url": "https://github.com/isaacs/node-tar",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "tar-fs",
+    "version": "2.1.5",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Mathias Buus",
+    "url": "https://github.com/mafintosh/tar-fs",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "tar-stream",
+    "version": "2.2.0",
+    "license": "MIT",
+    "author": "Copyright (c) 2014 Mathias Buus",
+    "url": "https://github.com/mafintosh/tar-stream",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "through2",
+    "version": "0.6.5",
+    "license": "MIT",
+    "author": "Copyright 2013, Rod Vagg (the \"Original Author\")",
+    "url": "https://github.com/rvagg/through2",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "tinyglobby",
+    "version": "0.2.17",
+    "license": "MIT",
+    "author": "Copyright (c) 2024 Madeline Gurriar\u00e1n",
+    "url": "https://github.com/SuperchupuDev/tinyglobby",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "tunnel-agent",
+    "version": "0.6.0",
+    "license": "Apache-2.0",
+    "author": "Mikeal Rogers",
+    "url": "https://github.com/mikeal/tunnel-agent",
+    "group": "App UI libraries"
+  },
+  {
     "name": "typescript-collections",
     "version": "1.3.3",
     "license": "MIT",
     "author": "Copyright (c) 2010-2017 Tomasz Ciborski",
     "url": "https://github.com/basarat/typescript-collections",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "undici",
+    "version": "6.28.1",
+    "license": "MIT",
+    "author": "Copyright (c) Matteo Collina and Undici contributors",
+    "url": "https://github.com/nodejs/undici",
     "group": "App UI libraries"
   },
   {
@@ -174,6 +630,38 @@
     "license": "MIT",
     "author": "Copyright (c) 2010 Mohit Muthanna Cheppudira",
     "url": "https://github.com/0xfe/vexflow",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "which",
+    "version": "6.0.1",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/node-which",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "wrappy",
+    "version": "1.0.2",
+    "license": "ISC",
+    "author": "Copyright (c) Isaac Z. Schlueter and Contributors",
+    "url": "https://github.com/npm/wrappy",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "xtend",
+    "version": "4.0.2",
+    "license": "MIT",
+    "author": "Copyright (c) 2012-2014 Raynos.",
+    "url": "https://github.com/Raynos/xtend",
+    "group": "App UI libraries"
+  },
+  {
+    "name": "yallist",
+    "version": "5.0.0",
+    "license": "BlueOak-1.0.0",
+    "author": "copyright in it.",
+    "url": "https://github.com/isaacs/yallist",
     "group": "App UI libraries"
   },
   {
@@ -202,7 +690,7 @@
   },
   {
     "name": "azure-identity",
-    "version": "1.25.3",
+    "version": "1.26.0",
     "license": "MIT",
     "author": "Copyright (c) Microsoft Corporation.",
     "url": "https://github.com/Azure/azure-sdk-for-python",
@@ -258,7 +746,7 @@
   },
   {
     "name": "charset-normalizer",
-    "version": "3.5.1",
+    "version": "3.5.2",
     "license": "MIT",
     "author": "Copyright (c) 2025 TAHRI Ahmed R.",
     "url": "https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
@@ -306,7 +794,7 @@
   },
   {
     "name": "filelock",
-    "version": "4.0.1",
+    "version": "4.1.0",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
     "url": "https://github.com/tox-dev/py-filelock",
@@ -342,6 +830,14 @@
     "license": "MIT",
     "author": "Copyright (c) 2016 Nathaniel J. Smith <njs@pobox.com> and other contributors",
     "url": "https://github.com/python-hyper/h11",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "hf-xet",
+    "version": "1.7.0",
+    "license": "Apache-2.0",
+    "author": "copyright notice that is included in or attached to the work",
+    "url": "https://github.com/huggingface/xet-core",
     "group": "Host/engine libraries"
   },
   {
@@ -402,7 +898,7 @@
   },
   {
     "name": "MarkupSafe",
-    "version": "3.0.3",
+    "version": "3.0.4",
     "license": "BSD-3-Clause",
     "author": "Copyright 2010 Pallets",
     "url": "https://github.com/pallets/markupsafe/",
@@ -450,9 +946,9 @@
   },
   {
     "name": "networkx",
-    "version": "3.6.1",
+    "version": "3.7",
     "license": "BSD-3-Clause",
-    "author": "Copyright (c) 2004-2025, NetworkX Developers",
+    "author": "Copyright (c) 2004-2026, NetworkX Developers",
     "url": "https://networkx.org/",
     "group": "Host/engine libraries"
   },
@@ -514,15 +1010,15 @@
   },
   {
     "name": "pycparser",
-    "version": "3.0",
+    "version": "3.11",
     "license": "BSD-3-Clause",
-    "author": "Copyright (c) 2008-2022, Eli Bendersky",
+    "author": "Copyright (c) 2008-2027, Eli Bendersky",
     "url": "https://github.com/eliben/pycparser",
     "group": "Host/engine libraries"
   },
   {
     "name": "PyJWT",
-    "version": "2.14.0",
+    "version": "2.15.1",
     "license": "MIT",
     "author": "Copyright (c) 2015-2022 Jos\u00e9 Padilla",
     "url": "https://github.com/jpadilla/pyjwt",
@@ -538,7 +1034,7 @@
   },
   {
     "name": "pythonnet",
-    "version": "3.1.0",
+    "version": "3.2.1",
     "license": "MIT",
     "author": "Copyright (c) 2006-2021 the contributors of the Python.NET project",
     "url": "https://pythonnet.github.io/",

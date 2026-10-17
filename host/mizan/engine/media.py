@@ -17,8 +17,9 @@ import warnings
 from scipy.io.wavfile import WavFileWarning
 
 from ..errors import (DownloadFailed, FFmpegProbeTimedOut, FFmpegUnavailable, InsufficientDisk,
-                      UnsupportedMedia, VideoUnavailable)
+                      UnsupportedMedia, VideoUnavailable, YoutubeSignInRequired)
 from ..paths import home
+from ..youtube_auth import youtube_auth_status, youtube_cookies_for_operation
 from .audio import read_audio
 from .providers import check_cancel
 
@@ -186,8 +187,9 @@ def _resolve_ffmpeg_path(configured: str | None) -> str:
     if winget:
         return validate_ffmpeg_executable(winget)
     raise FFmpegUnavailable(
-        "FFmpeg was not found. Download it from "
-        f"{FFMPEG_DOWNLOAD_URL} and choose bin\\ffmpeg.exe in Song analysis settings.")
+        "FFmpeg was not found. Run 'winget install Gyan.FFmpeg' in Terminal, then check again "
+        f"in Song analysis settings. Or download it from {FFMPEG_DOWNLOAD_URL} and choose "
+        "bin\\ffmpeg.exe there.")
 
 
 def ffmpeg_path() -> str:
@@ -235,6 +237,25 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
             if process.returncode:
                 errors.seek(0)
                 message = errors.read()[-3000:].strip()
+                lowered = message.lower()
+                if error_type is DownloadFailed and any(phrase in lowered for phrase in
+                        ("sign in to confirm", "confirm you're not a bot",
+                         "confirm you are not a bot", "not a bot")):
+                    if youtube_auth_status()["signedIn"]:
+                        raise YoutubeSignInRequired(
+                            "YouTube rejected the saved sign-in. Sign in again, then retry this analysis.")
+                    raise YoutubeSignInRequired(
+                        "YouTube requires sign-in. Sign in, then retry this analysis.")
+                if error_type is DownloadFailed and "--cookies" in command:
+                    if "http error 403" in lowered:
+                        raise DownloadFailed("HTTP Error 403")
+                    if any(word in lowered for word in
+                           ("private video", "video unavailable", "removed", "sign in",
+                            "not available", "copyright")):
+                        raise VideoUnavailable("This YouTube video is unavailable.")
+                    raise DownloadFailed(
+                        "YouTube could not use the saved sign-in or load this video. "
+                        "Sign in again or retry.")
                 if error_type is DownloadFailed and any(word in message.lower() for word in
                         ("private video", "video unavailable", "removed", "sign in", "not available", "copyright")):
                     raise VideoUnavailable(message)
@@ -247,9 +268,12 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
 
 
 def inspect_video(url: str, directory: Path, cancelled: Event) -> dict:
-    text = run_command([sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
-                        "--skip-download", "--dump-single-json", "--no-warnings", url],
-                       directory, cancelled, DownloadFailed)
+    command = [sys.executable, "-m", "yt_dlp", "--ignore-config"]
+    with youtube_cookies_for_operation() as cookies:
+        if cookies:
+            command.extend(["--cookies", str(cookies)])
+        command.extend(["--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", url])
+        text = run_command(command, directory, cancelled, DownloadFailed)
     try:
         info = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -279,19 +303,22 @@ def preflight(metadata: dict, directory: Path) -> list[str]:
 
 def download_video(url: str, directory: Path, cancelled: Event, progress=None) -> Path:
     command = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
-               "--ffmpeg-location", ffmpeg_path(),
-               "-f", "bestaudio/best", "--newline", "--progress",
-               "--progress-template", "download:progress:%(progress._percent_str)s",
-               "--print", "after_move:filepath", "--no-simulate",
-               "-o", str(directory / "source.%(ext)s"), url]
-    try:
-        text = run_command(command, directory, cancelled, DownloadFailed, progress)
-    except DownloadFailed as exc:
-        if "HTTP Error 403" not in str(exc):
-            raise
-        logger.warning("Direct YouTube audio returned HTTP 403; retrying its HLS audio stream.")
-        command[command.index("-f") + 1] = "bestaudio[protocol^=m3u8]/best[protocol^=m3u8]"
-        text = run_command(command, directory, cancelled, DownloadFailed, progress)
+               "--ffmpeg-location", ffmpeg_path()]
+    with youtube_cookies_for_operation() as cookies:
+        if cookies:
+            command.extend(["--cookies", str(cookies)])
+        command.extend(["-f", "bestaudio/best", "--newline", "--progress",
+                   "--progress-template", "download:progress:%(progress._percent_str)s",
+                   "--print", "after_move:filepath", "--no-simulate",
+                   "-o", str(directory / "source.%(ext)s"), url])
+        try:
+            text = run_command(command, directory, cancelled, DownloadFailed, progress)
+        except DownloadFailed as exc:
+            if "HTTP Error 403" not in str(exc):
+                raise
+            logger.warning("Direct YouTube audio returned HTTP 403; retrying its HLS audio stream.")
+            command[command.index("-f") + 1] = "bestaudio[protocol^=m3u8]/best[protocol^=m3u8]"
+            text = run_command(command, directory, cancelled, DownloadFailed, progress)
     files = [directory / Path(line.strip()).name for line in text.splitlines() if line.strip() and not line.startswith("progress:")]
     source = next((path for path in reversed(files) if path.is_file() and path.name.startswith("source.")), None)
     if source is None:
