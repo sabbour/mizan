@@ -741,8 +741,9 @@ class Api:
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         return response(lambda: {"ok": True, "job": self._queue_job(self._runner.cancel(job_id))})
 
-    def retry_job(self, job_id: str) -> dict[str, Any]:
-        return response(lambda: {"ok": True, "job": self._queue_job(self._runner.retry(job_id))})
+    def retry_job(self, job_id: str, transcription_model: str | None = None) -> dict[str, Any]:
+        return response(lambda: {"ok": True, "job": self._queue_job(
+            self._runner.retry(job_id, transcription_model))})
 
     def move_job(self, job_id: str, order: int) -> dict[str, Any]:
         return response(lambda: {"ok": True, "job": self._queue_job(self._runner.move(job_id, order))})

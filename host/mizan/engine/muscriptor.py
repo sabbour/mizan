@@ -652,7 +652,9 @@ def _transcribe_inprocess(model: str, audio: Audio, cancelled=None, progress=Non
 
     check_cancel(cancelled)
     try:
-        torch.set_num_threads(min(4 if model == "muscriptor-large" else 12, os.cpu_count() or 1))
+        thread_limit = os.cpu_count() or 1
+        torch.set_num_threads(
+            thread_limit if model == "muscriptor-large" else min(12, thread_limit))
         transcriber = _load_official_model(
             model, app_dir("models") / model / "model.safetensors")
     except Exception as exc:
@@ -708,6 +710,14 @@ def _transcribe_inprocess(model: str, audio: Audio, cancelled=None, progress=Non
     return result
 
 
+def _cpu_inference_timeout_message(model: str, audio: Audio) -> str:
+    message = (f"{model} CPU inference exceeded its bounded run time for this "
+               f"{audio.duration / 60:.1f}-minute recording.")
+    if model == "muscriptor-small":
+        return f"{message} Try a shorter recording."
+    return f"{message} Retry with MuScriptor Small or choose a shorter recording."
+
+
 def transcribe_official(model: str, audio: Audio, cancelled=None, progress=None, *, source: Path):
     """Isolate native PyTorch faults from the host process."""
     _spec(model)
@@ -736,9 +746,7 @@ def transcribe_official(model: str, audio: Audio, cancelled=None, progress=None,
                 while worker.poll() is None:
                     check_cancel(cancelled)
                     if time.monotonic() >= deadline:
-                        raise ModelFailed(
-                            f"{model} CPU inference exceeded its bounded run time; "
-                            "try a shorter recording or a smaller MuScriptor size.")
+                        raise ModelFailed(_cpu_inference_timeout_message(model, audio))
                     try:
                         value = float(progress_file.read_text(encoding="ascii"))
                         if math.isfinite(value) and last_progress < value <= 1:
