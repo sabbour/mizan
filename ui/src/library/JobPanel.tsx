@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, Pause, Play, RotateCcw, X } from 'lucide-react'
 import { host, type Found, type QueueJob } from './bridge'
-import { decodingErrorHeadline, instrumentStatus, jobExecutionLabel, jobQueuePosition, jobStageLabel, jobStagePercent, jobStageState, jobTitle, roughly, stageModelLabel, stageProviderLabel, STAGE_LABEL, took } from './format'
+import { decodingErrorHeadline, instrumentStatus, jobExecutionLabel, jobQueuePosition, jobStageLabel, jobStagePercent, jobStageState, jobTitle, roughly, smallerCpuRetryModel, stageModelLabel, stageProviderLabel, STAGE_LABEL, took } from './format'
 import './jobpanel.css'
 
 type Props = { job: QueueJob; jobs: QueueJob[]; onClose: () => void; onChange: () => void; onOpen: (songId: string) => void }
@@ -81,6 +81,7 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
     ?? j.cloudProvider
   const { ahead, place } = jobQueuePosition(j, jobs)
   const wait = ahead.reduce((t, q) => t + (q.eta?.seconds ?? 0), 0)
+  const smallerRetryModel = smallerCpuRetryModel(j)
 
   let lead: string
   let sub: string
@@ -152,6 +153,12 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
             {(j.status === 'failed' || j.status === 'cancelled') && (
               <button className="btn btn-primary" disabled={actionBusy} onClick={() => void act(() => host.retry(j.id))}>
                 <RotateCcw size={15} aria-hidden /> Retry
+              </button>
+            )}
+            {smallerRetryModel && (
+              <button className="btn" disabled={actionBusy}
+                onClick={() => void act(() => host.retry(j.id, smallerRetryModel))}>
+                <RotateCcw size={15} aria-hidden /> Retry with MuScriptor Small
               </button>
             )}
             {(j.status === 'running' || j.status === 'queued') && (

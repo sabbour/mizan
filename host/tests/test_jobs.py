@@ -309,6 +309,26 @@ def test_default_pipeline_surfaces_structured_failure(monkeypatch):
         runner.close()
 
 
+def test_local_retry_can_use_smaller_model_without_changing_saved_default(monkeypatch):
+    store = JobStore()
+    store.set_transcription_model("muscriptor-large")
+    failed = store.create("aB_12-cD345", URL, "auto", "test")
+    store.update(failed["id"], status="failed", error=ModelFailed("Inference timed out."))
+    checked = []
+    monkeypatch.setattr("mizan.engine.muscriptor.check_model_resources",
+                        lambda model: checked.append(model))
+    runner = JobRunner(store, pipeline=lambda *_args: None)
+    try:
+        retried = runner.retry(failed["id"], "muscriptor-small")
+        completed = wait_for(store, retried["id"], "done")
+
+        assert checked == ["muscriptor-small"]
+        assert completed["transcription_model"] == "muscriptor-small"
+        assert store.get_transcription_model() == "muscriptor-large"
+    finally:
+        runner.close()
+
+
 def test_cancel_running_and_queued():
     entered, release, observed = Event(), Event(), Event()
     calls = []
