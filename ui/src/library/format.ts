@@ -1,5 +1,14 @@
 import type { Entry, Position, QueueJob, Stage } from './bridge'
 
+export function smallerCpuRetryModel(job: Pick<QueueJob, 'kind' | 'status' | 'processingMode'
+  | 'errorCode' | 'errorMessage' | 'transcriptionModel'>): QueueJob['transcriptionModel'] | null {
+  if (job.kind !== 'transcribe' || job.status !== 'failed' || job.processingMode === 'cloud'
+    || job.errorCode !== 'model_failed' || !job.transcriptionModel
+    || job.transcriptionModel === 'muscriptor-small'
+    || !/exceeded its bounded run time/i.test(job.errorMessage ?? '')) return null
+  return 'muscriptor-small'
+}
+
 export const STAGE_LABEL: Record<Stage, string> = {
   inspect: 'Reading video details',
   download: 'Downloading audio',

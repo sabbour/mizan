@@ -21,7 +21,8 @@ import pytest
 from mizan.api import Api, public_job, queue_job
 from mizan.engine import pipeline
 from mizan.engine.audio import Audio, write_audio
-from mizan.engine.muscriptor import MODELS, require_ready, _transcribe_inprocess, transcribe_official
+from mizan.engine.muscriptor import (MODELS, _cpu_inference_timeout_message, require_ready,
+                                     _transcribe_inprocess, transcribe_official)
 from mizan.errors import Cancelled, InvalidTranscriptionModel, ModelFailed
 from mizan.jobs import JobRunner, JobStore
 from mizan.library import LibraryStore
@@ -655,7 +656,9 @@ def test_official_event_mapping_progress_and_cancel(monkeypatch, model):
     audio = Audio(np.zeros(16000, dtype=np.float32), 16000)
     progress = []
     piano, drums, details, events = _transcribe_inprocess(model, audio, Event(), progress.append)
-    assert thread_counts == [min(4 if model == "muscriptor-large" else 12, os.cpu_count() or 1)]
+    assert thread_counts == [
+        (os.cpu_count() or 1) if model == "muscriptor-large"
+        else min(12, os.cpu_count() or 1)]
     assert [note["midi"] for note in piano] == [60, 64]
     assert [note["onset"] for note in piano] == [0.11, 0.23]
     assert all(note["hand"] in ("left", "right") and note["generated"] is False for note in piano)
@@ -762,6 +765,20 @@ def test_dense_passage_token_limit_has_actionable_model_error(monkeypatch):
     monkeypatch.setattr(official, "_load_official_model", lambda *_: DenseModel())
     with pytest.raises(ModelFailed, match="2000-token limit.*another MuScriptor size"):
         _transcribe_inprocess("muscriptor-small", Audio(np.zeros(16000, dtype=np.float32), 16000))
+
+
+@pytest.mark.parametrize(("model", "recovery"), [
+    ("muscriptor-small", "Try a shorter recording."),
+    ("muscriptor-medium", "Retry with MuScriptor Small"),
+    ("muscriptor-large", "Retry with MuScriptor Small"),
+])
+def test_cpu_timeout_message_suggests_a_smaller_model_only_when_available(model, recovery):
+    message = _cpu_inference_timeout_message(
+        model, Audio(np.zeros(90 * 16000, dtype=np.float32), 16000))
+    assert "1.5-minute recording" in message
+    assert recovery in message
+    if model == "muscriptor-small":
+        assert "Retry with MuScriptor Small" not in message
 
 
 def test_large_checkpoint_loader_uses_pread_without_changing_weights(monkeypatch, tmp_path):

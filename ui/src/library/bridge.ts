@@ -528,7 +528,8 @@ export const host = {
   job: (id: string) => call<{ job: QueueJob }>('get_job', id).then((r) => r.job),
   jobLog: (id: string) => call<{ lines: string[] }>('get_job_log', id).then((r) => r.lines),
   cancel: (id: string) => call('cancel_job', id),
-  retry: (id: string) => call('retry_job', id),
+  retry: (id: string, transcriptionModel?: TranscriptionModel) =>
+    transcriptionModel ? call('retry_job', id, transcriptionModel) : call('retry_job', id),
   move: (id: string, order: number) => call('move_job', id, order),
   dismiss: (id: string) => call('dismiss_job', id),
   open: (id: string) => call<Opened>('open_song', id),
