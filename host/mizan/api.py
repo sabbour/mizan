@@ -313,12 +313,19 @@ class Api:
         return cloud_setup_response("build", 4, build, provider)
 
     def finish_cloud(self, image: str, use_saved_token: bool = False,
-                     provider: str | None = None) -> dict[str, Any]:
+                     provider: str | None = None, update_existing_job: bool = False,
+                     job_update_confirmation: str | None = None) -> dict[str, Any]:
         from .cloud import CloudError, finish
         from .hf_credentials import get_hf_token
         def create(pinned):
             if type(use_saved_token) is not bool:
                 raise CloudError("Approve sending the saved Hugging Face token to the Cloud provider.")
+            if type(update_existing_job) is not bool:
+                raise CloudError("Review and confirm the existing GPU Job update before applying it.")
+            if update_existing_job and (use_saved_token or pinned != "azure"):
+                raise CloudError("An existing Azure Job update cannot transfer a token or update another provider.")
+            if not update_existing_job and job_update_confirmation is not None:
+                raise CloudError("Check the existing GPU Job before using its update confirmation.")
             def token_provider():
                 if not use_saved_token:
                     return None
@@ -331,6 +338,11 @@ class Api:
                     raise CloudError(
                         "No Hugging Face token is saved. Save one in Song analysis settings, then retry.")
                 return token
+            if update_existing_job:
+                return finish(
+                    image, hf_token_provider=token_provider, provider=pinned,
+                    update_existing_job=True,
+                    job_update_confirmation=job_update_confirmation)
             return finish(image, hf_token_provider=token_provider, provider=pinned)
         return cloud_setup_response("job", 4, create, provider)
 

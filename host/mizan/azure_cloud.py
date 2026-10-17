@@ -2,6 +2,7 @@
 
 import json
 import copy
+import hashlib
 import io
 import gzip
 import ipaddress
@@ -1062,6 +1063,196 @@ def _job_image_matches(config, image, job_image):
     return True
 
 
+def _job_update_display(value):
+    if value in (None, ""):
+        return "Not set"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _job_update_plan(job_name, previous, image, environment, identity,
+                     identity_client_id, values):
+    """Build a narrowly scoped merge patch and a displayable confirmation plan."""
+    properties = previous.get("properties")
+    if not isinstance(properties, dict):
+        raise CloudError("The existing GPU Job configuration is incomplete; Mizan will not change it.")
+    configuration = properties.get("configuration")
+    if not isinstance(configuration, dict) or configuration.get("triggerType") != "Manual":
+        raise CloudError("The existing Job is not a manual Mizan GPU Job; Mizan will not change it.")
+    template = properties.get("template")
+    containers = template.get("containers") if isinstance(template, dict) else None
+    if (not isinstance(containers, list) or len(containers) != 1
+            or not isinstance(containers[0], dict)
+            or containers[0].get("name") != "mizan-worker"):
+        raise CloudError("The existing Job does not have the single Mizan worker container; "
+                         "Mizan will not change it.")
+
+    container = copy.deepcopy(containers[0])
+    repository = f"{values['registry']}.azurecr.io/mizan-aca-gpu"
+    current_image = container.get("image")
+    if (not isinstance(current_image, str)
+            or not re.fullmatch(
+                rf"{re.escape(repository)}(?:(?:@sha256:[a-f0-9]{{64}})|"
+                r":(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}))", current_image)):
+        raise CloudError("The existing Job image is not in the selected Mizan registry; "
+                         "Mizan will not change it.")
+
+    secrets = configuration.get("secrets", [])
+    env = container.get("env", [])
+    hf_secrets = [item for item in secrets if isinstance(item, dict)
+                  and item.get("name") == "hf-token"] if isinstance(secrets, list) else []
+    hf_bindings = [item for item in env if isinstance(item, dict)
+                   and item.get("name") == "HF_TOKEN"] if isinstance(env, list) else []
+    if (len(hf_secrets) != 1 or len(hf_bindings) != 1
+            or hf_bindings[0].get("secretRef") != "hf-token"
+            or hf_bindings[0].get("value")):
+        raise CloudError("The existing GPU Job is missing its required HF_TOKEN secret binding. "
+                         "Mizan will not replace its secret or transfer a token.")
+    if not isinstance(env, list) or any(not isinstance(item, dict) for item in env):
+        raise CloudError("The existing Job environment is ambiguous; Mizan will not change it.")
+
+    changes = []
+    container_changed = False
+
+    def add_change(field, current, target):
+        if current != target:
+            changes.append({
+                "field": field,
+                "current": _job_update_display(current),
+                "target": _job_update_display(target),
+            })
+
+    properties_patch = {}
+    if properties.get("environmentId") != environment:
+        add_change("Container Apps environment", properties.get("environmentId"), environment)
+        properties_patch["environmentId"] = environment
+    if properties.get("workloadProfileName") != GPU_PROFILE:
+        add_change("GPU workload profile", properties.get("workloadProfileName"), GPU_PROFILE)
+        properties_patch["workloadProfileName"] = GPU_PROFILE
+    if current_image != image:
+        add_change("Worker image (SHA-256 digest)", current_image, image)
+        container["image"] = image
+        container_changed = True
+
+    existing_resources = container.get("resources")
+    matched_resources = next(
+        (candidate for candidate in EXISTING_JOB_RESOURCES
+         if _job_resources_match(existing_resources, candidate)), None)
+    resources = matched_resources or JOB_RESOURCES
+    if not _job_resources_match(existing_resources, resources):
+        current = (f"{existing_resources.get('cpu')} vCPU / {existing_resources.get('memory')}"
+                   if isinstance(existing_resources, dict) else "Not set")
+        target = f"{resources['cpu']} vCPU / {resources['memory']}"
+        add_change("Worker CPU and memory", current, target)
+        container["resources"] = copy.deepcopy(resources)
+        container_changed = True
+
+    current_identity = previous.get("identity")
+    if current_identity is None:
+        current_identity = {}
+    if not isinstance(current_identity, dict):
+        raise CloudError("The existing Job identity is ambiguous; Mizan will not change it.")
+    assigned = current_identity.get("userAssignedIdentities", {})
+    if not isinstance(assigned, dict) or any(not isinstance(key, str) for key in assigned):
+        raise CloudError("The existing Job identity is ambiguous; Mizan will not change it.")
+    identity_type = current_identity.get("type")
+    if identity_type is not None and not isinstance(identity_type, str):
+        raise CloudError("The existing Job identity is ambiguous; Mizan will not change it.")
+    current_types = {part.strip() for part in (identity_type or "").split(",") if part.strip()}
+    if current_types - {"SystemAssigned", "UserAssigned"}:
+        raise CloudError("The existing Job identity has an unsupported type; Mizan will not change it.")
+    assigned_identity = next(
+        (name for name in assigned if name.lower() == identity.lower()), None)
+    target_types = current_types | {"UserAssigned"}
+    identity_patch = {}
+    if target_types != current_types:
+        identity_patch["type"] = ", ".join(
+            kind for kind in ("SystemAssigned", "UserAssigned") if kind in target_types)
+    if assigned_identity is None:
+        identity_patch.setdefault("userAssignedIdentities", {})[identity] = {}
+    current_identity_text = (
+        f"{', '.join(kind for kind in ('SystemAssigned', 'UserAssigned') if kind in current_types) or 'None'}; "
+        f"assigned: {', '.join(sorted(assigned, key=str.lower)) or 'none'}"
+    )
+    target_names = sorted({*assigned, identity}, key=str.lower)
+    target_identity_text = (
+        f"{', '.join(kind for kind in ('SystemAssigned', 'UserAssigned') if kind in target_types)}; "
+        f"assigned: {', '.join(target_names)}"
+    )
+    add_change("Managed identity", current_identity_text, target_identity_text)
+
+    registries = configuration.get("registries", [])
+    if not isinstance(registries, list) or any(not isinstance(item, dict) for item in registries):
+        raise CloudError("The existing Job registry settings are ambiguous; Mizan will not change them.")
+    registry_server = f"{values['registry']}.azurecr.io"
+    registry_indexes = [index for index, item in enumerate(registries)
+                        if item.get("server", "").lower() == registry_server.lower()]
+    if len(registry_indexes) > 1:
+        raise CloudError("The existing Job has duplicate settings for the selected registry; "
+                         "Mizan will not change them.")
+    registry_identity = None
+    if registry_indexes:
+        registry_identity = registries[registry_indexes[0]].get("identity")
+        if not isinstance(registry_identity, str) or registry_identity.lower() != identity.lower():
+            add_change("Registry pull identity", registry_identity, identity)
+            registries = copy.deepcopy(registries)
+            registries[registry_indexes[0]]["identity"] = identity
+    else:
+        add_change("Registry pull identity", "Not configured", identity)
+        registries = [*copy.deepcopy(registries), {"server": registry_server, "identity": identity}]
+    if registry_identity is None or registry_identity.lower() != identity.lower():
+        properties_patch.setdefault("configuration", {})["registries"] = registries
+
+    target_environment = {
+        "AZURE_STORAGE_BLOB_URL": f"https://{values['storageAccount']}.blob.core.windows.net",
+        "AZURE_STORAGE_CONTAINER": values["container"],
+        "AZURE_CLIENT_ID": identity_client_id,
+    }
+    for name, target in target_environment.items():
+        matches = [item for item in env if item.get("name") == name]
+        if len(matches) > 1:
+            raise CloudError(f"The existing Job has duplicate {name} settings; Mizan will not change it.")
+        if matches and (matches[0].get("secretRef") or matches[0].get("valueFrom")):
+            raise CloudError(f"The existing Job {name} setting is secret-backed; Mizan will not replace it.")
+        current = matches[0].get("value") if matches else None
+        if current != target:
+            add_change(name.replace("_", " "), current, target)
+            if matches:
+                matches[0]["value"] = target
+            else:
+                env.append({"name": name, "value": target})
+            container_changed = True
+
+    if container_changed:
+        properties_patch.setdefault("template", {})["containers"] = [container]
+    patch = {}
+    if properties_patch:
+        patch["properties"] = properties_patch
+    if identity_patch:
+        patch["identity"] = identity_patch
+    confirmation_id = hashlib.sha256(json.dumps({
+        "job": {key: values.get(key) for key in (*FIELDS, *SETUP_FIELDS)},
+        "changes": changes,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return {
+        "patch": patch,
+        "changes": changes,
+        "confirmationId": confirmation_id,
+        "resources": resources,
+    }
+
+
+def _require_fresh_worker_build(image):
+    try:
+        built = json.loads(_setting("cloud_built_image") or "{}")
+    except (TypeError, ValueError) as exc:
+        raise CloudError("Build the GPU worker in the selected registry before updating the Job.") from exc
+    if (not isinstance(built, dict) or built.get("image") != image
+            or built.get("sourceHash") != _worker_source()[1]):
+        raise CloudError("Build the current GPU worker in the selected registry before updating the Job.")
+
+
 def list_subscriptions():
     """List subscriptions visible to the currently signed-in desktop user."""
     _progress_step("authentication", 0, "Checking the signed-in Azure identity.")
@@ -1576,8 +1767,6 @@ def build_cloud_image():
         raise CloudError("Destination ACR is missing; re-run Prepare.")
     _setting("processing_mode", "local")
     _setting("cloud_built_image", "")
-    _setting("cloud_job_created", "")
-    _setting("cloud_job_resources", "")
     _setting("cloud_runtime_verified", "")
     _progress_step("upload", 1, "Requesting an ACR source-upload location.")
     upload = azure.request(f"{registry}/listBuildSourceUploadUrl", "2019-04-01", "POST")
@@ -1648,8 +1837,13 @@ def build_cloud_image():
             "sourceHash": contract}
 
 
-def finish(image, hf_token=None, *, hf_token_provider=None):
+def finish(image, hf_token=None, *, hf_token_provider=None, update_existing_job=False,
+           job_update_confirmation=None):
     """Verify or create a dormant manual Job without persisting its one-time secret."""
+    if type(update_existing_job) is not bool:
+        raise CloudError("Review and confirm the existing GPU Job update before applying it.")
+    if job_update_confirmation is not None and not isinstance(job_update_confirmation, str):
+        raise CloudError("The existing GPU Job update confirmation is invalid; check the Job again.")
     _progress_step("preflight", 0, "Checking the pinned image and prepared Azure resources.")
     saved = _setting("cloud_prepared")
     if not saved:
@@ -1659,7 +1853,7 @@ def finish(image, hf_token=None, *, hf_token_provider=None):
     if not configured.get("userObjectId") or any(
             configured[key] != values[key] for key in (*FIELDS, *SETUP_FIELDS)):
         raise CloudError("Azure identity or configuration changed since provisioning; reconnect and prepare again.")
-    _image_digest(configured, image)
+    digest = _image_digest(configured, image)
     resources = JOB_RESOURCES
     azure = _Azure(configured)
     environment = _resource(azure, "Microsoft.App", "managedEnvironments", values["environment"])
@@ -1675,34 +1869,51 @@ def finish(image, hf_token=None, *, hf_token_provider=None):
     job = _resource(azure, "Microsoft.App", "jobs", values["jobName"])
     previous = azure.request(job, "2024-03-01")
     if previous:
-        props = previous.get("properties", {})
-        containers = props.get("template", {}).get("containers", [])
-        existing_resources = containers[0].get("resources") if len(containers) == 1 else None
-        matched_resources = next(
-            (candidate for candidate in EXISTING_JOB_RESOURCES
-             if _job_resources_match(existing_resources, candidate)), None)
-        if (props.get("environmentId", "").lower() != environment.lower()
-                or props.get("workloadProfileName") != GPU_PROFILE
-                or props.get("configuration", {}).get("triggerType") != "Manual"
-                or len(containers) != 1
-                or not _job_image_matches(configured, image, containers[0].get("image"))
-                or matched_resources is None
-                or identity.lower() not in {key.lower() for key in previous.get(
-                    "identity", {}).get("userAssignedIdentities", {})}):
-            raise CloudError("The existing GPU Job does not match the pinned image, environment, "
-                             "profile, resources or identity. Mizan will not change it.")
-        existing = containers[0].get("env", [])
         if hf_token not in (None, ""):
             raise CloudError("Mizan will not transfer a token to an existing GPU Job.")
-        if (not any(
-                secret.get("name") == "hf-token"
-                for secret in props.get("configuration", {}).get("secrets", []))
-                or not any(env.get("name") == "HF_TOKEN" and env.get("secretRef") == "hf-token"
-                           and not env.get("value") for env in existing)):
-            raise CloudError("The existing GPU Job is missing its required HF_TOKEN secret binding. "
-                             "Mizan will not replace its secret or transfer a token.")
-        resources = matched_resources
+        plan = _job_update_plan(
+            values["jobName"], previous, image, environment, identity,
+            ident["properties"]["clientId"], values)
+        if plan["changes"]:
+            _require_fresh_worker_build(image)
+            if not update_existing_job:
+                _registry_manifest(configured, digest, digest)
+                result = status()
+                return {
+                    **result,
+                    "requiresJobUpdateConsent": True,
+                    "jobUpdate": {
+                        "confirmationId": plan["confirmationId"],
+                        "changes": plan["changes"],
+                    },
+                    "next": "Review the listed changes and approve updating this Mizan GPU Job. "
+                            "Its Hugging Face secret and other Azure resources will remain unchanged.",
+                }
+            if job_update_confirmation != plan["confirmationId"]:
+                raise CloudError("The GPU Job changed after review or its update approval expired. "
+                                 "Check the existing Job again before approving another update.")
+            _registry_manifest(configured, digest, digest)
+            _progress_step("job", 2, "Updating only the approved GPU Job settings.")
+            azure.request(job, "2024-03-01", "PATCH", plan["patch"])
+            updated = azure.request(job, "2024-03-01")
+            if not updated:
+                raise CloudError("Azure accepted the GPU Job update but the Job is not visible yet; "
+                                 "check Azure Portal before retrying.")
+            verified_plan = _job_update_plan(
+                values["jobName"], updated, image, environment, identity,
+                ident["properties"]["clientId"], values)
+            if verified_plan["changes"]:
+                raise CloudError("Azure accepted the GPU Job update, but its configuration does not "
+                                 "match the approved values. Check the Job in Azure before retrying.")
+            resources = verified_plan["resources"]
+        else:
+            if update_existing_job:
+                raise CloudError("The GPU Job no longer needs the reviewed update. Check it again.")
+            resources = plan["resources"]
     else:
+        if update_existing_job or job_update_confirmation is not None:
+            raise CloudError("No existing GPU Job is available for the reviewed update. "
+                             "Check the Azure resources again.")
         _setting("cloud_job_created", "")
         _setting("cloud_job_resources", "")
         if hf_token is None and hf_token_provider is not None:
@@ -1953,6 +2164,10 @@ def status(*, check_connection=True, target=None):
             worker_image = (f"{configured_registry}.azurecr.io/mizan-aca-gpu@"
                             f"{SUPPORTED_WORKER_DIGEST}")
     digest = worker_image.rsplit("@", 1)[-1] if worker_image else None
+    if image and worker_image and image != worker_image:
+        configured = False
+        issue = ("A newer worker image is built. Check the existing GPU Job to review and "
+                 "approve its update before using Cloud.")
     if not digest and _setting("cloud_reuse") == "yes":
         digest = SUPPORTED_WORKER_DIGEST
     result = {"ok": True, "provider": "azure", "providerName": "Azure",
