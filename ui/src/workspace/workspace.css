@@ -11,20 +11,65 @@
   background: var(--accent-wash);
 }
 
-.analysis-notice {
+/* Saved-song notices and the playability note share one row of the header; each is a single line, wrapping only when the
+   window is narrow, so the score, tab and 3D guide keep the height. Longer explanations open over the practice view. */
+.ws-notices {
+  position: relative;
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
+  gap: 6px 16px;
+  min-width: 0;
+}
+.ws-notices > .lesson-panel { flex: 1 1 100%; }
+
+.analysis-notice {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 6px 4px 12px;
   background: var(--accent-wash);
   border: 1px solid var(--line);
+  border-radius: 6px;
   font-size: 13px;
+  line-height: 1.35;
 }
+.analysis-notice-item { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; }
+.analysis-notice-item > strong { min-width: 0; overflow-wrap: anywhere; }
+.analysis-notice-item .btn { flex-shrink: 0; padding-block: 3px; }
+.analysis-notice-error { flex-basis: 100%; margin: 0; color: var(--danger); overflow-wrap: anywhere; }
 
-.analysis-notice p { margin: 4px 0 0; }
-.analysis-notice button { flex-shrink: 0; }
+/* The details sit in the flow as a link-like summary; the panel is anchored to the notice row, not the summary, so it
+   never runs off the right edge. */
+.notice-details > summary { width: fit-content; color: var(--accent-deep); font-weight: 400; white-space: nowrap; cursor: pointer; }
+.notice-details[open] > summary { font-weight: 600; }
+.notice-details-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: min(72ch, 100%);
+  max-height: min(40vh, 280px);
+  overflow: auto;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.notice-details-panel p { margin: 0; }
+.notice-details-panel p + p { margin-top: 6px; }
 .vocal-note { grid-column: 1 / -1; margin: -10px 0 0; padding-bottom: 2px; font-size: 12px; color: var(--ink-2); }
 .ws[data-instrument="vocals"] .guide { position: sticky; bottom: 0; width: 100%; flex-shrink: 0; background: white; height: 160px; border-top: 1px solid var(--line); }
 .ws[data-instrument="vocals"] .guide-canvas { width: 100%; max-width: 1320px; height: 125px; display: block; margin: 0 auto; }
@@ -235,7 +280,7 @@
   /* Title, position, then every view and track control in one wrapping column: the title never drops below a readable width. */
   grid-template-columns: minmax(220px, 1fr) auto auto;
   align-items: center;
-  gap: 24px;
+  gap: 8px 24px;
   padding: 10px 24px;
   border-bottom: 1px solid var(--line);
 }
@@ -671,22 +716,21 @@
   accent-color: var(--accent-deep);
 }
 
-/* Playability note: what the repair changed, quiet and in the flow above the practice view. */
+/* Playability note: what the repair changed, quiet and in the notice row above the practice view. */
 .playability-note {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
-  flex: 1 0 100%;
-  grid-column: 1 / -1;
+  flex: 1 1 320px;
   min-width: 0;
-  padding: 4px 0 0;
+  padding: 0;
   background: transparent;
   color: var(--ink-2);
   font-size: 12.5px;
   line-height: 1.4;
 }
-.playability-lines { margin: 0; }
+.playability-lines { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .playability-switch { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
 .playability-switch button {
   padding: 2px 9px;
@@ -697,9 +741,9 @@
   cursor: pointer;
 }
 .playability-switch button[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent-deep); font-weight: 600; }
-.playability-where { flex-basis: 100%; }
-.playability-where summary { cursor: pointer; color: var(--accent-deep); }
-.playability-where ul { margin: 4px 0 0; padding: 0; list-style: none; max-height: 140px; overflow: auto; }
+.playability-where ul { margin: 0; padding: 0; list-style: none; }
+.playability-where li + li { margin-top: 2px; }
+.playability-where .notice-details-panel p { margin-top: 6px; color: var(--ink-2); }
 .playability-where li button { border: 0; background: none; padding: 0; color: var(--accent-deep); font: inherit; text-decoration: underline; cursor: pointer; }
 .fretted-fret.is-adjusted { text-decoration: underline dotted 2px; text-underline-offset: 3px; }
 .fretted-unplayable-mark { fill: var(--danger); font-size: 14px; font-weight: 700; }
@@ -1519,7 +1563,7 @@
 
 @media (max-width: 1180px) {
   .ws-head {
-    gap: 18px;
+    column-gap: 18px;
   }
 
   .ws-draft {
@@ -1619,7 +1663,7 @@
   .ws-head { display: flex; flex-wrap: wrap; gap: 8px 16px; }
   .ws-title { flex: 1 1 100%; }
   .ws-controls { flex: 1 1 auto; justify-content: flex-start; }
-  .lesson-panel { flex: 1 1 100%; min-width: 0; }
+  .lesson-panel, .ws-notices { flex: 1 1 100%; min-width: 0; }
 }
 @media (max-width: 760px) {
   .lesson-panel { flex-direction: column; }
