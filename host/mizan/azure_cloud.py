@@ -1175,7 +1175,9 @@ def _job_update_plan(job_name, previous, image, environment, identity,
         f"{', '.join(kind for kind in ('SystemAssigned', 'UserAssigned') if kind in current_types) or 'None'}; "
         f"assigned: {', '.join(sorted(assigned, key=str.lower)) or 'none'}"
     )
-    target_names = sorted({*assigned, identity}, key=str.lower)
+    target_names = sorted(
+        assigned if assigned_identity is not None else {*assigned, identity},
+        key=str.lower)
     target_identity_text = (
         f"{', '.join(kind for kind in ('SystemAssigned', 'UserAssigned') if kind in target_types)}; "
         f"assigned: {', '.join(target_names)}"
