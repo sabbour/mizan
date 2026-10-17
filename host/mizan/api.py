@@ -33,6 +33,7 @@ FIXES = {
     "invalid_url": "Paste a public youtube.com or youtu.be video link.",
     "video_unavailable": "Check the video is public, or sign in to YouTube in your browser.",
     "download_failed": "Check your connection and try the link again.",
+    "youtube_extraction_failed": "Update Mizan and retry. If the problem continues, try again later.",
     "unsupported_media": "Try a finished, public YouTube video with audio.",
     "ffmpeg_unavailable": "Download FFmpeg, extract it, then choose bin\\ffmpeg.exe in Song analysis settings.",
     "ffmpeg_validation_timeout": (

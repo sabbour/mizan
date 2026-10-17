@@ -6,12 +6,15 @@ namespace Mizan.Shell;
 
 internal sealed class WorkerProcess : IAsyncDisposable
 {
+    private readonly string _dataDirectory;
     private readonly HashSet<string> _pending = [];
     private readonly Lock _lock = new();
     private readonly SemaphoreSlim _inputLock = new(1, 1);
     private Process? _process;
     private bool _stopping;
     private int _restarts;
+
+    public WorkerProcess(string dataDirectory) => _dataDirectory = dataDirectory;
 
     public event Action<string>? MessageReceived;
     public event Action<string>? FatalError;
@@ -58,6 +61,7 @@ internal sealed class WorkerProcess : IAsyncDisposable
             WorkingDirectory = AppContext.BaseDirectory,
         };
         start.Environment["PYTHONUTF8"] = "1";
+        start.Environment["MIZAN_HOME"] = _dataDirectory;
 
         var packagedRoot = Path.Combine(AppContext.BaseDirectory, "Python");
         if (Directory.Exists(packagedRoot))
