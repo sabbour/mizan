@@ -1,5 +1,6 @@
 import type { Engine } from './engine'
 import { barAt, barStart } from './meter'
+import { NoticeDetails } from './NoticeDetails'
 import { playabilityNotice, type PlayabilityIssue, type PlayabilitySummary } from './playability'
 import type { Song } from './song'
 
@@ -37,8 +38,7 @@ export function PlayabilityNote({ summary, song, engine, asTranscribed, onToggle
         <button type="button" aria-pressed={!asTranscribed} onClick={() => onToggle(false)}>Playable</button>
         <button type="button" aria-pressed={asTranscribed} onClick={() => onToggle(true)}>As transcribed</button>
       </div>
-      <details className="playability-where">
-        <summary>Show where</summary>
+      <NoticeDetails className="playability-where" summary="Show where">
         <ul>
           {summary.issues.slice(0, MAX_LISTED).map((issue) =>
             <li key={`${issue.kind}:${issue.beat}`} data-kind={issue.kind}>
@@ -47,7 +47,7 @@ export function PlayabilityNote({ summary, song, engine, asTranscribed, onToggle
             </li>)}
         </ul>
         {summary.issues.length > MAX_LISTED && <p>{summary.issues.length - MAX_LISTED} more not listed.</p>}
-      </details>
+      </NoticeDetails>
     </div>
   )
 }
