@@ -1,5 +1,5 @@
 import { buildSong } from '../workspace/song'
-import type { CloudProvider, Entry, FfmpegStatus, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel } from './bridge'
+import type { CloudProvider, Entry, FfmpegStatus, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel, YouTubeAuthStatus } from './bridge'
 import { foldSearchText } from './searchText'
 import { gmInstrumentName } from '../workspace/gmInstruments'
 
@@ -222,6 +222,7 @@ let mockHfConfigured = false
 let mockModel: TranscriptionModel = 'muscriptor-small'
 let mockCloudProvider: CloudProvider = 'azure'
 let mockFfmpegPath: string | null = null
+let mockYoutubeAuth: YouTubeAuthStatus = { signedIn: false, source: null }
 const mockFfmpegStatus = (): FfmpegStatus => ({
   configuredPath: mockFfmpegPath,
   effectivePath: mockFfmpegPath ?? 'ffmpeg',
@@ -317,6 +318,24 @@ export const mockHost = {
   browse_ffmpeg_path: () => fail(
     'file_picker_unavailable',
     'File browsing is available in the Windows app. Enter the full path to ffmpeg.exe here.',
+  ),
+  youtube_auth_status: () => ok(mockYoutubeAuth),
+  youtube_sign_in: () => fail(
+    'youtube_sign_in_unavailable',
+    'YouTube sign-in in a browser window is available only in the Windows app. You can import cookies.txt instead.',
+  ),
+  youtube_sign_out() {
+    mockYoutubeAuth = { signedIn: false, source: null }
+    return ok(mockYoutubeAuth)
+  },
+  import_youtube_cookies(path: string) {
+    if (!path.trim()) return fail('invalid_youtube_cookies', 'Choose a cookies.txt file.')
+    mockYoutubeAuth = { signedIn: true, source: 'file' }
+    return ok(mockYoutubeAuth)
+  },
+  browse_youtube_cookies: () => fail(
+    'file_picker_unavailable',
+    'File browsing is available in the Windows app. Enter the full path to cookies.txt here.',
   ),
   hf_token_status: () => ok({ configured: mockHfConfigured }),
   set_hf_token(token: string) {

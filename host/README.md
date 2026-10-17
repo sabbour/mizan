@@ -18,14 +18,28 @@ $env:MIZAN_DEV_URL = "http://localhost:5173"
 host\.venv\Scripts\python -m mizan
 ```
 
-Install FFmpeg separately for YouTube audio.
-Open the [official FFmpeg download page](https://ffmpeg.org/download.html#build-windows).
-Choose a Windows build from one of the providers listed there.
-Download a ZIP package.
-Extract the package, then browse for `bin\ffmpeg.exe` in Song analysis settings
+Install FFmpeg separately for YouTube audio. The easiest way is WinGet:
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Mizan finds the WinGet install automatically; select **Check again** in Song
+analysis settings. To install it manually instead, open the
+[official FFmpeg download page](https://ffmpeg.org/download.html#build-windows),
+download a Windows ZIP build from a listed provider, and extract it.
+Then browse for `bin\ffmpeg.exe` in Song analysis settings
 or enter its full path. The settings field shows the configured path or the
 path found on this PC. Select **Save path** to validate and save a new path.
 Mizan uses this path on this PC. It does not set a path on a cloud worker.
+
+If YouTube asks yt-dlp to confirm you are not a bot, sign in from
+**Song analysis settings → YouTube sign-in** in the Windows app. If Google sign-in
+is unavailable in the in-app window, import a Netscape `cookies.txt` exported
+from a private browser window with a cookies.txt extension. The file is stored
+locally in Mizan's data directory; **Sign out** deletes it and clears the
+in-app YouTube profile. The sign-in window closes automatically after an
+active YouTube session is saved.
 
 The FFmpeg project provides source code.
 The listed providers supply the Windows executables.

@@ -5,6 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from .errors import PopularChartUnavailable
+from .youtube_auth import youtube_cookies_for_operation
 
 logger = logging.getLogger(__name__)
 
@@ -116,50 +117,64 @@ def _fetch_playlist(section: dict) -> dict:
     from yt_dlp import YoutubeDL
     from yt_dlp.utils import DownloadError
 
-    try:
-        with YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "extract_flat": "in_playlist",
-            "playlistend": POPULAR_PLAYLIST_LIMIT,
-            "socket_timeout": 8,
-            "retries": 0,
-            "extractor_retries": 0,
-            "cachedir": False,
-            "cookiefile": None,
-            "usenetrc": False,
-        }) as youtube:
-            payload = youtube.extract_info(section["sourceUrl"], download=False)
-        parsed = parse_playlist_response(
-            payload,
-            playlist_id=section["playlist_id"],
-            title=section["playlist_title"],
-            publisher=section["publisher"],
-            ranked=section["kind"] == "chart",
-        )
-        return {
-            **section,
-            "status": "available",
-            **parsed,
-        }
-    except (DownloadError, OSError, TimeoutError, PopularChartUnavailable) as exc:
-        logger.warning("YouTube Music playlist %s could not load: %s", section["id"], exc)
-        message = "YouTube Music could not load this playlist. Retry or search for a song instead."
-        if isinstance(exc, DownloadError) and "not a bot" in str(exc).lower():
-            message = (
-                "YouTube is asking Mizan to confirm it is not a bot. "
-                "Retry later or search for a song instead. "
-                "Your browser's YouTube sign-in is not shared with Mizan."
+    with youtube_cookies_for_operation() as cookies:
+        try:
+            with YoutubeDL({
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "extract_flat": "in_playlist",
+                "playlistend": POPULAR_PLAYLIST_LIMIT,
+                "socket_timeout": 8,
+                "retries": 0,
+                "extractor_retries": 0,
+                "cachedir": False,
+                "cookiefile": str(cookies) if cookies else None,
+                "usenetrc": False,
+            }) as youtube:
+                payload = youtube.extract_info(section["sourceUrl"], download=False)
+            parsed = parse_playlist_response(
+                payload,
+                playlist_id=section["playlist_id"],
+                title=section["playlist_title"],
+                publisher=section["publisher"],
+                ranked=section["kind"] == "chart",
             )
-        return {
-            **section,
-            "status": "unavailable",
-            "message": message,
-            "rows": [],
-            "description": "",
-            "chartDate": "",
-        }
+            return {
+                **section,
+                "status": "available",
+                **parsed,
+            }
+        except (DownloadError, OSError, TimeoutError, PopularChartUnavailable) as exc:
+            requires_auth = isinstance(exc, DownloadError) and any(
+                phrase in str(exc).lower() for phrase in (
+                    "sign in to confirm",
+                    "confirm you're not a bot",
+                    "confirm you are not a bot",
+                    "not a bot",
+                    "login required",
+                    "authentication required",
+                )
+            )
+            logger.warning(
+                "YouTube Music playlist fetch failed for %s (%s).",
+                section["id"],
+                "sign-in required" if requires_auth else type(exc).__name__,
+            )
+            message = (
+                "YouTube Music requires sign-in to load this playlist."
+                if requires_auth
+                else "YouTube Music could not load this playlist. Retry or search for a song instead."
+            )
+            return {
+                **section,
+                "status": "unavailable",
+                "message": message,
+                "requiresAuth": requires_auth,
+                "rows": [],
+                "description": "",
+                "chartDate": "",
+            }
 
 
 def fetch_popular_songs() -> dict:

@@ -1,13 +1,16 @@
 import json
+import logging
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from yt_dlp.utils import DownloadError
 
 from mizan import popular
 from mizan.api import Api, POPULAR_SONGS_CACHE_SECONDS
 from mizan.errors import PopularChartUnavailable
 from mizan.jobs import JobRunner, JobStore
+from mizan.youtube_auth import youtube_cookies_path, youtube_sign_out
 
 
 FIXTURE = Path(__file__).parent / "data" / "youtube-music-playlists.json"
@@ -160,7 +163,6 @@ def test_playlist_fetch_uses_metadata_without_extracting_video_playback(monkeypa
 
 
 @pytest.mark.parametrize("error, expected", [
-    ("Sign in to confirm you're not a bot", "not a bot"),
     ("Network offline", "Retry or search for a song"),
 ])
 def test_playlist_failure_is_logged_and_explained(monkeypatch, caplog, error, expected):
@@ -174,10 +176,10 @@ def test_playlist_failure_is_logged_and_explained(monkeypatch, caplog, error, ex
 
     assert result["status"] == "unavailable"
     assert result["rows"] == []
+    assert result["requiresAuth"] is False
     assert expected in result["message"]
-    assert "hit-list" in caplog.text and error in caplog.text
-    if "not a bot" in error:
-        assert "browser's YouTube sign-in is not shared" in result["message"]
+    assert "hit-list" in caplog.text and "DownloadError" in caplog.text
+    assert error not in caplog.text
 
 
 def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
@@ -228,7 +230,8 @@ def test_popular_feed_cache_and_stale_snapshot(monkeypatch):
 def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
-    monkeypatch.setattr("mizan.api.fetch_popular_songs", lambda: {
+    fetched = []
+    failed_feed = {
         "title": "YouTube Music",
         "sections": [
             {"id": "hit-list", "status": "unavailable", "rows": []},
@@ -236,15 +239,16 @@ def test_all_playlist_failures_are_visible_without_a_cached_success(monkeypatch)
             {"id": "classic-rock-greatest-hits", "status": "unavailable", "rows": []},
             {"id": "all-time-alt", "status": "unavailable", "rows": []},
         ],
-    })
+    }
+    monkeypatch.setattr("mizan.api.fetch_popular_songs", lambda: fetched.append(1) or failed_feed)
     try:
-        result = bridge.popular_songs()
-        assert result["ok"]
-        assert [section["status"] for section in result["sections"]] == ["unavailable"] * 4
+        first = bridge.popular_songs()
+        second = bridge.popular_songs()
+        assert first["ok"] and second["ok"]
+        assert [section["status"] for section in first["sections"]] == ["unavailable"] * 4
+        assert len(fetched) == 2
     finally:
         runner.close()
-
-
 def test_failed_initial_playlist_load_is_not_cached(monkeypatch):
     runner = JobRunner(JobStore(), lambda *_args: None)
     bridge = Api(runner)
@@ -271,3 +275,69 @@ def test_failed_initial_playlist_load_is_not_cached(monkeypatch):
         assert len(attempts) == 2
     finally:
         runner.close()
+
+
+def test_playlist_fetch_uses_saved_youtube_cookies_and_logs_failures(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("MIZAN_HOME", str(tmp_path / "mizan"))
+    cookies = youtube_cookies_path()
+    cookies.parent.mkdir(parents=True, exist_ok=True)
+    cookies.write_text(
+        "# Netscape HTTP Cookie File\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSAPISID\tsynthetic-cookie-value\n",
+        encoding="utf-8",
+    )
+    options_seen = []
+    operation_cookie_files = []
+
+    class Youtube:
+        def __init__(self, options):
+            options_seen.append(options)
+            operation_cookie_files.append(Path(options["cookiefile"]))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            operation_cookie_files[-1].write_text(
+                "# yt-dlp simulated cookie-jar writeback\n", encoding="utf-8")
+            youtube_sign_out()
+
+        def extract_info(self, *_args, **_kwargs):
+            raise DownloadError("temporary network failure")
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", Youtube)
+
+    with caplog.at_level(logging.WARNING, logger="mizan.popular"):
+        result = popular._fetch_playlist(popular._PLAYLISTS[0])
+
+    assert operation_cookie_files[0] != cookies
+    assert options_seen[0]["cookiefile"] == str(operation_cookie_files[0])
+    assert not operation_cookie_files[0].exists()
+    assert not cookies.exists()
+    assert options_seen[0]["extract_flat"] == "in_playlist"
+    assert result["status"] == "unavailable"
+    assert result["requiresAuth"] is False
+    assert any("DownloadError" in record.getMessage() for record in caplog.records)
+
+
+def test_playlist_auth_failure_is_actionable_without_exposing_error(monkeypatch, tmp_path):
+    class Youtube:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def extract_info(self, *_args, **_kwargs):
+            raise DownloadError("Sign in to confirm you're not a bot")
+
+    monkeypatch.setenv("MIZAN_HOME", str(tmp_path / "empty-mizan"))
+    monkeypatch.setattr("yt_dlp.YoutubeDL", Youtube)
+
+    result = popular._fetch_playlist(popular._PLAYLISTS[0])
+
+    assert result["requiresAuth"] is True
+    assert result["message"] == "YouTube Music requires sign-in to load this playlist."

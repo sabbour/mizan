@@ -46,6 +46,16 @@ class DownloadFailed(MizanError):
     message = "The video could not be downloaded."
 
 
+class YoutubeSignInRequired(DownloadFailed):
+    code = "youtube_sign_in_required"
+    message = "YouTube requires sign-in to continue."
+
+
+class InvalidYoutubeCookies(MizanError):
+    code = "invalid_youtube_cookies"
+    message = "Choose a valid Netscape cookies.txt file containing youtube.com cookies."
+
+
 class UnsupportedMedia(MizanError):
     code = "unsupported_media"
     message = "This video's media format is not supported."
