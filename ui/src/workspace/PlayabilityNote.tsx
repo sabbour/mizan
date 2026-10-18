@@ -17,8 +17,9 @@ const MAX_LISTED = 40
 const describe = (issue: PlayabilityIssue, instrument: PlayabilitySummary['instrument']) => {
   const notes = `${issue.count} note${issue.count === 1 ? '' : 's'}`
   if (issue.kind === 'unplayable') return `${notes} can't be played as written`
+  if (issue.kind === 'octave') return `${notes} shifted by an octave to preserve the chord`
   if (issue.kind === 'jump') return 'quick jump between hand positions'
-  return instrument === 'piano' ? `${notes} moved to the other hand` : `${notes} moved to another string or fret`
+  return instrument === 'piano' ? `${notes} moved to the other hand` : `${notes} repositioned on the fretboard`
 }
 
 /** A small, non-blocking note about what the playability repair changed, with a way to see where and to compare. */

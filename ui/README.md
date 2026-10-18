@@ -59,6 +59,31 @@ With Vite running, check job audio and the removed Creative group:
 node tests\playback.mjs --job-preview
 ```
 
+## Playable transcription parts
+
+Piano practice splits over-wide parts between two hands. Guitar and bass practice choose
+positions that fit the strings, frets, and hand reach. When a fretted chord is still too
+wide, Mizan can shift a recognized chord tone by one octave before leaving a note out;
+the chord's pitch classes are preserved, and non-chord notes are reduced before chord
+tones when the instrument still lacks strings. The original register remains available
+with **As transcribed**. The selected synth part follows the repaired pitches while
+**Playable** is active; recording stems and the saved analysis are unchanged.
+
+Run the focused repair tests and compare the same local analyses before and after changes:
+
+```powershell
+node tests\playability.mjs
+node tests\playability-songs.mjs "C:\path\to\song-cache"
+```
+
+For a before/after comparison, run the report from each revision against the same analysis
+folder. It distinguishes moments that were unplayable at their original positions
+(`flagged`) from moments still missing notes after repair (`unplayable`), and reports
+repositioned notes and octave folds separately. For drums, it flags moments requiring more
+than two hand strokes, then counts moments with unassigned hand strokes after sticking
+suggestions. Two cymbal strokes can use both hands; moments requiring more than two hand
+strokes remain unsuggested.
+
 ## Guitar and bass practice
 
 Course includes 85 catalog lessons each for guitar and four-string bass.
