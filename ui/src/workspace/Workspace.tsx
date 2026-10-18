@@ -268,6 +268,16 @@ export function Workspace({
     engine.selectPart(track?.id ?? null)
   }, [engine, track?.id])
   useEffect(() => {
+    if (asTranscribed || !playableTarget || !track) {
+      engine.setPlayablePart(null)
+      return
+    }
+    const notes = track.instrument === 'other'
+      ? practiceInstrument === 'piano' ? playable.song.piano : playable.song.instrumentNotes?.[track.id]
+      : playable.song.piano
+    engine.setPlayablePart(notes ? { trackId: track.id, notes } : null)
+  }, [engine, track, playableTarget, practiceInstrument, playable, asTranscribed])
+  useEffect(() => {
     engine.countIn = countIn
   }, [engine, countIn])
   useEffect(() => {

@@ -36,7 +36,7 @@ export type PianoNote = {
   finger?: 1 | 2 | 3 | 4 | 5
   /** How an authored lesson spells the note, e.g. `E#` in F# major or `Cb` in Eb minor; otherwise it is spelled from the key. */
   spell?: string
-  /** Practice only, set by the playability repair: the note was moved to the other hand or to another string and fret. */
+  /** Practice only, set by the playability repair when a note is reassigned or folded by an octave. */
   adjusted?: boolean
   /** Practice only: this moment cannot be played as written, so the note is marked instead of placed. */
   notPlayable?: boolean
