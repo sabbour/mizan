@@ -421,7 +421,9 @@ export function DrumKitView({ song, engine, sticking, style, onStyle }: Props) {
         <span className="practice-note">
           {sticking && (sticking.source === 'lesson'
             ? 'Lesson sticking: each note glows in its hand\'s colour as it approaches and when played, from the player\'s side. '
-            : 'Suggested sticking, right-hand lead: a guide from the hits, not from the recording. ')}
+            : sticking.source === 'transcribed'
+              ? 'As transcribed: no hand assignments are applied. '
+              : 'Suggested sticking, right-hand lead: a guide from the hits, not from the recording. ')}
           {!sticking && 'Each piece glows in its own colour as its note approaches and when played. '}
           {!handsOn ? '' : handsFailed ? 'The hands could not be loaded, so only the kit is shown. ' : 'Hands show a suggested motion, not a recording. '}
           {song.source === 'course' ? 'Hits light briefly. Every stroke in the lesson names its kit piece and hi-hat state' : <>

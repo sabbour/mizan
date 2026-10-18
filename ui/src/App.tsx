@@ -1,4 +1,4 @@
-import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
 import { AnalysisNotice } from './workspace/AnalysisNotice'
@@ -7,6 +7,7 @@ import { JobPanel } from './library/JobPanel'
 import { Credits } from './Credits'
 import { host, type Entry, type Opened } from './library/bridge'
 import { fromHost } from './library/adapt'
+import { preparePlayableSong } from './workspace/playability'
 import { useQueue } from './library/useQueue'
 import { activeAnalysis, analysisProgress, decodingErrorHeadline, jobTitle } from './library/format'
 import { lessonById, lessonNote, lessonSong } from './course/curriculum'
@@ -68,22 +69,63 @@ export default function App() {
   const [openRevision, setOpenRevision] = useState(0)
   const [reprocessing, setReprocessing] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [playabilityError, setPlayabilityError] = useState<string | null>(null)
   const queue = useQueue()
   const clearFinished = queue.clearFinished
 
+  const prepareOpened = useCallback(async (id: string, opened: Opened): Promise<Opened> => {
+    const prepared = preparePlayableSong(fromHost(opened.song))
+    if (prepared.request) {
+      try {
+        await host.savePlayability(id, prepared.request)
+        setPlayabilityError(null)
+      } catch (error) {
+        setPlayabilityError(error instanceof Error
+          ? `The playable version was prepared but could not be saved: ${error.message}`
+          : 'The playable version was prepared but could not be saved.')
+      }
+    }
+    return { ...opened, song: prepared.song }
+  }, [])
+  const pendingOpen = useRef(new Map<string, Promise<Opened>>())
+  const openPrepared = useCallback((id: string) => {
+    const existing = pendingOpen.current.get(id)
+    if (existing) return existing
+    const pending = host.open(id).then((opened) => prepareOpened(id, opened))
+    pendingOpen.current.set(id, pending)
+    void pending.finally(() => {
+      if (pendingOpen.current.get(id) === pending) pendingOpen.current.delete(id)
+    }).catch(() => {})
+    return pending
+  }, [prepareOpened])
+
   const open = useCallback(async (id: string) => {
     setOpenError(null)
+    setPlayabilityError(null)
     try {
-      const opened = await host.open(id)
+      const opened = await openPrepared(id)
       clearFinished()
       setAnalysisError(null)
       setOpenRevision((revision) => revision + 1)
-      setView({ kind: 'song', opened: { ...opened, song: fromHost(opened.song) } })
+      setView({ kind: 'song', opened })
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'That song could not be opened.')
       setView({ kind: 'library' })
     }
-  }, [clearFinished])
+  }, [clearFinished, openPrepared])
+
+  const completedJob = queue.finished?.kind === 'transcribe' && queue.finished.status === 'done'
+    ? queue.finished : null
+  const preparedCompletion = useRef<string | null>(null)
+  useEffect(() => {
+    if (!completedJob?.songId || preparedCompletion.current === completedJob.id) return
+    preparedCompletion.current = completedJob.id
+    void openPrepared(completedJob.songId).catch((error) => {
+      setPlayabilityError(error instanceof Error
+        ? `The completed transcription could not be optimized: ${error.message}`
+        : 'The completed transcription could not be optimized.')
+    })
+  }, [completedJob, openPrepared])
 
   const back = useCallback(() => {
     setView({ kind: 'library' })
@@ -187,13 +229,14 @@ export default function App() {
           onPosition={(p) => void host.savePosition(opened.entry.id, p)}
           onDeleteTrack={async (trackId) => {
             const updated = await host.deleteScoreTrack(opened.entry.id, trackId)
+            const prepared = await prepareOpened(opened.entry.id, updated)
             setOpenRevision((revision) => revision + 1)
-            setView({ kind: 'song', opened: { ...updated, song: fromHost(updated.song) } })
+            setView({ kind: 'song', opened: prepared })
           }}
           onSaveInstrument={async (trackId, gmProgram) => {
             const songId = opened.entry.id
             const updated = await host.changeScoreTrackInstrument(songId, trackId, gmProgram)
-            const refreshed = { ...updated, song: fromHost(updated.song) }
+            const refreshed = await prepareOpened(songId, updated)
             setView((current) => current.kind === 'song' && current.opened.entry.id === songId
               ? { kind: 'song', opened: refreshed } : current)
           }}
@@ -235,6 +278,14 @@ export default function App() {
         <div className="notice" role="alert">
           <p>{openError}</p>
           <button className="icon-btn" aria-label="Dismiss" onClick={() => setOpenError(null)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+      {playabilityError && (
+        <div className="notice" role="alert">
+          <p>{playabilityError}</p>
+          <button className="icon-btn" aria-label="Dismiss" onClick={() => setPlayabilityError(null)}>
             <X size={16} />
           </button>
         </div>

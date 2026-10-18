@@ -2,6 +2,7 @@ import { buildSong } from '../workspace/song'
 import type { CloudProvider, Entry, FfmpegStatus, Folder, MidiSearchResult, ModelDownloads, PopularChart, QueueJob, Stage, Stem, TranscriptionModel, YouTubeAuthStatus } from './bridge'
 import { foldSearchText } from './searchText'
 import { gmInstrumentName } from '../workspace/gmInstruments'
+import type { PlayabilitySaveRequest } from '../workspace/playability'
 
 // A stand-in host for the browser dev server: same calls and shapes as the Python bridge.
 
@@ -715,6 +716,23 @@ export const mockHost = {
       { id: 'other', label: 'Other', url: audio.mix, level: 0.25 },
     ] : undefined
     return ok({ entry, song: score(entry), artifacts: {}, stems })
+  },
+  save_playability(id: string, result: PlayabilitySaveRequest) {
+    const entry = entries.find((item) => item.id === id)
+    if (!entry) return fail('song_not_found', 'This song could not be found.')
+    const song = score(entry)
+    song.playability = {
+      version: result.version,
+      parts: Object.fromEntries(Object.entries(result.parts).map(([key, part]) =>
+        [key, { sourceSignature: part.sourceSignature, notes: part.notes, summary: part.summary }])),
+      ...(result.drums ? { drums: {
+        sourceSignature: result.drums.sourceSignature,
+        hits: result.drums.hits,
+        summary: result.drums.summary,
+        trackSummaries: result.drums.trackSummaries,
+      } } : {}),
+    }
+    return ok({})
   },
   delete_score_track(id: string, trackId: string) {
     const entry = entries.find((item) => item.id === id)

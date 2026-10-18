@@ -99,6 +99,191 @@ def test_midi_musicxml_and_mxl_imports_and_position_roundtrip():
         runner.close()
 
 
+def test_playability_is_saved_separately_and_rejects_stale_source():
+    api, runner = api_with_idle_runner()
+    try:
+        imported = api.import_file("duet.mid", base64.b64encode(midi_data()).decode())
+        song_id = imported["entry"]["id"]
+        original = api.open_song(song_id)["song"]
+        source_piano = original["piano"]
+        optimized_piano = [dict(note) for note in source_piano]
+        optimized_piano[0]["hand"] = "left" if source_piano[0]["hand"] != "left" else "right"
+        source_drums = original["drums"]
+        optimized_drums = [dict(hit) for hit in source_drums]
+        hat = next(index for index, hit in enumerate(source_drums) if hit["lane"] == "hihat")
+        optimized_drums[hat]["hand"] = "right"
+        drum_track_id = source_drums[hat]["trackId"]
+        track_drum_summary = {
+            "instrument": "drums", "flagged": 0, "moved": 1, "octaveAdjusted": 0,
+            "unplayable": 0, "unplayableNotes": 0, "warnings": 0,
+            "issues": [{"beat": source_drums[hat]["startBeat"], "kind": "moved", "count": 1}],
+        }
+        result = {
+            "version": "constrained-path-v3",
+            "parts": {"piano": {
+                "sourceNotes": source_piano, "sourceSignature": "test-piano",
+                "notes": optimized_piano,
+                "summary": {"instrument": "piano", "flagged": 1, "moved": 1, "octaveAdjusted": 0,
+                            "unplayable": 0, "unplayableNotes": 0, "warnings": 0,
+                            "issues": [{"beat": 0, "kind": "moved", "count": 1}]},
+            }},
+            "drums": {
+                "sourceHits": source_drums, "sourceSignature": "test-drums", "hits": optimized_drums,
+                "summary": {"instrument": "drums", "flagged": 0, "moved": 1, "octaveAdjusted": 0,
+                            "unplayable": 0, "unplayableNotes": 0, "warnings": 0,
+                            "issues": [{"beat": source_drums[hat]["startBeat"], "kind": "moved", "count": 1}]},
+                "trackSummaries": {drum_track_id: track_drum_summary},
+            },
+        }
+        assert api.save_playability(song_id, result) == {"ok": True}
+        saved = api.open_song(song_id)["song"]
+        assert saved["piano"] == source_piano and saved["drums"] == source_drums
+        assert saved["playability"]["parts"]["piano"]["notes"] == optimized_piano
+        assert saved["playability"]["drums"]["hits"] == optimized_drums
+        assert saved["playability"]["drums"]["trackSummaries"] == {drum_track_id: track_drum_summary}
+
+        stale = json.loads(json.dumps(result))
+        stale["parts"]["piano"]["sourceNotes"][0]["midi"] += 1
+        assert api.save_playability(song_id, stale)["error"]["code"] == "invalid_playability"
+        assert api.open_song(song_id)["song"] == saved
+
+        edited = api.delete_score_track(song_id, "piano")
+        assert edited["ok"] and "playability" not in edited["song"]
+    finally:
+        runner.close()
+
+
+def test_playability_track_key_disambiguates_a_piano_named_track():
+    api, runner = api_with_idle_runner()
+    try:
+        imported = api.import_file("duet.mid", base64.b64encode(midi_data()).decode())
+        song_id = imported["entry"]["id"]
+        path = api._library.get(song_id)["song_path"]
+        with open(path, encoding="utf-8") as source:
+            song = json.load(source)
+        piano_track = next(track for track in song["tracks"] if track["id"] == "piano")
+        piano_track.update({"instrument": "other", "gmProgram": 0})
+        source_notes = [dict(song["piano"][0], trackId="piano")]
+        song["instrumentNotes"] = {"piano": source_notes}
+        song["piano"] = [dict(source_notes[0], trackId="second-piano")]
+        song["tracks"].append({
+            "id": "second-piano", "instrument": "piano", "name": "Second piano", "detail": "",
+        })
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump(song, output)
+
+        optimized = [dict(note, hand="left") for note in source_notes]
+        result = {
+            "version": "constrained-path-v3",
+            "parts": {"track:piano": {
+                "sourceNotes": source_notes, "sourceSignature": "test-gm-piano",
+                "notes": optimized,
+                "summary": {"instrument": "piano", "flagged": 0, "moved": 0, "octaveAdjusted": 0,
+                            "unplayable": 0, "unplayableNotes": 0, "warnings": 0, "issues": []},
+            }},
+        }
+        assert api.save_playability(song_id, result) == {"ok": True}
+        saved = api.open_song(song_id)["song"]
+        assert saved["piano"] == song["piano"]
+        assert saved["playability"]["parts"]["track:piano"]["notes"] == optimized
+    finally:
+        runner.close()
+
+
+def test_recording_update_merges_into_the_latest_analysis_song():
+    api, runner = api_with_idle_runner()
+    try:
+        imported = api.import_file("duet.mid", base64.b64encode(midi_data()).decode())
+        song_id = imported["entry"]["id"]
+        entry = api._library.get(song_id)
+        path = entry["song_path"]
+        stale_song = api.open_song(song_id)["song"]
+        with open(path, encoding="utf-8") as source:
+            latest_song = json.load(source)
+        latest_song["piano"][0]["midi"] = 65
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump(latest_song, output)
+
+        tempo_map = [{"beat": 0, "time": 0.25}, {"beat": 4, "time": 2.25}]
+        stale_song["durationSeconds"] = 2
+        updated = api._library.update_recording(song_id, entry["artifacts"], stale_song, tempo_map)
+        saved = api.open_song(song_id)["song"]
+        assert saved["piano"][0]["midi"] == 65, "an alignment snapshot must not overwrite a newer score"
+        assert saved["tempoMap"] == tempo_map and saved["recording"] is True
+        assert saved["durationSeconds"] == 2 and updated["tempo_map"] == tempo_map
+    finally:
+        runner.close()
+
+
+def test_playability_save_and_recording_update_serialize_analysis_writes(monkeypatch):
+    import mizan.library as library_module
+
+    api, runner = api_with_idle_runner()
+    try:
+        imported = api.import_file("duet.mid", base64.b64encode(midi_data()).decode())
+        song_id = imported["entry"]["id"]
+        entry = api._library.get(song_id)
+        source_song = api.open_song(song_id)["song"]
+        analysis_path = entry["song_path"]
+        source_piano = source_song["piano"]
+        result = {
+            "version": "constrained-path-v3",
+            "parts": {"piano": {
+                "sourceNotes": source_piano, "sourceSignature": "serialized-write",
+                "notes": source_piano,
+                "summary": {"instrument": "piano", "flagged": 0, "moved": 0, "octaveAdjusted": 0,
+                            "unplayable": 0, "unplayableNotes": 0, "warnings": 0, "issues": []},
+            }},
+        }
+        tempo_map = [{"beat": 0, "time": 0.25}, {"beat": 4, "time": 2.25}]
+        recording_song = {**source_song, "durationSeconds": 2}
+        replace_reached = Event()
+        release_replace = Event()
+        update_attempted = Event()
+        update_starting = Event()
+        real_replace = library_module.os.replace
+        real_connect = api._library._connect
+
+        def hold_playability_replace(source, destination):
+            if str(destination) == analysis_path and not replace_reached.is_set():
+                replace_reached.set()
+                if not release_replace.wait(5):
+                    raise TimeoutError("Timed out waiting to release the playability write.")
+            return real_replace(source, destination)
+
+        def tracked_connect():
+            connection = real_connect()
+            if update_starting.is_set():
+                connection.set_trace_callback(
+                    lambda statement: update_attempted.set()
+                    if statement.strip().upper() == "BEGIN IMMEDIATE" else None
+                )
+            return connection
+
+        monkeypatch.setattr(library_module.os, "replace", hold_playability_replace)
+        monkeypatch.setattr(api._library, "_connect", tracked_connect)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            save = workers.submit(api._library.save_playability, song_id, result)
+            assert replace_reached.wait(5), "the playability save should reach its atomic replacement"
+            update_starting.set()
+            update = workers.submit(
+                api._library.update_recording, song_id, entry["artifacts"], recording_song, tempo_map)
+            try:
+                assert update_attempted.wait(5), "the recording update should attempt the database write lock"
+            finally:
+                release_replace.set()
+            save.result(timeout=5)
+            update.result(timeout=5)
+
+        saved = api.open_song(song_id)["song"]
+        assert saved["tempoMap"] == tempo_map
+        assert saved["durationSeconds"] == 2 and saved["recording"] is True
+        assert "playability" not in saved, "recording alignment invalidates derived playability"
+    finally:
+        runner.close()
+
+
 def test_split_piano_hands_import_as_one_grand_staff():
     midi = mido.MidiFile(ticks_per_beat=480)
     for name, pitch in (("up", 76), ("down", 62)):
