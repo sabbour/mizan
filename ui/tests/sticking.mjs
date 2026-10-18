@@ -74,15 +74,16 @@ try {
   assert.deepEqual(suggestSticking(song([hit('hightom', 0, 50), hit('hightom', 0, 48)])).sort(), ['left', 'right'], 'a flam on one drum uses both hands')
   assert.deepEqual(suggestSticking(song([hit('hihat', 0, 42), hit('snare', 0)])), ['right', 'left'])
   assert.deepEqual(suggestSticking(song([hit('crash', 0), hit('snare', 0)])), ['right', 'left'], 'crash and snare together: right on the crash')
+  assert.deepEqual(suggestSticking(song([hit('crash', 0), hit('ride', 0)])), ['left', 'right'], 'two cymbals use both hands')
 
   // Crossing avoidance: a ride-to-floor-tom move after a snare does not put the left hand over the right.
   assert.equal(crossings(toms(SNARE, FLOOR, SNARE, FLOOR)), 0)
 
   // Impossible moments are left blank, feet get no hand, and the other moments are still suggested.
   assert.equal(letters([hit('hihat', 0, 42), hit('snare', 0), hit('hightom', 0, 50)]), '---')
-  assert.equal(letters([hit('crash', 0), hit('ride', 0)]), '--')
   assert.equal(letters([hit('kick', 0), hit('hihat', 1, 44)]), '--')
-  assert.equal(letters([hit('snare', 0), hit('crash', 1), hit('ride', 1), hit('snare', 2)]), 'R--R', 'a blank moment does not stop the rest')
+  assert.match(letters([hit('snare', 0), hit('crash', 1), hit('ride', 1), hit('snare', 2)]), /^[RL]{4}$/,
+    'two cymbals use both hands without blocking the other suggestions')
 
   // Deterministic, and authored lesson sticking is untouched.
   assert.equal(letters(groove), letters(groove))

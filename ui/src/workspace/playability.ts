@@ -3,7 +3,7 @@ import {
   BASS, GUITAR, planFrettedTab, positionsForMidi,
   type FrettedInstrumentConfig, type FrettedPosition,
 } from './fretboard'
-import type { MelodyNote, Pedal, PianoNote, Song, Track } from './song'
+import type { Chord, MelodyNote, Pedal, PianoNote, Song, Track } from './song'
 
 /**
  * Playability checks and repairs for transcribed music. Transcribers and importers split piano notes between the hands by
@@ -29,7 +29,7 @@ const BEAM = 6
 
 export type PlayabilityIssue = {
   beat: number
-  kind: 'moved' | 'unplayable' | 'jump'
+  kind: 'moved' | 'octave' | 'unplayable' | 'jump'
   count: number
 }
 
@@ -37,8 +37,10 @@ export type PlayabilitySummary = {
   instrument: 'piano' | 'guitar' | 'bass'
   /** Moments that could not be played as written. */
   flagged: number
-  /** Notes moved to the other hand (piano) or to another string and fret (guitar, bass). */
+  /** Notes moved to the other hand (piano) or adjusted in tab (guitar, bass). */
   moved: number
+  /** Fretted chord tones folded by an octave to keep the voicing playable. */
+  octaveAdjusted: number
   /** Moments still not playable after the repair; their notes are marked. */
   unplayable: number
   unplayableNotes: number
@@ -48,7 +50,7 @@ export type PlayabilitySummary = {
 }
 
 const empty = (instrument: PlayabilitySummary['instrument']): PlayabilitySummary =>
-  ({ instrument, flagged: 0, moved: 0, unplayable: 0, unplayableNotes: 0, warnings: 0, issues: [] })
+  ({ instrument, flagged: 0, moved: 0, octaveAdjusted: 0, unplayable: 0, unplayableNotes: 0, warnings: 0, issues: [] })
 
 const tally = (map: Map<number, number>, beat: number) => map.set(beat, (map.get(beat) ?? 0) + 1)
 
@@ -318,7 +320,23 @@ export function repairPiano(
 // ---------------------------------------------------------------- guitar and bass
 
 type Pos = { string: number; fret: number }
+type Candidate = Pos & { midi: number; octaveFold: boolean }
 export type FrettedNote = MelodyNote & { string?: number; fret?: number }
+
+const CHORD_SHAPES = [
+  [0, 3, 7], [0, 4, 7], [0, 3, 6], [0, 4, 8], [0, 5, 7],
+  [0, 3, 6, 9], [0, 3, 6, 10], [0, 3, 7, 10], [0, 4, 7, 10], [0, 4, 7, 11],
+]
+const pitchClass = (midi: number) => (midi % 12 + 12) % 12
+
+function inferredChordTones(notes: readonly { midi: number }[]): Set<number> | null {
+  const pitches = new Set(notes.map((note) => pitchClass(note.midi)))
+  if (pitches.size < 3 || pitches.size > 4) return null
+  const soundsLikeChord = CHORD_SHAPES.some((shape) =>
+    Array.from({ length: 12 }, (_, root) => new Set(shape.map((step) => (root + step) % 12)))
+      .some((candidate) => [...pitches].every((pitch) => candidate.has(pitch))))
+  return soundsLikeChord ? pitches : null
+}
 
 /**
  * Widest stretch in frets the fretting hand covers (highest fret minus lowest). Frets are widest nearest the nut and
@@ -364,8 +382,8 @@ export function shapeFits(items: readonly Pos[], config: FrettedInstrumentConfig
   return fingers <= 4
 }
 
-type Item = { index: number; midi: number; start: number; end: number; candidates: Pos[]; preferred?: Pos }
-type Placed = { index: number; string: number; fret: number; end: number }
+type Item = { index: number; midi: number; start: number; end: number; candidates: Candidate[]; originallyPlayable: boolean; preferred?: Pos }
+type Placed = { index: number; midi: number; string: number; fret: number; end: number }
 type Node = { cost: number; pos: number | null; active: Placed[]; parent: Node | null; placed: Placed[]; dropped: number[]; key: string }
 
 const sameSpot = (a?: Pos, b?: Pos) => !!a && !!b && a.string === b.string && a.fret === b.fret
@@ -373,45 +391,81 @@ const sameSpot = (a?: Pos, b?: Pos) => !!a && !!b && a.string === b.string && a.
 export function repairFretted(
   input: readonly FrettedNote[],
   config: FrettedInstrumentConfig,
+  options: { chords?: readonly Chord[] } = {},
 ): { notes: FrettedNote[]; summary: PlayabilitySummary } {
   const summary = empty(config.id)
   const baseline = planFrettedTab(input, config)
   const items: Item[] = []
-  const byMidi = new Map<number, FrettedPosition[]>()
   for (const [index, note] of input.entries()) {
     if (!Number.isInteger(note.midi) || !(note.beats > 0)) continue
-    let places = byMidi.get(note.midi)
-    if (!places) byMidi.set(note.midi, places = positionsForMidi(note.midi, config))
-    if (!places.length) continue
     const given = baseline[index].position
     const preferred = given ? { string: given.string, fret: given.fret } : undefined
-    const candidates = places.map((place: FrettedPosition) => ({ string: place.string, fret: place.fret }))
-      .sort((a, b) => (sameSpot(b, preferred) ? 1 : 0) - (sameSpot(a, preferred) ? 1 : 0) || a.fret - b.fret || a.string - b.string)
-    items.push({ index, midi: note.midi, start: note.startBeat, end: note.startBeat + note.beats, candidates, preferred })
+    items.push({ index, midi: note.midi, start: note.startBeat, end: note.startBeat + note.beats,
+      candidates: [], originallyPlayable: false, preferred })
   }
   items.sort((a, b) => a.start - b.start || a.index - b.index)
 
+  const theoryNotes = new Set<number>()
+  const chordAt = (beat: number) => options.chords?.find((chord) =>
+    chord.confidence >= 0.5 && chord.tones.length > 0 &&
+    chord.startBeat <= beat + EPS && chord.startBeat + chord.beats > beat + EPS)
+  for (let first = 0; first < items.length;) {
+    let last = first + 1
+    while (last < items.length && items[last].start - items[first].start <= EPS) last++
+    const group = items.slice(first, last)
+    const chord = chordAt(group[0].start)
+    const tones = chord ? new Set(chord.tones.map(pitchClass)) : inferredChordTones(group)
+    if (tones) for (const item of group) if (tones.has(pitchClass(item.midi))) theoryNotes.add(item.index)
+    first = last
+  }
+
+  const byMidi = new Map<number, FrettedPosition[]>()
+  const positions = (midi: number) => {
+    let found = byMidi.get(midi)
+    if (!found) byMidi.set(midi, found = positionsForMidi(midi, config))
+    return found
+  }
+  for (const item of items) {
+    const originalPositions = positions(item.midi)
+    item.originallyPlayable = originalPositions.length > 0
+    const pitches = [item.midi]
+    if (theoryNotes.has(item.index)) pitches.push(item.midi - 12, item.midi + 12)
+    item.candidates = pitches.flatMap((midi) =>
+      positions(midi).map((place) => ({ string: place.string, fret: place.fret, midi, octaveFold: midi !== item.midi })))
+      .sort((a, b) => {
+        const preferredA = !a.octaveFold && sameSpot(a, item.preferred) ? 1 : 0
+        const preferredB = !b.octaveFold && sameSpot(b, item.preferred) ? 1 : 0
+        return preferredB - preferredA || Number(a.octaveFold) - Number(b.octaveFold) || a.fret - b.fret || a.string - b.string
+      })
+  }
+  for (let index = items.length - 1; index >= 0; index--)
+    if (!items[index].candidates.length) items.splice(index, 1)
+
   const groups: Item[][] = []
+  const originalGroups: Item[][] = []
   for (const item of items) {
     const group = groups[groups.length - 1]
     if (group && item.start - group[0].start <= EPS) group.push(item)
     else groups.push([item])
+    const originalGroup = originalGroups[originalGroups.length - 1]
+    if (originalGroup && item.start - originalGroup[0].start <= EPS) originalGroup.push(item)
+    else originalGroups.push([item])
   }
 
   // Moments the notes as first placed cannot play.
   const where = new Map(items.map((item) => [item.index, item]))
   const bad: number[] = []
   let sounding: Item[] = []
-  groups.forEach((group, at) => {
+  originalGroups.forEach((group) => {
     const t = group[0].start
     sounding = sounding.filter((item) => item.end > t + EPS).concat(group)
     const spots = sounding.map((item) => baseline[item.index].position)
-    if (spots.some((spot) => !spot) || !shapeFits(spots as Pos[], config)) bad.push(at)
+    if (spots.some((spot) => !spot) || !shapeFits(spots as Pos[], config)) bad.push(group[0].index)
   })
   summary.flagged = bad.length
-  if (!bad.length) return { notes: input as FrettedNote[], summary }
+  if (!bad.length && !items.some((item) => !item.originallyPlayable)) return { notes: input as FrettedNote[], summary }
 
-  /** What a placement costs: stretch, a shift of the hand from where it was, higher frets, and leaving the first placement. */
+  /** What a placement costs: stretch, hand movement, higher frets, octave folds, and leaving the first placement. */
   const leafOf = (held: Placed[], chosen: Placed[], pos: number | null) => {
     const fretted = held.concat(chosen).filter((item) => item.fret > 0).map((item) => item.fret)
     let cost = 0
@@ -423,13 +477,15 @@ export function repairFretted(
       if (pos !== null) cost += Math.abs(low - pos)
     }
     for (const place of chosen) {
+      const item = where.get(place.index)!
       cost += place.fret * 0.02
-      if (!sameSpot(where.get(place.index)!.preferred, place)) cost += 6
+      if (place.midi !== item.midi) cost += 12
+      if (!sameSpot(item.preferred, place) || place.midi !== item.midi) cost += 6
     }
     return { placed: chosen, cost, pos: nextPos }
   }
 
-  const enumerate = (kept: Item[], held: Placed[], pos: number | null) => {
+  const enumerate = (kept: Item[], held: Placed[], pos: number | null, allowOctaveFolds = false) => {
     const order = [...kept].sort((a, b) => a.candidates.length - b.candidates.length || a.midi - b.midi || a.index - b.index)
     const leaves: { placed: Placed[]; cost: number; pos: number | null }[] = []
     const chosen: Placed[] = []
@@ -443,8 +499,8 @@ export function repairFretted(
         return
       }
       const item = order[depth]
-      for (const candidate of item.candidates) {
-        const place: Placed = { index: item.index, string: candidate.string, fret: candidate.fret, end: item.end }
+      for (const candidate of item.candidates.filter((place) => allowOctaveFolds || !place.octaveFold)) {
+        const place: Placed = { index: item.index, midi: candidate.midi, string: candidate.string, fret: candidate.fret, end: item.end }
         stack.push(place)
         if (!shapeFits(stack, config)) { stack.pop(); continue }
         chosen.push(place)
@@ -467,9 +523,26 @@ export function repairFretted(
       priority.push(byMidi[low])
       if (high !== low) priority.push(byMidi[high])
     }
+    const rank = new Map(priority.map((item, index) => [item.index, index]))
+    const endpoints = new Set([byMidi[0]?.index, byMidi.at(-1)?.index])
+    const distinctChordTones = new Set<number>()
+    const seenChordTones = new Set<number>()
+    for (const item of byMidi) {
+      const pitch = pitchClass(item.midi)
+      if (theoryNotes.has(item.index) && !seenChordTones.has(pitch)) {
+        seenChordTones.add(pitch)
+        distinctChordTones.add(item.index)
+      }
+    }
+    priority.sort((a, b) => {
+      const importance = (item: Item) => endpoints.has(item.index) ? 0
+        : distinctChordTones.has(item.index) ? 1
+          : theoryNotes.has(item.index) ? 2 : 3
+      return importance(a) - importance(b) || rank.get(a.index)! - rank.get(b.index)!
+    })
     const merged = new Map<string, Node>()
     const first = group.every((item) => item.preferred)
-      ? group.map((item): Placed => ({ index: item.index, string: item.preferred!.string, fret: item.preferred!.fret, end: item.end })) : null
+      ? group.map((item): Placed => ({ index: item.index, midi: item.midi, string: item.preferred!.string, fret: item.preferred!.fret, end: item.end })) : null
     let easy = !!first
     for (const node of beam) {
       const held = node.active.filter((place) => place.end > t + EPS)
@@ -477,7 +550,9 @@ export function repairFretted(
       const quick = first && shapeFits([...held, ...first], config) ? [leafOf(held, first, node.pos)] : null
       if (!quick) easy = false
       for (let kept = priority.length; kept >= 0; kept--) {
-        const leaves = quick ?? (kept ? enumerate(priority.slice(0, kept), held, node.pos) : [{ placed: [], cost: 0, pos: node.pos }])
+        const selected = priority.slice(0, kept)
+        const standard = quick ?? (kept ? enumerate(selected, held, node.pos) : [{ placed: [], cost: 0, pos: node.pos }])
+        const leaves = standard.length || !kept ? standard : enumerate(selected, held, node.pos, true)
         if (!leaves.length) continue
         const dropped = priority.slice(kept).map((item) => item.index)
         for (const leaf of leaves) {
@@ -509,12 +584,16 @@ export function repairFretted(
   }
 
   const movedAt = new Map<number, number>()
+  const octaveAt = new Map<number, number>()
   const notes = input.map((note, index) => {
     const place = chosen.get(index)
     if (place) {
+      const folded = place.midi !== note.midi
       const moved = !sameSpot(where.get(index)!.preferred, place)
-      if (moved) { summary.moved++; tally(movedAt, note.startBeat) }
-      return { ...note, string: place.string, fret: place.fret, ...(moved ? { adjusted: true } : {}) }
+      if (moved) summary.moved++
+      if (folded) { summary.octaveAdjusted++; tally(octaveAt, note.startBeat) }
+      else if (moved) tally(movedAt, note.startBeat)
+      return { ...note, midi: place.midi, string: place.string, fret: place.fret, ...(moved || folded ? { adjusted: true } : {}) }
     }
     if (dropped.has(index)) {
       const { string: _string, fret: _fret, ...rest } = note
@@ -526,6 +605,7 @@ export function repairFretted(
   summary.unplayable = droppedAt.size
   for (const [beat, marked] of droppedAt) summary.issues.push({ beat, kind: 'unplayable', count: marked })
   for (const [beat, moved] of movedAt) summary.issues.push({ beat, kind: 'moved', count: moved })
+  for (const [beat, folded] of octaveAt) summary.issues.push({ beat, kind: 'octave', count: folded })
   summary.issues.sort((a, b) => a.beat - b.beat)
   return { notes, summary }
 }
@@ -553,12 +633,14 @@ export function applyPlayability(song: Song, target: PracticeTarget): Playable {
   if (!source) return { song, summary: null }
   const notes: readonly (PianoNote | MelodyNote)[] = source === 'piano' ? song.piano : song.instrumentNotes![source]
   const pedalKey = song.pedals?.map((pedal) => `${pedal.controller}@${pedal.startBeat}+${pedal.beats}`).join() ?? ""
-  const key = `${instrument}:${song.bpm}:${pedalKey}`
+  const harmonyKey = song.chords?.map((chord) =>
+    `${chord.startBeat}+${chord.beats}:${chord.confidence}:${chord.tones.join('.')}`).join(';') ?? ""
+  const key = `${instrument}:${song.bpm}:${pedalKey}:${harmonyKey}`
   const cached = cache.get(notes)?.get(key)
   const result = cached ?? (() => {
     const made = instrument === 'piano'
       ? repairPiano(notes as PianoNote[], { bpm: song.bpm, pedals: song.pedals })
-      : repairFretted(notes, instrument === 'bass' ? BASS : GUITAR)
+      : repairFretted(notes, instrument === 'bass' ? BASS : GUITAR, { chords: song.chords })
     const entry = { notes: made.notes as readonly unknown[], summary: made.summary }
     cache.set(notes, (cache.get(notes) ?? new Map()).set(key, entry))
     return entry
@@ -579,7 +661,8 @@ export function playabilityNotice(summary: PlayabilitySummary | null): string[] 
   const lines: string[] = []
   if (summary.moved) lines.push(summary.instrument === 'piano'
     ? `Hands adjusted for playability: ${plural(summary.moved, 'note')} moved to the other hand.`
-    : `Tab positions adjusted for playability: ${plural(summary.moved, 'note')}.`)
+    : `Tab notes adjusted for playability: ${plural(summary.moved, 'note')}.`)
+  if (summary.octaveAdjusted) lines.push(`${plural(summary.octaveAdjusted, 'chord tone')} shifted by an octave to keep the voicing playable.`)
   if (summary.unplayable) lines.push(`${plural(summary.unplayable, 'moment')} can't be played as written; marked in the score${summary.instrument === 'piano' ? '' : ' and tab'}.`)
   if (summary.warnings) lines.push(`${plural(summary.warnings, 'quick jump')} between hand positions may be hard to play.`)
   return lines

@@ -18,6 +18,7 @@ type Sample = { midi: number; soft: AudioBuffer; loud: AudioBuffer }
 type GmSample = { midi: number; buffer: AudioBuffer }
 type GmManifest = { instruments: { program: number; name: string; samples: { midi: number; url: string; silent?: boolean }[] }[] }
 type BendableNote = Pick<PianoNote, 'midi' | 'startBeat' | 'beats' | 'pitchBends'>
+type PlayablePart = { trackId: string; notes: readonly (PianoNote | MelodyNote)[] }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -99,6 +100,7 @@ export class Engine {
   private rhythmSource: Song | null = null
   private rhythmInputs: unknown[] = []
   private rhythm: number[] = []
+  private playablePart: PlayablePart | null = null
 
   rate = 1
   loop: { startBar: number; endBar: number } | null = null
@@ -341,6 +343,13 @@ export class Engine {
     this.updateMix()
   }
 
+  /** Play the repaired pitches for one part without changing the saved song or its recording stems. */
+  setPlayablePart(part: PlayablePart | null): void {
+    if (this.playablePart?.trackId === part?.trackId && this.playablePart?.notes === part?.notes) return
+    this.playablePart = part
+    this.refresh()
+  }
+
   refreshMix(): void {
     this.updateMix()
     if (!this.playing || !this.recording) return
@@ -508,7 +517,16 @@ export class Engine {
       if (id === 'piano') this.piano(at(start), n, duration, n.trackId ?? song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano', start)
       else this.lead(at(start), n, duration, id, start)
     }
-    for (const n of song.piano) note(n, 'piano')
+    const playableTrack = this.playablePart && song.tracks.find((track) => track.id === this.playablePart!.trackId)
+    const defaultPianoTrackId = song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano'
+    for (const n of song.piano) {
+      const trackId = n.trackId ?? defaultPianoTrackId
+      if (playableTrack?.instrument === 'piano' && trackId === playableTrack.id) continue
+      note(n, 'piano')
+    }
+    if (playableTrack?.instrument === 'piano') {
+      for (const n of this.playablePart!.notes) note(n, 'piano')
+    }
     for (const n of song.vocals ?? []) {
       if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
       const start = Math.max(n.startBeat, from)
@@ -516,7 +534,9 @@ export class Engine {
     }
     for (const part of song.tracks) {
       if (part.instrument !== 'other') continue
-      for (const n of song.instrumentNotes?.[part.id] ?? []) {
+      const notes = playableTrack?.instrument === 'other' && part.id === playableTrack.id
+        ? this.playablePart!.notes : song.instrumentNotes?.[part.id] ?? []
+      for (const n of notes) {
         if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
         const start = Math.max(n.startBeat, from)
         const duration = this.seconds(start, n.startBeat + n.beats)
