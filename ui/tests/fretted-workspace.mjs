@@ -113,7 +113,7 @@ export async function tabChecks() {
   }
 }
 
-export async function frettedChecks() {
+export async function frettedChecks({ layoutOnly = false } = {}) {
   const { default: React } = await import('react')
   const { default: ReactDOM } = await import('react-dom/client')
   const { Workspace } = await import('/src/workspace/Workspace.tsx')
@@ -346,6 +346,7 @@ export async function frettedChecks() {
         stageTop: stageRect.top, staffBottom: staff.bottom, footBottom: foot.bottom,
         doc: [document.documentElement.scrollHeight, innerHeight], practice: [practiceEl.scrollHeight, practiceEl.clientHeight] })}`)
     }
+    if (layoutOnly) return `${instrument}: compact 3D fretboard and first tab staff fit without scrolling`
     const fret = tab.querySelector('.fretted-fret')
     check(Number.parseFloat(getComputedStyle(fret).fontSize) >= 14 &&
       fret.getBoundingClientRect().height >= 21, 'Fret numbers stay readable without shrinking the whole tab')

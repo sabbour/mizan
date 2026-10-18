@@ -134,12 +134,22 @@ export function FrettedTabView({ song, track, trackId, beat, playing, countingIn
       const viewport = element.closest<HTMLElement>('.fretted-practice, .ws > .fretted-tab')
       const target = element.querySelector<SVGGraphicsElement>(`[data-bar="${active + 1}"]`)
       if (!viewport || !target) return
+      const marks = [...target.children]
+        .filter((child) => !child.classList.contains('fretted-active-bar'))
+        .map((child) => child.getBoundingClientRect())
+        .filter((rect) => rect.width || rect.height)
+      if (!marks.length) return
+      // The active-bar highlight extends through blank SVG padding; only the notation needs to clear the footer.
+      const bounds = {
+        top: Math.min(...marks.map((rect) => rect.top)),
+        bottom: Math.max(...marks.map((rect) => rect.bottom)),
+      }
       const usable = usableSpan(viewport)
-      const bounds = target.getBoundingClientRect()
       const height = Math.max(0, usable.bottom - usable.top)
+      const contentHeight = bounds.bottom - bounds.top
       const margin = Math.min(8, height / 2)
       let delta = 0
-      if (bounds.height > height || bounds.top < usable.top + margin)
+      if (contentHeight > height || bounds.top < usable.top + margin)
         delta = bounds.top - (usable.top + margin)
       else if (bounds.bottom > usable.bottom - margin)
         delta = bounds.bottom - (usable.bottom - margin)

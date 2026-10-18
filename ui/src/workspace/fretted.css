@@ -752,6 +752,13 @@
   .ws:has(.fretted-practice[data-view="mirror"]) .transport-tools { flex-wrap: nowrap; justify-content: flex-end; }
 }
 
+@media (min-width: 1280px) and (max-height: 760px) {
+  .ws .fretted-practice[data-view="mirror"] { gap: 2px; }
+  .ws .fretted-strip .fretted-tab { padding-bottom: 0; }
+  .ws .fretted-strip .fretted-tab-scroll { margin-bottom: 0; }
+  .ws .fretted-strip .fretted-rhythm-guide { display: none; }
+}
+
 .fretted-tab {
   --fretted-glow: var(--accent);
   min-width: 0;

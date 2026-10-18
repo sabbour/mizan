@@ -23,8 +23,14 @@ try {
     try { port = Number((await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); break } catch { await sleep(100) }
   }
   assert.ok(port, 'The test browser has a debugging endpoint')
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
-  const target = targets.find((item) => item.type === 'page' && item.url === 'about:blank')
+  let target
+  for (let attempt = 0; attempt < 50 && !target; attempt++) {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+    target = targets.find((item) => item.type === 'page' && item.url === 'about:blank') ??
+      targets.find((item) => item.type === 'page')
+    if (!target) await sleep(100)
+  }
+  assert.ok(target, 'The test browser opened a page')
   const address = new URL(target.webSocketDebuggerUrl)
   address.hostname = '127.0.0.1'
   socket = new WebSocket(address.href)
