@@ -364,7 +364,7 @@ class LibraryStore:
         return notes if isinstance(notes, list) else None
 
     def save_playability(self, song_id: str, result: dict) -> None:
-        if not isinstance(result, dict) or result.get("version") != "constrained-path-v3" \
+        if not isinstance(result, dict) or result.get("version") != "constrained-path-v4" \
                 or not isinstance(result.get("parts"), dict) \
                 or not result["parts"] and not isinstance(result.get("drums"), dict):
             raise InvalidPlayability()
