@@ -192,11 +192,33 @@ try {
     assert.equal(summary.unplayable, 0, 'a recognized chord can be voiced without dropping a note')
     assert.equal(summary.octaveAdjusted, 1, 'only one chord tone needs an octave fold')
     assert.equal(summary.moved, 2, 'the revoiced position and octave fold are counted')
+    assert.equal(Math.min(...notes.map((note) => note.midi)), Math.min(...dm7.map((note) => note.midi)),
+      'an octave-folded chord tone cannot become lower than the playable bass anchor')
     assert.deepEqual([...new Set(notes.map((note) => note.midi % 12))].sort((a, b) => a - b), [0, 2, 5, 9],
       'the Dm7 pitch classes are preserved')
     assert.equal(dm7[1].midi, 53, 'the source part is unchanged')
     assert.ok(summary.issues.some((issue) => issue.kind === 'octave'))
     assert.ok(playabilityNotice(summary).some((line) => line.includes('shifted by an octave')))
+  }
+  {
+    const chord = { startBeat: 0, beats: 2, symbol: 'F#maj7', tones: [54, 58, 61, 65], confidence: 0.9 }
+    const notes = [gnote(40, 0, 0.5), ...[58, 61, 65, 66].map((midi) => gnote(midi, 0, 2))]
+    const { notes: repaired } = repairFretted(notes, GUITAR, { chords: [chord] })
+    const lowestAt = (part, beat) => {
+      const sounding = part.filter((note) => note.startBeat <= beat && note.startBeat + note.beats > beat)
+      assert.ok(sounding.length, `there are notes sounding at beat ${beat}`)
+      return Math.min(...sounding.map((note) => note.midi))
+    }
+    assert.equal(lowestAt(repaired, 0.25), 40, 'the short source bass remains the lowest note while sounding')
+    assert.equal(lowestAt(repaired, 0.5), 58, 'after it releases, a folded held note cannot undercut the next bass')
+  }
+  {
+    const chord = { startBeat: 1, beats: 1, tones: [47], confidence: 0.99 }
+    const notes = [gnote(40, 0, 3), ...[45, 50, 55].map((midi) => gnote(midi, 0, 3)), gnote(47, 1, 1)]
+    const { notes: repaired, summary } = repairFretted(notes, GUITAR, { chords: [chord] })
+    assert.equal(summary.unplayable, 0, 'a sustained lower bass must not anchor the incoming upper voice')
+    assert.equal(repaired[4].midi, 59, 'the incoming chord tone can fold up instead of being dropped')
+    assert.equal(Math.min(...repaired.map((note) => note.midi)), 40, 'the sustained source bass stays lowest')
   }
 
   // ---- Guitar: reliable analyzed chord tones can use the same voicing repair
@@ -385,6 +407,10 @@ try {
     const playable = applyPlayability(selected, { instrument: 'piano', track: pianoTrack })
     assert.deepEqual(playable.song.piano, prepared.song.playability.parts['track:piano'].notes)
     assert.equal(playable.summary, prepared.song.playability.parts['track:piano'].summary)
+    const stale = { ...prepared.song, playability: { ...prepared.song.playability, version: 'constrained-path-v3' } }
+    const refreshed = preparePlayableSong(stale)
+    assert.ok(refreshed.request, 'stored repairs from the prior algorithm version are regenerated')
+    assert.equal(refreshed.request.version, 'constrained-path-v4')
   }
   {
     const pianoTrack = { id: 'piano', instrument: 'other', gmProgram: 0, name: 'Keyboard', detail: '' }
