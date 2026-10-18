@@ -10,6 +10,7 @@ try {
   const { buildSong } = await vite.ssrLoadModule('/src/workspace/song.ts')
   const { pianoXml, instrumentXml, frettedTabXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
   const { keyOf } = await vite.ssrLoadModule('/src/workspace/fingers.ts')
+  const { Engine } = await vite.ssrLoadModule('/src/workspace/engine.ts')
 
   const piano = (midi, hand, startBeat = 0, beats = 4, extra = {}) => ({ midi, hand, startBeat, beats, ...extra })
   const keysOf = (notes, hand) => [...new Set(notes.filter((n) => n.hand === hand).map((n) => keyOf(n.midi)))]
@@ -174,6 +175,87 @@ try {
     assert.deepEqual([notes[0].string, notes[0].fret], [2, 2], 'the playable note keeps its written place')
   }
 
+  // ---- Guitar: fold a chord tone by an octave before dropping it
+  {
+    const dm7 = [50, 53, 57, 60].map((midi) => gnote(midi, 0, 2))
+    const { notes, summary } = repairFretted(dm7, GUITAR)
+    assert.equal(summary.flagged, 1, 'the original Dm7 voicing is outside a comfortable guitar reach')
+    assert.equal(summary.unplayable, 0, 'a recognized chord can be voiced without dropping a note')
+    assert.equal(summary.octaveAdjusted, 1, 'only one chord tone needs an octave fold')
+    assert.equal(summary.moved, 2, 'the revoiced position and octave fold are counted')
+    assert.deepEqual([...new Set(notes.map((note) => note.midi % 12))].sort((a, b) => a - b), [0, 2, 5, 9],
+      'the Dm7 pitch classes are preserved')
+    assert.equal(dm7[1].midi, 53, 'the source part is unchanged')
+    assert.ok(summary.issues.some((issue) => issue.kind === 'octave'))
+    assert.ok(playabilityNotice(summary).some((line) => line.includes('shifted by an octave')))
+  }
+
+  // ---- Guitar: reliable analyzed chord tones can use the same voicing repair
+  {
+    const chord = { startBeat: 0, beats: 2, symbol: 'Dm7', numeral: 'ii7', role: 'predominant',
+      tones: [50, 53, 57, 60], flats: false, confidence: 0.9 }
+    const dm7 = [50, 53, 57, 60].map((midi) => gnote(midi, 0, 2))
+    const { notes, summary } = repairFretted(dm7, GUITAR, { chords: [chord] })
+    assert.equal(summary.unplayable, 0)
+    assert.equal(summary.octaveAdjusted, 1)
+    assert.deepEqual([...new Set(notes.map((note) => note.midi % 12))].sort((a, b) => a - b), [0, 2, 5, 9],
+      'the written chord pitch classes remain')
+  }
+
+  // ---- Guitar: keep chord tones before a non-chord extension when six strings are not enough
+  {
+    const chord = { startBeat: 0, beats: 2, symbol: 'C', numeral: 'I', role: 'tonic',
+      tones: [48, 52, 55, 60], flats: false, confidence: 0.9 }
+    const notes = [40, 48, 52, 55, 60, 62, 64].map((midi) => gnote(midi, 0, 2))
+    const { notes: fixed, summary } = repairFretted(notes, GUITAR, { chords: [chord] })
+    assert.equal(summary.unplayable, 1, 'seven simultaneous notes still exceed six strings')
+    assert.deepEqual(fixed.filter((note) => note.notPlayable).map((note) => note.midi), [62],
+      'the non-chord D is reduced before the C-major chord tones')
+    assert.ok(fixed.filter((note) => !note.notPlayable).every((note) => [0, 4, 7].includes(note.midi % 12)))
+  }
+
+  // ---- Bass: distinct chord tones outrank a redundant doubling
+  {
+    const chord = { startBeat: 0, beats: 2, symbol: 'C', numeral: 'I', role: 'tonic',
+      tones: [48, 52, 55, 60], flats: false, confidence: 0.9 }
+    const notes = [36, 48, 52, 55, 60].map((midi) => gnote(midi, 0, 2))
+    const { notes: fixed, summary } = repairFretted(notes, BASS, { chords: [chord] })
+    assert.equal(summary.unplayable, 1, 'five simultaneous notes exceed the bass strings by one')
+    assert.equal(summary.unplayableNotes, 1)
+    assert.deepEqual([...new Set(fixed.filter((note) => !note.notPlayable).map((note) => note.midi % 12))].sort((a, b) => a - b),
+      [0, 4, 7], 'a redundant C is dropped before the third or fifth')
+    assert.deepEqual(fixed.filter((note) => note.notPlayable).map((note) => note.midi % 12), [0])
+  }
+
+  // ---- Synth playback follows repaired pitches and restores the original in As transcribed
+  {
+    const track = { id: 'guitar', instrument: 'other', name: 'Guitar', detail: '', gmProgram: 24 }
+    const backing = { id: 'backing', instrument: 'other', name: 'Backing', detail: '', gmProgram: 32 }
+    const chord = { startBeat: 0, beats: 2, symbol: 'Dm7', numeral: 'ii7', role: 'predominant',
+      tones: [50, 53, 57, 60], flats: false, confidence: 0.9 }
+    const notes = [50, 53, 57, 60].map((midi) => gnote(midi, 0, 2))
+    const backingNotes = [gnote(40, 0, 2)]
+    const song = { ...buildSong(), tracks: [track, backing], piano: [], vocals: [], drums: [], chords: [chord],
+      instrumentNotes: { guitar: notes, backing: backingNotes } }
+    const repaired = applyPlayability(song, { instrument: 'guitar', track })
+    const repairedNotes = repaired.song.instrumentNotes.guitar
+    const engine = new Engine(song)
+    const scheduled = []
+    engine.gmNote = (_time, note, _duration, _velocity, id) => scheduled.push({ id, midi: note.midi })
+    engine.setPlayablePart({ trackId: track.id, notes: repairedNotes })
+    engine.events(0, 2, 0, 0.5, false)
+    assert.deepEqual(scheduled.filter((note) => note.id === track.id).map((note) => note.midi),
+      repairedNotes.map((note) => note.midi), 'the selected part plays exactly the pitches displayed in the playable view')
+    assert.deepEqual(scheduled.filter((note) => note.id === backing.id).map((note) => note.midi), [40],
+      'the other synth part remains as transcribed')
+    assert.ok(repairedNotes.some((note, index) => note.midi !== notes[index].midi), 'the fixture contains an octave-folded note')
+    scheduled.length = 0
+    engine.setPlayablePart(null)
+    engine.events(0, 2, 0, 0.5, false)
+    assert.deepEqual(scheduled.filter((note) => note.id === track.id).map((note) => note.midi),
+      notes.map((note) => note.midi), 'As transcribed restores original synth pitches')
+  }
+
   // ---- Guitar: a let-ring arpeggio stays playable
   {
     const arpeggio = [48, 52, 55, 60, 64].map((m, i) => gnote(m, i * 0.5, 4 - i * 0.5))
@@ -212,6 +294,13 @@ try {
     const { notes, summary } = repairFretted(reach, BASS)
     assert.equal(summary.flagged, 1)
     assert.ok(fitsAt(notes, 0, BASS))
+
+    const lowChord = { startBeat: 0, beats: 1, tones: [24], confidence: 0.9 }
+    const folded = repairFretted([gnote(24, 0, 1)], BASS, { chords: [lowChord] })
+    assert.equal(folded.summary.flagged, 1, 'a chord tone outside the bass range is still unplayable as written')
+    assert.equal(folded.summary.octaveAdjusted, 1, 'the out-of-range chord tone can be folded into range')
+    assert.equal(folded.summary.unplayable, 0)
+    assert.equal(folded.notes[0].midi, 36)
   }
 
   // ---- The song a practice view shows

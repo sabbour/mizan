@@ -24,7 +24,8 @@ const DEFAULT_BPM = 120
  * (the right hand keeps the hat or ride pattern), a cymbal changing hands, and a slight lean to the right hand.
  * So grooves are right on the cymbal and left on the snare; fast single strokes alternate; fills move toward the
  * side they travel to without crossing; and doubles appear only where alternating would force a crossing or an
- * impossible repeat. Feet get no hand; moments with more than two hand strokes, or two cymbals, get no suggestion.
+ * impossible repeat. Two simultaneous cymbals use both hands; feet get no hand, and moments with more than two hand
+ * strokes get no suggestion.
  */
 export function stickingFor(song: Song): Sticking {
   if (song.drums.some((hit) => hit.hand)) return { hands: song.drums.map((hit) => hit.hand), source: 'lesson' }
@@ -66,8 +67,6 @@ export function suggestSticking(song: Song): (Hand | undefined)[] {
     const strokes = [...moments.get(beat)!.values()]
     if (strokes.length === 1) return [{ left: strokes[0], right: [] }, { left: [], right: strokes[0] }]
     if (strokes.length !== 2) return null
-    const cymbals = strokes.filter(isCymbal)
-    if (cymbals.length === 2) return null
     // Two sounds on one drum are played with both hands: the higher-pitched on the right, as before.
     const [a, b] = [...strokes].sort((p, q) => x(p) - x(q) || (song.drums[q[0]].sourceMidi ?? 0) - (song.drums[p[0]].sourceMidi ?? 0))
     if (where(a) === where(b)) return [{ left: a, right: b }]

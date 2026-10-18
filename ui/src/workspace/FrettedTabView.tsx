@@ -222,8 +222,8 @@ export function FrettedTabView({ song, track, trackId, beat, playing, countingIn
                 <foreignObject x={x - 13} y={y - 11} width="26" height="22">
                   <button type="button" className={`fretted-fret${(rhythm(note.beats)?.base ?? 0) >= 2 ? ' is-open-length' : ''}${note.adjusted ? ' is-adjusted' : ''}`}
                     data-adjusted={note.adjusted ? 'true' : undefined}
-                    aria-label={`${note.position.pitchName}, string ${note.position.conventionalStringNumber}, fret ${note.position.fret}${note.finger ? `, finger ${note.finger}` : ''}${note.adjusted ? ', moved to make this playable' : ''}; seek to beat ${note.startBeat}`}
-                    title={`${note.position.pitchName} · string ${note.position.conventionalStringNumber}, fret ${note.position.fret} · ${Number(note.beats.toFixed(2))} beats${note.adjusted ? ' · moved to make this playable' : ''}`}
+                    aria-label={`${note.position.pitchName}, string ${note.position.conventionalStringNumber}, fret ${note.position.fret}${note.finger ? `, finger ${note.finger}` : ''}${note.adjusted ? ', adjusted to make this playable' : ''}; seek to beat ${note.startBeat}`}
+                    title={`${note.position.pitchName} · string ${note.position.conventionalStringNumber}, fret ${note.position.fret} · ${Number(note.beats.toFixed(2))} beats${note.adjusted ? ' · adjusted to make this playable' : ''}`}
                     onClick={() => onPick(Math.max(layout.bar.startBeat, note.startBeat))}>{note.position.fret}</button>
                 </foreignObject>
               </g>
