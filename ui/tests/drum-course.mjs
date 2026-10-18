@@ -469,7 +469,7 @@ try {
     assert.equal((sevenEight.match(/<beam number="1">continue<\/beam>/g) ?? []).length, 1)
   }
 
-  // Suggested sticking for transcribed drums: deterministic, right-hand lead, feet and ambiguous moments left blank.
+  // Suggested sticking for transcribed drums: deterministic, right-hand lead, feet and impossible moments left blank.
   {
     const base = lessonSong(lesson('rock-beat'))
     const song = (drums) => ({ ...base, source: 'youtube', drums })
@@ -491,7 +491,7 @@ try {
     const crowded = song([hit('hihat', 0, 42), hit('snare', 0), hit('hightom', 0, 50)])
     assert.deepEqual(suggestSticking(crowded), [undefined, undefined, undefined], 'more than two hand strokes are not guessed')
     const cymbals = song([hit('crash', 0), hit('ride', 0)])
-    assert.deepEqual(suggestSticking(cymbals), [undefined, undefined], 'two cymbals together are not guessed')
+    assert.deepEqual(suggestSticking(cymbals), ['left', 'right'], 'two cymbals together use both hands')
     const feet = song([hit('kick', 0), hit('hihat', 1, 44)])
     assert.deepEqual(suggestSticking(feet), [undefined, undefined], 'feet never get a hand')
     const before = structuredClone(groove.drums)

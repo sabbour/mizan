@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 import shutil
 import sqlite3
 from contextlib import closing
@@ -10,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .errors import (FolderNameExists, FolderNotFound, InvalidFolderName, InvalidPosition,
-                     InvalidScoreTrackInstrument, ScoreTrackAmbiguous, ScoreTrackInstrumentAmbiguous,
+                     InvalidPlayability, InvalidScoreTrackInstrument, ScoreTrackAmbiguous, ScoreTrackInstrumentAmbiguous,
                      ScoreTrackInstrumentNotEditable, ScoreTrackNotFound, SongNotFound)
 from .paths import home
 
@@ -299,15 +301,185 @@ class LibraryStore:
             if cursor.rowcount != 1:
                 raise SongNotFound()
 
-    def update_recording(self, song_id: str, artifacts: dict, song: dict, tempo_map: list[dict]) -> dict:
-        entry = self.get(song_id)
-        Path(entry["song_path"]).write_text(json.dumps(song, ensure_ascii=True, allow_nan=False), encoding="utf-8")
+    @staticmethod
+    def _validate_playability_summary(summary: Any, instrument: str, note_count: int) -> dict:
+        fields = ("flagged", "moved", "octaveAdjusted", "unplayable", "unplayableNotes", "warnings")
+        if not isinstance(summary, dict) or summary.get("instrument") != instrument \
+                or any(type(summary.get(field)) is not int or summary[field] < 0 for field in fields) \
+                or not isinstance(summary.get("issues"), list):
+            raise InvalidPlayability()
+        if any(summary[field] > note_count for field in fields):
+            raise InvalidPlayability()
+        for issue in summary["issues"]:
+            if not isinstance(issue, dict) or type(issue.get("beat")) not in (int, float) \
+                    or not math.isfinite(issue["beat"]) or issue["beat"] < 0 \
+                    or issue.get("kind") not in ("moved", "octave", "unplayable", "jump", "repeat") \
+                    or type(issue.get("count")) is not int or issue["count"] < 1:
+                raise InvalidPlayability()
+        return summary
+
+    @staticmethod
+    def _validate_optimized_notes(source: Any, optimized: Any, *, drum: bool = False) -> None:
+        if not isinstance(source, list) or not isinstance(optimized, list) or len(source) != len(optimized):
+            raise InvalidPlayability()
+        allowed = {"hand"} if drum else {
+            "midi", "hand", "finger", "string", "fret", "adjusted", "notPlayable",
+        }
+        for original, result in zip(source, optimized):
+            if not isinstance(original, dict) or not isinstance(result, dict):
+                raise InvalidPlayability()
+            for field in (original.keys() | result.keys()) - allowed:
+                if original.get(field) != result.get(field) or (field in original) != (field in result):
+                    raise InvalidPlayability()
+            if drum:
+                if result.get("hand") not in (None, "left", "right"):
+                    raise InvalidPlayability()
+                continue
+            midi = result.get("midi")
+            if type(midi) not in (int, float) or not math.isfinite(midi) or not 0 <= midi <= 127:
+                raise InvalidPlayability()
+            if result.get("hand") not in (None, "left", "right") \
+                    or result.get("finger") not in (None, 1, 2, 3, 4, 5) \
+                    or type(result.get("string", 1)) is not int or type(result.get("fret", 0)) is not int \
+                    or result.get("string", 1) < 1 or result.get("fret", 0) < 0:
+                raise InvalidPlayability()
+            if any(type(result.get(flag, False)) is not bool for flag in ("adjusted", "notPlayable")):
+                raise InvalidPlayability()
+
+    @staticmethod
+    def _playability_source(song: dict, key: str) -> list | None:
+        if key == "piano":
+            return song.get("piano")
+        track_id = key.removeprefix("track:") if key.startswith("track:") else key
+        if not track_id:
+            return None
+        tracks = [track for track in song.get("tracks", [])
+                  if isinstance(track, dict) and track.get("id") == track_id and track.get("group") != "creative"]
+        if len(tracks) != 1:
+            return None
+        track = tracks[0]
+        if track.get("instrument") == "piano":
+            return [note for note in song.get("piano", []) if note.get("trackId") == track_id]
+        notes = song.get("instrumentNotes", {}).get(track_id)
+        return notes if isinstance(notes, list) else None
+
+    def save_playability(self, song_id: str, result: dict) -> None:
+        if not isinstance(result, dict) or result.get("version") != "constrained-path-v3" \
+                or not isinstance(result.get("parts"), dict) \
+                or not result["parts"] and not isinstance(result.get("drums"), dict):
+            raise InvalidPlayability()
         with closing(self._connect()) as connection, connection:
-            connection.execute("""
-                UPDATE songs SET recording = 1, duration = ?, artifacts = ?, tempo_map = ?
-                WHERE id = ?
-            """, (song.get("durationSeconds"), json.dumps(artifacts),
-                  json.dumps(tempo_map), song_id))
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT song_path FROM songs WHERE id = ?", (song_id,)).fetchone()
+            if row is None:
+                raise SongNotFound()
+            path = Path(row["song_path"])
+            try:
+                song = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise InvalidPlayability() from exc
+
+            stored_parts = {}
+            for key, part in result["parts"].items():
+                if not isinstance(key, str) or not key or not isinstance(part, dict) \
+                        or not isinstance(part.get("sourceSignature"), str) \
+                        or not isinstance(part.get("sourceNotes"), list):
+                    raise InvalidPlayability()
+                expected = self._playability_source(song, key)
+                if expected is None or part["sourceNotes"] != expected:
+                    raise InvalidPlayability()
+                self._validate_optimized_notes(expected, part.get("notes"))
+                summary = part.get("summary")
+                if not isinstance(summary, dict) or summary.get("instrument") not in ("piano", "guitar", "bass"):
+                    raise InvalidPlayability()
+                summary = self._validate_playability_summary(summary, summary["instrument"], len(expected))
+                if len(part["sourceSignature"]) > 100:
+                    raise InvalidPlayability()
+                stored_parts[key] = {
+                    "sourceSignature": part["sourceSignature"], "notes": part["notes"], "summary": summary,
+                }
+
+            drums = result.get("drums")
+            stored_drums = None
+            if drums is not None:
+                if not isinstance(drums, dict) or not isinstance(drums.get("sourceSignature"), str) \
+                        or not isinstance(drums.get("sourceHits"), list) \
+                        or not isinstance(drums.get("trackSummaries"), dict) \
+                        or drums["sourceHits"] != song.get("drums"):
+                    raise InvalidPlayability()
+                self._validate_optimized_notes(drums["sourceHits"], drums.get("hits"), drum=True)
+                if any(source.get("hand") and source.get("hand") != optimized.get("hand")
+                       for source, optimized in zip(drums["sourceHits"], drums["hits"])):
+                    raise InvalidPlayability()
+                summary = self._validate_playability_summary(
+                    drums.get("summary"), "drums", len(drums["sourceHits"]))
+                source_track_ids = {
+                    hit.get("trackId") for hit in drums["sourceHits"]
+                    if isinstance(hit.get("trackId"), str) and hit.get("trackId")
+                }
+                if set(drums["trackSummaries"]) != source_track_ids:
+                    raise InvalidPlayability()
+                track_summaries = {}
+                for track_id, track_summary in drums["trackSummaries"].items():
+                    if not isinstance(track_id, str) or not track_id:
+                        raise InvalidPlayability()
+                    count = sum(hit.get("trackId") == track_id for hit in drums["sourceHits"])
+                    track_summaries[track_id] = self._validate_playability_summary(
+                        track_summary, "drums", count)
+                if len(drums["sourceSignature"]) > 100:
+                    raise InvalidPlayability()
+                stored_drums = {
+                    "sourceSignature": drums["sourceSignature"], "hits": drums["hits"], "summary": summary,
+                    "trackSummaries": track_summaries,
+                }
+
+            song["playability"] = {
+                "version": result["version"], "parts": stored_parts,
+                **({"drums": stored_drums} if stored_drums else {}),
+            }
+            temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+            try:
+                temporary.write_text(json.dumps(song, ensure_ascii=True, allow_nan=False), encoding="utf-8")
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    def update_recording(self, song_id: str, artifacts: dict, song: dict, tempo_map: list[dict]) -> dict:
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT song_path, artifacts FROM songs WHERE id = ?", (song_id,)).fetchone()
+            if row is None:
+                raise SongNotFound()
+            path = Path(row["song_path"])
+            try:
+                current_song = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise InvalidPlayability() from exc
+            from .alignment import apply_tempo_map
+
+            updated_song = apply_tempo_map(current_song, tempo_map)
+            if "durationSeconds" in song:
+                updated_song["durationSeconds"] = song["durationSeconds"]
+            updated_song.pop("playability", None)
+            updated_artifacts = json.loads(row["artifacts"])
+            if artifacts.get("mix") is not None:
+                updated_artifacts["mix"] = artifacts["mix"]
+            analysis = path.with_name(f"analysis-{uuid4().hex}.json")
+            try:
+                analysis.write_text(json.dumps(updated_song, ensure_ascii=True, allow_nan=False), encoding="utf-8")
+                updated_artifacts["analysis"] = str(analysis)
+                cursor = connection.execute("""
+                    UPDATE songs
+                    SET recording = 1, duration = ?, artifacts = ?, tempo_map = ?, song_path = ?
+                    WHERE id = ? AND song_path = ?
+                """, (updated_song.get("durationSeconds"), json.dumps(updated_artifacts),
+                      json.dumps(tempo_map), str(analysis), song_id, str(path)))
+                if cursor.rowcount != 1:
+                    raise SongNotFound()
+            except Exception:
+                analysis.unlink(missing_ok=True)
+                raise
         return self.get(song_id)
 
     def _commit_score_revision(self, song_id: str, entry: dict, path: Path, song: dict,
@@ -316,6 +488,7 @@ class LibraryStore:
         from .engine.output import export_midi, export_musicxml
 
         revision = uuid4().hex
+        song.pop("playability", None)
         analysis = path.with_name(f"analysis-{revision}.json")
         midi = path.with_name(f"score-{revision}.mid")
         musicxml = path.with_name(f"score-{revision}.musicxml")

@@ -47,6 +47,38 @@ export type Pedal = { controller: 64 | 66 | 67; startBeat: number; beats: number
 export type ChordLabel = { startBeat: number; beats: number; symbol: string }
 export type MelodyNote = Omit<PianoNote, 'hand'> & { hand?: PianoNote['hand']; sourceInstrument?: string }
 
+export type PlayabilityIssue = {
+  beat: number
+  kind: 'moved' | 'octave' | 'unplayable' | 'jump' | 'repeat'
+  count: number
+}
+
+export type PlayabilitySummary = {
+  instrument: 'piano' | 'guitar' | 'bass' | 'drums'
+  flagged: number
+  moved: number
+  octaveAdjusted: number
+  unplayable: number
+  unplayableNotes: number
+  warnings: number
+  issues: PlayabilityIssue[]
+}
+
+export type StoredPlayability = {
+  version: string
+  parts: Record<string, {
+    sourceSignature: string
+    notes: (PianoNote | MelodyNote)[]
+    summary: PlayabilitySummary
+  }>
+  drums?: {
+    sourceSignature: string
+    hits: DrumHit[]
+    summary: PlayabilitySummary
+    trackSummaries: Record<string, PlayabilitySummary>
+  }
+}
+
 export type DrumLane = 'crash' | 'ride' | 'hihat' | 'openhat' | 'hightom' | 'snare' | 'floortom' | 'kick'
 
 /**
@@ -129,6 +161,8 @@ export type Song = {
   tempoMap?: { beat: number; time: number }[]
   /** Present when the decoder reported how many capped chunks it continued past. Missing means unknown (legacy result). */
   decodingErrors?: DecodingErrors
+  /** Derived practice-only parts; original transcription remains in piano/instrumentNotes. */
+  playability?: StoredPlayability
 }
 
 export function hasPitchedScore(song: Song): boolean {

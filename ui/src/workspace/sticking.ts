@@ -4,7 +4,7 @@ import type { Song } from './song'
 
 export type Hand = 'left' | 'right'
 /** A hand for each drum hit (undefined for feet and for strokes no hand is suggested for), and where it came from. */
-export type Sticking = { hands: (Hand | undefined)[]; source: 'lesson' | 'suggested' }
+export type Sticking = { hands: (Hand | undefined)[]; source: 'lesson' | 'suggested' | 'transcribed' }
 
 const CYMBALS = new Set<KitPiece>(['hihat', 'ride', 'crash'])
 /** Where each piece sits across a right-handed kit, from the player's far left to far right (generic rack toms average). */
@@ -28,6 +28,11 @@ const DEFAULT_BPM = 120
  * strokes get no suggestion.
  */
 export function stickingFor(song: Song): Sticking {
+  const stored = song.playability?.drums
+  if (stored?.summary.moved && song.drums.length > 0 &&
+      song.drums.every((hit) => stored.hits.includes(hit))) {
+    return { hands: song.drums.map((hit) => hit.hand), source: 'suggested' }
+  }
   if (song.drums.some((hit) => hit.hand)) return { hands: song.drums.map((hit) => hit.hand), source: 'lesson' }
   return { hands: suggestSticking(song), source: 'suggested' }
 }

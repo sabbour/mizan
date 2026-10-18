@@ -145,8 +145,7 @@ export function Workspace({
     },
     [song, voiced, instrument, pianoGmTrack, track],
   )
-  // The stored song is never changed: hands and string choices are made playable from it each time, and the player can
-  // switch back to the music exactly as transcribed.
+  // The original stays separate from the stored practice layer, so the player can always switch back to the transcription.
   const [asTranscribed, setAsTranscribed] = useState(false)
   const playableTarget = instrument === 'chords' || chart || track?.group === 'creative' ? null : practiceInstrument === 'drums' ? null : practiceInstrument
   const playable = useMemo(() => applyPlayability(chosen, { instrument: playableTarget, track }), [chosen, playableTarget, track])
@@ -157,8 +156,12 @@ export function Workspace({
     ? 'keyboard' : practice.piano
   const kitPane = !chart && viewInstrument === 'drums' && practice.drums === 'kit'
   const keyboardPane = !chart && practiceInstrument === 'piano' && pianoPracticeView === 'keyboard'
-  const sticking = useMemo(() => viewInstrument === 'drums' && showSticking && viewed.drums.length ? stickingFor(viewed) : undefined,
-    [viewInstrument, showSticking, viewed])
+  const sticking = useMemo(() => {
+    if (viewInstrument !== 'drums' || !showSticking || !viewed.drums.length) return undefined
+    if (asTranscribed && !viewed.drums.some((hit) => hit.hand))
+      return { hands: viewed.drums.map(() => undefined), source: 'transcribed' as const }
+    return stickingFor(viewed)
+  }, [viewInstrument, showSticking, viewed, asTranscribed])
   const xml = useMemo(() => {
     if (chart) return ''
     if (viewInstrument === 'chords') return chordsXml(viewed)

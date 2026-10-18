@@ -171,6 +171,11 @@ class InvalidPosition(MizanError):
     message = "The saved practice position is invalid."
 
 
+class InvalidPlayability(MizanError):
+    code = "invalid_playability"
+    message = "The playable score is invalid or the transcription changed. Reopen the song and try again."
+
+
 class InvalidTiming(MizanError):
     code = "invalid_timing"
     message = "The timing adjustment is invalid."

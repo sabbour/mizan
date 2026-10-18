@@ -790,6 +790,12 @@ class Api:
             return {"ok": True}
         return response(save)
 
+    def save_playability(self, song_id: str, result: dict) -> dict[str, Any]:
+        def save():
+            self._library.save_playability(song_id, result)
+            return {"ok": True}
+        return response(save)
+
     def delete_song(self, song_id: str) -> dict[str, Any]:
         def delete():
             self._library.delete(song_id)
