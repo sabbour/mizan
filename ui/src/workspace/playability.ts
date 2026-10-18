@@ -19,7 +19,7 @@ export type { PlayabilityIssue, PlayabilitySummary } from './song'
  */
 
 const EPS = 1e-6
-export const PLAYABILITY_VERSION = 'constrained-path-v3'
+export const PLAYABILITY_VERSION = 'constrained-path-v4'
 
 /** Most keys one hand can hold down at once. */
 export const PIANO_MAX_NOTES = 5
@@ -427,7 +427,7 @@ export function repairFretted(
   for (let index = items.length - 1; index >= 0; index--)
     if (!items[index].candidates.length) items.splice(index, 1)
 
-  const chordAnchors = new Set<number>()
+  const bassAnchors = new Set<number>()
   if (config.id === 'guitar') {
     for (const chord of options.chords ?? []) {
       if (chord.confidence < 0.5 || chord.beats <= 0) continue
@@ -435,8 +435,72 @@ export function repairFretted(
         item.start < chord.startBeat + chord.beats && item.end > chord.startBeat)
       if (sounding.length) {
         const lowest = sounding.reduce((best, next) => next.midi < best.midi ? next : best)
-        chordAnchors.add(lowest.index)
+        bassAnchors.add(lowest.index)
       }
+    }
+  }
+
+  const bassFloorByItem = new Map<number, number>()
+  if (config.id === 'guitar') {
+    const playable = items.filter((item) => item.originallyPlayable)
+    const starts = [...playable].sort((a, b) => a.start - b.start || a.index - b.index)
+    const ends = [...playable].sort((a, b) => a.end - b.end || a.index - b.index)
+    const times = [...new Set(playable.flatMap((item) => [item.start, item.end]))].sort((a, b) => a - b)
+    const activeAtPitch = Array.from({ length: 128 }, () => new Set<number>())
+    const counts = new Array<number>(128).fill(0)
+    const active = new Set<number>()
+    const floors: (number | null)[] = []
+    let nextStart = 0
+    let nextEnd = 0
+    for (const beat of times) {
+      while (nextEnd < ends.length && ends[nextEnd].end <= beat + EPS) {
+        const item = ends[nextEnd++]
+        if (!active.delete(item.index)) continue
+        activeAtPitch[item.midi].delete(item.index)
+        counts[item.midi]--
+      }
+      while (nextStart < starts.length && starts[nextStart].start <= beat + EPS) {
+        const item = starts[nextStart++]
+        if (item.end <= beat + EPS) continue
+        active.add(item.index)
+        activeAtPitch[item.midi].add(item.index)
+        counts[item.midi]++
+      }
+      let lowest = 0
+      while (lowest < counts.length && counts[lowest] === 0) lowest++
+      const floor = lowest < counts.length ? lowest : null
+      floors.push(floor)
+      if (floor !== null) for (const index of activeAtPitch[floor]) bassAnchors.add(index)
+    }
+
+    let treeSize = 1
+    while (treeSize < floors.length) treeSize *= 2
+    const floorTree = new Array<number>(treeSize * 2).fill(-Infinity)
+    floors.forEach((floor, index) => { floorTree[treeSize + index] = floor ?? -Infinity })
+    for (let node = treeSize - 1; node > 0; node--)
+      floorTree[node] = Math.max(floorTree[node * 2], floorTree[node * 2 + 1])
+
+    const lowerBound = (beat: number) => {
+      let low = 0
+      let high = times.length
+      while (low < high) {
+        const middle = (low + high) >> 1
+        if (times[middle] < beat) low = middle + 1
+        else high = middle
+      }
+      return low
+    }
+    for (const item of items) {
+      let left = lowerBound(item.start - EPS) + treeSize
+      let right = lowerBound(item.end - EPS) + treeSize
+      let floor = -Infinity
+      while (left < right) {
+        if (left % 2) floor = Math.max(floor, floorTree[left++])
+        if (right % 2) floor = Math.max(floor, floorTree[--right])
+        left = Math.floor(left / 2)
+        right = Math.floor(right / 2)
+      }
+      if (Number.isFinite(floor)) bassFloorByItem.set(item.index, floor)
     }
   }
 
@@ -507,8 +571,13 @@ export function repairFretted(
         return
       }
       const item = order[depth]
+      const bassFloor = bassFloorByItem.get(item.index)
+      // A fold must not move a playable guitar bass anchor or create a lower note than it.
       for (const candidate of item.candidates.filter((place) =>
-        !place.octaveFold || allowOctaveFolds && (config.id === 'guitar' || !endpoints.has(item.index)))) {
+        !place.octaveFold || allowOctaveFolds &&
+          (config.id === 'guitar' || !endpoints.has(item.index)) &&
+          !(config.id === 'guitar' && bassAnchors.has(item.index) && item.originallyPlayable) &&
+          (config.id !== 'guitar' || bassFloor === undefined || place.midi >= bassFloor))) {
         const place: Placed = { index: item.index, midi: candidate.midi, string: candidate.string, fret: candidate.fret, end: item.end }
         stack.push(place)
         if (!shapeFits(stack, config)) { stack.pop(); continue }
@@ -544,7 +613,7 @@ export function repairFretted(
     }
     const rank = new Map(priority.map((item, index) => [item.index, index]))
     const distinctPitches = new Set(byMidi.map((item) => item.midi)).size
-    const endpoints = new Set(chordAnchors)
+    const endpoints = new Set(bassAnchors)
     if (distinctPitches > 1) endpoints.add(byMidi[0].index)
     const distinctChordTones = new Set<number>()
     const seenChordTones = new Set<number>()
