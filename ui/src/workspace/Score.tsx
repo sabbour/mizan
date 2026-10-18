@@ -234,6 +234,7 @@ type Props = {
   song: Song
   engine: Engine
   bar: number
+  seekRevision?: number
   loop: { startBar: number; endBar: number } | null
   confidence: Confidence[]
   /** Letter names drawn inside the noteheads (pitched scores only). */
@@ -332,7 +333,7 @@ export function scoreX(layout: Layout, beat: number, meter: number | Song): numb
   return left.x + (right.x - left.x) * (beat - left.beat) / (right.beat - left.beat)
 }
 
-export function Score({ xml, song, engine, bar, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', fingering = true, onPick, previewId }: Props) {
+export function Score({ xml, song, engine, bar, seekRevision = 0, loop, confidence, noteNames, instrument, playing, audioLoading, audioError, vocalGuide, instrumentGuide, practice = 'score', fingering = true, onPick, previewId }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const osmd = useRef<OpenSheetMusicDisplay | null>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -352,6 +353,7 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
   // or the playhead jumps (go to, bar pick, loop wrap) instead of advancing one bar.
   const browsing = useRef(false)
   const previousBar = useRef(bar)
+  const previousSeekRevision = useRef(seekRevision)
 
   const clearHighlights = useCallback(() => {
     for (const el of lit.current) el.classList.remove('score-head-active')
@@ -473,9 +475,11 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
   useEffect(() => {
     const el = viewport.current
     const target = activeBar.current
-    const jumped = bar !== previousBar.current && bar !== previousBar.current + 1
+    const jumped = seekRevision !== previousSeekRevision.current ||
+      (bar !== previousBar.current && bar !== previousBar.current + 1)
     previousBar.current = bar
     if (!el || !target || !layout || status !== 'ready') return
+    previousSeekRevision.current = seekRevision
     const usable = usableSpan(el)
     const barRect = target.getBoundingClientRect()
     if (browsing.current) {
@@ -484,7 +488,7 @@ export function Score({ xml, song, engine, bar, loop, confidence, noteNames, ins
     }
     const delta = centerDelta(usable, barRect)
     if (Math.abs(delta) > 1) el.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' })
-  }, [bar, layout, playing, reduced, status, viewport])
+  }, [bar, layout, playing, reduced, seekRevision, status, viewport])
 
   const scrollToStart = () => {
     const el = viewport.current
