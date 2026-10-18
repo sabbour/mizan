@@ -5,7 +5,7 @@ import { createServer } from 'vite'
 globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
-  const { repairPiano, repairFretted, applyPlayability, playabilityNotice, shapeFits } = await vite.ssrLoadModule('/src/workspace/playability.ts')
+  const { repairPiano, repairFretted, preparePlayableSong, applyPlayability, playabilityNotice, shapeFits } = await vite.ssrLoadModule('/src/workspace/playability.ts')
   const { GUITAR, BASS, planFrettedTab } = await vite.ssrLoadModule('/src/workspace/fretboard.ts')
   const { buildSong } = await vite.ssrLoadModule('/src/workspace/song.ts')
   const { pianoXml, instrumentXml, frettedTabXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
@@ -163,6 +163,15 @@ try {
     assert.notEqual(plan[0].position.string, plan[1].position.string)
   }
 
+  // ---- Guitar: move a held note early when a later open-string note needs its string
+  {
+    const arpeggio = [gnote(46, 0, 2), gnote(45, 1, 1)]
+    const { notes, summary } = repairFretted(arpeggio, GUITAR)
+    assert.equal(summary.flagged, 1)
+    assert.equal(summary.unplayable, 0, 'the earlier note moves before the open A string is needed')
+    assert.deepEqual(notes.map(({ string, fret }) => [string, fret]), [[1, 6], [2, 0]])
+  }
+
   // ---- Guitar: a six-fret stretch at fret 2
   const stretch = [gnote(47, 0, 2, { string: 2, fret: 2 }), gnote(58, 0, 2, { string: 3, fret: 8 })]
   {
@@ -214,17 +223,20 @@ try {
     assert.ok(fixed.filter((note) => !note.notPlayable).every((note) => [0, 4, 7].includes(note.midi % 12)))
   }
 
-  // ---- Bass: distinct chord tones outrank a redundant doubling
+  // ---- Bass: preserve the bass anchor and chord tones; fold or drop redundant doublings first
   {
     const chord = { startBeat: 0, beats: 2, symbol: 'C', numeral: 'I', role: 'tonic',
       tones: [48, 52, 55, 60], flats: false, confidence: 0.9 }
     const notes = [36, 48, 52, 55, 60].map((midi) => gnote(midi, 0, 2))
     const { notes: fixed, summary } = repairFretted(notes, BASS, { chords: [chord] })
-    assert.equal(summary.unplayable, 1, 'five simultaneous notes exceed the bass strings by one')
+    assert.equal(summary.unplayable, 1, 'the two-octave voicing cannot fit a bass hand position')
     assert.equal(summary.unplayableNotes, 1)
+    assert.equal(fixed[0].midi, 36, 'the bass anchor keeps its written pitch')
+    assert.equal(fixed[0].notPlayable, undefined, 'the lowest note stays playable')
     assert.deepEqual([...new Set(fixed.filter((note) => !note.notPlayable).map((note) => note.midi % 12))].sort((a, b) => a - b),
-      [0, 4, 7], 'a redundant C is dropped before the third or fifth')
-    assert.deepEqual(fixed.filter((note) => note.notPlayable).map((note) => note.midi % 12), [0])
+      [0, 4, 7], 'the bass anchor and distinct chord tones remain')
+    assert.ok(fixed.every((note, index) => note.midi % 12 === notes[index].midi % 12),
+      'octave folds preserve pitch classes')
   }
 
   // ---- Synth playback follows repaired pitches and restores the original in As transcribed
@@ -298,7 +310,7 @@ try {
     const lowChord = { startBeat: 0, beats: 1, tones: [24], confidence: 0.9 }
     const folded = repairFretted([gnote(24, 0, 1)], BASS, { chords: [lowChord] })
     assert.equal(folded.summary.flagged, 1, 'a chord tone outside the bass range is still unplayable as written')
-    assert.equal(folded.summary.octaveAdjusted, 1, 'the out-of-range chord tone can be folded into range')
+    assert.equal(folded.summary.octaveAdjusted, 1, 'a single out-of-range bass note can be folded into range')
     assert.equal(folded.summary.unplayable, 0)
     assert.equal(folded.notes[0].midi, 36)
   }
@@ -360,6 +372,78 @@ try {
     assert.ok(frettedTabXml(sevenFixed, track, GUITAR).includes('<lyric><text>!</text></lyric>'))
     assert.ok(instrumentXml(sevenFixed, track).includes('<lyric><text>!</text></lyric>'))
     assert.ok(!instrumentXml(sevenSong, track).includes('<text>!</text>'))
+  }
+  {
+    const pianoTrack = { id: 'piano', instrument: 'piano', name: 'Piano', detail: '' }
+    const secondPiano = { id: 'second-piano', instrument: 'piano', name: 'Second piano', detail: '' }
+    const notes = [...[60, 62, 64, 65, 67, 69, 71].map((midi) => piano(midi, 'right', 0, 1, { trackId: pianoTrack.id })),
+      piano(48, 'left', 0, 1, { trackId: secondPiano.id })]
+    const song = { ...buildSong(), tracks: [pianoTrack, secondPiano], piano: notes, drums: [] }
+    const prepared = preparePlayableSong(song)
+    assert.deepEqual(Object.keys(prepared.request.parts).sort(), ['track:piano', 'track:second-piano'])
+    const selected = { ...prepared.song, piano: notes.filter((note) => note.trackId === pianoTrack.id) }
+    const playable = applyPlayability(selected, { instrument: 'piano', track: pianoTrack })
+    assert.deepEqual(playable.song.piano, prepared.song.playability.parts['track:piano'].notes)
+    assert.equal(playable.summary, prepared.song.playability.parts['track:piano'].summary)
+  }
+  {
+    const pianoTrack = { id: 'piano', instrument: 'other', gmProgram: 0, name: 'Keyboard', detail: '' }
+    const secondPiano = { id: 'second-piano', instrument: 'piano', name: 'Second piano', detail: '' }
+    const gmNotes = [60, 62, 64, 65, 67, 69, 71]
+      .map((midi) => piano(midi, 'right', 0, 1, { trackId: pianoTrack.id }))
+    const song = { ...buildSong(), tracks: [pianoTrack, secondPiano], piano: [
+      piano(48, 'left', 0, 1, { trackId: secondPiano.id }),
+    ], instrumentNotes: { piano: gmNotes }, drums: [] }
+    const prepared = preparePlayableSong(song)
+    assert.ok(prepared.request.parts['track:piano'], 'track IDs cannot collide with the aggregate piano key')
+    const selected = { ...prepared.song, piano: gmNotes }
+    const playable = applyPlayability(selected, { instrument: 'piano', track: pianoTrack })
+    assert.deepEqual(playable.song.piano, prepared.song.playability.parts['track:piano'].notes)
+    assert.equal(playable.summary, prepared.song.playability.parts['track:piano'].summary)
+  }
+  {
+    const track = { id: 'drums', instrument: 'drums', name: 'Drum kit', detail: '' }
+    const hit = { trackId: track.id, lane: 'snare', sourceMidi: 38, startBeat: 0, velocity: 0.7 }
+    const song = { ...buildSong(), bpm: 120, tracks: [track], drums: [hit, { ...hit }] }
+    const prepared = preparePlayableSong(song)
+    const playable = applyPlayability(prepared.song, { instrument: null, track })
+    assert.equal(playable.summary?.moved, 1, 'duplicate hit events at one written moment are one assigned stroke')
+    assert.deepEqual(playable.song.drums.map((note) => note.hand), ['right', 'right'])
+  }
+  {
+    const track = { id: 'drums', instrument: 'drums', name: 'Drum kit', detail: '' }
+    const drums = [
+      { trackId: track.id, lane: 'snare', sourceMidi: 38, startBeat: 0, velocity: 0.7, hand: 'left' },
+      { trackId: track.id, lane: 'hihat', sourceMidi: 42, startBeat: 0.5, velocity: 0.7, hand: 'right' },
+    ]
+    const song = { ...buildSong(), bpm: 120, tracks: [track], drums }
+    const prepared = preparePlayableSong(song)
+    assert.deepEqual(prepared.song.playability.drums.hits.map((note) => note.hand), ['left', 'right'])
+    assert.deepEqual(prepared.request.drums.sourceHits, drums, 'authored sticking stays recoverable with the raw hits')
+    assert.deepEqual(applyPlayability(prepared.song, { instrument: null, track }).song.drums.map((note) => note.hand), ['left', 'right'])
+    assert.deepEqual(song.drums, drums, 'preparing a song never mutates its authored sticking')
+  }
+  {
+    const drumsA = { id: 'drums-a', instrument: 'drums', name: 'Drum part A', detail: '' }
+    const drumsB = { id: 'drums-b', instrument: 'drums', name: 'Drum part B', detail: '' }
+    const drums = [
+      { trackId: drumsA.id, lane: 'snare', sourceMidi: 38, startBeat: 0, velocity: 0.8 },
+      { trackId: drumsA.id, lane: 'hihat', sourceMidi: 42, startBeat: 0, velocity: 0.7 },
+      { trackId: drumsB.id, lane: 'crash', sourceMidi: 49, startBeat: 0, velocity: 0.9 },
+      { trackId: drumsA.id, lane: 'snare', sourceMidi: 38, startBeat: 1, velocity: 0.8 },
+    ]
+    const prepared = preparePlayableSong({ ...buildSong(), bpm: 120, tracks: [drumsA, drumsB], drums })
+    const storedHits = prepared.song.playability.drums.hits
+    const selectedA = { ...prepared.song, drums: storedHits.filter((hit) => hit.trackId === drumsA.id) }
+    const selectedB = { ...prepared.song, drums: storedHits.filter((hit) => hit.trackId === drumsB.id) }
+    const playableA = applyPlayability(selectedA, { instrument: null, track: drumsA })
+    const playableB = applyPlayability(selectedB, { instrument: null, track: drumsB })
+    assert.deepEqual(playableA.song.drums.slice(0, 2).map((hit) => hit.hand).sort(), ['left', 'right'])
+    assert.equal(playableA.song.drums[2].hand !== undefined, true)
+    assert.deepEqual(playableB.song.drums.map((hit) => hit.hand), ['right'])
+    assert.equal(playableA.summary.unplayable, 0, 'another track cannot make this part exceed two hands')
+    assert.equal(playableB.summary.unplayable, 0, 'the selected part gets its own playability summary')
+    assert.equal(prepared.song.playability.drums.summary.unplayable, 0)
   }
   console.log('playability tests passed')
 } finally {

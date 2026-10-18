@@ -16,10 +16,15 @@ const MAX_LISTED = 40
 
 const describe = (issue: PlayabilityIssue, instrument: PlayabilitySummary['instrument']) => {
   const notes = `${issue.count} note${issue.count === 1 ? '' : 's'}`
-  if (issue.kind === 'unplayable') return `${notes} can't be played as written`
+  if (issue.kind === 'unplayable') return instrument === 'drums'
+    ? `${issue.count} simultaneous stroke${issue.count === 1 ? '' : 's'} left unassigned`
+    : `${notes} can't be played as written`
+  if (issue.kind === 'repeat') return `${issue.count} fast same-hand repeat${issue.count === 1 ? '' : 's'}`
   if (issue.kind === 'octave') return `${notes} shifted by an octave to preserve the chord`
   if (issue.kind === 'jump') return 'quick jump between hand positions'
-  return instrument === 'piano' ? `${notes} moved to the other hand` : `${notes} repositioned on the fretboard`
+  return instrument === 'piano' ? `${notes} moved to the other hand`
+    : instrument === 'drums' ? `${issue.count} stroke${issue.count === 1 ? '' : 's'} assigned a hand`
+      : `${notes} repositioned on the fretboard`
 }
 
 /** A small, non-blocking note about what the playability repair changed, with a way to see where and to compare. */
