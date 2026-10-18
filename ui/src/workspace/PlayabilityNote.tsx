@@ -1,4 +1,3 @@
-import type { Engine } from './engine'
 import { barAt, barStart } from './meter'
 import { NoticeDetails } from './NoticeDetails'
 import { playabilityNotice, type PlayabilityIssue, type PlayabilitySummary } from './playability'
@@ -7,7 +6,7 @@ import type { Song } from './song'
 type Props = {
   summary: PlayabilitySummary
   song: Song
-  engine: Engine
+  onSeek: (beat: number) => void
   asTranscribed: boolean
   onToggle: (asTranscribed: boolean) => void
 }
@@ -28,7 +27,7 @@ const describe = (issue: PlayabilityIssue, instrument: PlayabilitySummary['instr
 }
 
 /** A small, non-blocking note about what the playability repair changed, with a way to see where and to compare. */
-export function PlayabilityNote({ summary, song, engine, asTranscribed, onToggle }: Props) {
+export function PlayabilityNote({ summary, song, onSeek, asTranscribed, onToggle }: Props) {
   const lines = playabilityNotice(summary)
   if (!lines.length) return null
   const where = (beat: number) => {
@@ -48,7 +47,7 @@ export function PlayabilityNote({ summary, song, engine, asTranscribed, onToggle
         <ul>
           {summary.issues.slice(0, MAX_LISTED).map((issue) =>
             <li key={`${issue.kind}:${issue.beat}`} data-kind={issue.kind}>
-              <button type="button" onClick={() => engine.seek(issue.beat)}>{where(issue.beat)}</button>
+              <button type="button" onClick={() => onSeek(issue.beat)}>{where(issue.beat)}</button>
               {' · '}{describe(issue, summary.instrument)}
             </li>)}
         </ul>
