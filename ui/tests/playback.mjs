@@ -10,6 +10,9 @@
 // Add --instrument for instrument scores, saved practice views and continuous part switching.
 // Add --job-preview for live recording controls and removal of generated Creative tracks.
 // Add --fretted for guitar/bass courses, saved views and continuous part switching.
+// Add --fretted-layout for the compact 1280x720 guitar workspace fit check.
+// Add --fretted-layout-before to capture that layout with its pre-fix spacing.
+// Add --practice-layout for Go-to-bar and drum-control checks at 571x499 / 2.25x.
 // Add --fretted-hidpi for only the compact guitar/bass checks at double pixel density.
 // MIZAN_TEST_OPENED optionally points to a live Api.open_song JSON response for the Cairokee benchmark.
 import assert from 'node:assert/strict'
@@ -25,11 +28,15 @@ import { jobPreviewChecks } from './job-preview.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const testUrl = process.env.MIZAN_TEST_URL ?? 'http://localhost:5173'
+const browserArgs = JSON.parse(process.env.MIZAN_TEST_BROWSER_ARGS ?? '[]')
+assert.ok(Array.isArray(browserArgs) && browserArgs.every((arg) => typeof arg === 'string'),
+  'MIZAN_TEST_BROWSER_ARGS must be a JSON array of strings')
 // The browser profile lives outside the app folder, so its files never trigger the dev server's reloads.
 const profile = process.env.MIZAN_TEST_PROFILE
   ? join(process.cwd(), process.env.MIZAN_TEST_PROFILE)
   : await mkdtemp(join(tmpdir(), 'mizan-playback-'))
 spawn(process.env.MIZAN_TEST_BROWSER ?? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', [
+  ...browserArgs,
   '--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
   '--autoplay-policy=no-user-gesture-required', '--no-first-run', 'about:blank',
 ], { stdio: 'ignore' })
@@ -81,6 +88,7 @@ const connectBrowser = async () => {
 }
 let socket
 let onBinding
+const screenshotJobs = []
 try {
   socket = await connectBrowser()
   let sequence = 0
@@ -94,7 +102,11 @@ try {
       runtimeErrors.push(error)
       console.error(error)
     }
-    if (message.method === 'Runtime.bindingCalled') onBinding?.(message.params)
+    if (message.method === 'Runtime.bindingCalled' && onBinding) {
+      const job = Promise.resolve(onBinding(message.params))
+      screenshotJobs.push(job)
+      job.catch((error) => console.error('Screenshot capture failed:', error))
+    }
   }
   socket.onclose = () => {
     for (const { method, finish } of [...pending.values()]) {
@@ -137,9 +149,12 @@ try {
   const courseOnly = process.argv.includes('--course')
   const pianoOnly = process.argv.includes('--piano')
   const jobPreviewOnly = process.argv.includes('--job-preview')
+  const frettedLayoutBeforeOnly = process.argv.includes('--fretted-layout-before')
+  const frettedLayoutOnly = process.argv.includes('--fretted-layout') || frettedLayoutBeforeOnly
+  const practiceLayoutOnly = process.argv.includes('--practice-layout')
   const tabOnly = process.argv.includes('--fretted-tab')
   const frettedHidpiOnly = process.argv.includes('--fretted-hidpi')
-  const frettedOnly = process.argv.includes('--fretted') || tabOnly || frettedHidpiOnly
+  const frettedOnly = process.argv.includes('--fretted') || tabOnly || frettedHidpiOnly || frettedLayoutOnly
   if (frettedOnly) {
     const artifacts = process.env.MIZAN_TEST_ARTIFACTS
     if (artifacts) {
@@ -150,7 +165,9 @@ try {
         await writeFile(join(artifacts, `fretted-${payload}.png`), Buffer.from(shot.data, 'base64'))
       }
     }
-    const sizes = frettedHidpiOnly ? [[617, 900, 2]] : [[1440, 900, 1], [1366, 768, 1], [617, 900, 1], [617, 900, 2]]
+    const sizes = frettedLayoutOnly ? [[1280, 720, 1]]
+      : frettedHidpiOnly ? [[617, 900, 2]]
+        : [[1440, 900, 1], [1366, 768, 1], [617, 900, 1], [617, 900, 2]]
     for (const [width, height, scale] of sizes) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false })
       await call('Emulation.setEmulatedMedia', {
@@ -160,12 +177,92 @@ try {
         window.mizanFrettedShot(name + '-${width}${scale === 1 ? '' : '-2x'}');
         return new Promise((resolve) => setTimeout(resolve, 500));
       }`)
-      console.log(await evaluate(`import('/tests/fretted-workspace.mjs').then((checks) =>
-        checks.${tabOnly ? 'tabChecks' : 'frettedChecks'}())`))
+      if (frettedLayoutOnly) {
+        if (frettedLayoutBeforeOnly) await evaluate(`(() => {
+          const style = document.createElement('style')
+          style.textContent = \`
+            @media (min-width: 1280px) and (max-height: 760px) {
+              .ws .fretted-practice[data-view="mirror"] { gap: 4px !important; }
+              .ws .fretted-strip .fretted-tab { padding-bottom: 3px !important; }
+              .ws .fretted-strip .fretted-tab-scroll { margin-bottom: 2px !important; }
+              .ws .fretted-strip .fretted-rhythm-guide { display: block !important; }
+            }\`
+          document.head.append(style)
+        })()`)
+        const outcome = await evaluate(`import('/tests/fretted-workspace.mjs').then(async (checks) => {
+          try { return { result: await checks.frettedChecks({ layoutOnly: true }) } }
+          catch (error) { return { error: error.message } }
+        })`)
+        const geometry = await evaluate(`(() => {
+          const rect = (selector) => {
+            const element = document.querySelector(selector)
+            return element ? element.getBoundingClientRect().toJSON() : null
+          }
+          const practice = document.querySelector('.fretted-practice')
+          return {
+            outcome: ${JSON.stringify(outcome)},
+            stage: rect('.fretted-stage'),
+            staff: rect('.fretted-tab-staff'),
+            foot: rect('.ws-foot'),
+            parts: ['.fretted-view', '.fretted-toolbar', '.fretted-hand-guidance', '.fretted-strip',
+              '.fretted-tab', '.fretted-tab-scroll', '.fretted-rhythm-guide'].map((selector) => {
+                const element = document.querySelector(selector)
+                return element && {
+                  selector,
+                  rect: element.getBoundingClientRect().toJSON(),
+                  display: getComputedStyle(element).display,
+                  margin: getComputedStyle(element).margin,
+                  padding: getComputedStyle(element).padding,
+                }
+              }),
+            practice: practice && {
+              rect: practice.getBoundingClientRect().toJSON(),
+              scroll: [practice.scrollHeight, practice.clientHeight, practice.scrollTop],
+              children: [...practice.children].map((child) => ({
+                className: child.className,
+                rect: child.getBoundingClientRect().toJSON(),
+                scroll: [child.scrollHeight, child.clientHeight],
+              })),
+            },
+          }
+        })()`)
+        console.log(JSON.stringify(geometry, null, 2))
+        if (artifacts) {
+          const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+          await writeFile(join(artifacts, 'guitar-3d-tab-1280x720.png'), Buffer.from(shot.data, 'base64'))
+        }
+        if (outcome.error && !frettedLayoutBeforeOnly) throw new Error(outcome.error)
+        if (outcome.error) console.log(`Expected pre-fix fit failure: ${outcome.error}`)
+      } else {
+        const checkCall = tabOnly ? 'tabChecks()' : 'frettedChecks()'
+        console.log(await evaluate(`import('/tests/fretted-workspace.mjs').then((checks) => checks.${checkCall})`))
+      }
       await call('Page.navigate', { url: testUrl })
       for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-tabs")'); i++) await sleep(100)
     }
     assert.deepEqual(runtimeErrors, [], 'Guitar and bass checks have no uncaught browser errors')
+  }
+  if (practiceLayoutOnly) {
+    const failures = []
+    for (const mode of ['guitar', 'drums']) {
+      await call('Emulation.setDeviceMetricsOverride', { width: 571, height: 499, deviceScaleFactor: 2.25, mobile: false })
+      await call('Page.navigate', { url: testUrl })
+      for (let i = 0; i < 100 && !await evaluate('!!document.querySelector(".lib-main")'); i++) await sleep(100)
+      const outcome = await evaluate(`import('/tests/compact-practice-layout.mjs').then(async (checks) => {
+        try { return { result: await checks.compactPracticeLayoutChecks('${mode}') } }
+        catch (error) { return { error: error.message } }
+      })`)
+      console.log(JSON.stringify(outcome, null, 2))
+      if (process.env.MIZAN_TEST_ARTIFACTS) {
+        const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+        const name = mode === 'guitar' ? 'guitar-go-to-bar-21-571x499-2.25.png' : 'drum-kit-legend-571x499-2.25.png'
+        await writeFile(join(process.env.MIZAN_TEST_ARTIFACTS, name), Buffer.from(shot.data, 'base64'))
+      }
+      if (outcome.error) failures.push(`${mode}: ${outcome.error}`)
+      await evaluate('window.__mizanPracticeLayoutCleanup?.()')
+    }
+    assert.deepEqual(runtimeErrors, [], 'Compact practice layouts have no uncaught browser errors')
+    assert.deepEqual(failures, [], 'Compact practice layout checks pass')
   }
   if (jobPreviewOnly) {
     console.log(await evaluate(`(${jobPreviewChecks.toString()})()`))
@@ -266,7 +363,7 @@ try {
   if (process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${harmonyChecks.toString()})()`))
   }
-  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !practiceLayoutOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !drumsOnly && !process.argv.includes('--harmony')) {
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     for (const [width, height] of [[2000, 1000], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -280,10 +377,10 @@ try {
     }
     await call('Emulation.setEmulatedMedia', { features: [] })
   }
-  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !practiceLayoutOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !process.argv.includes('--mixer') && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${drumChecks.toString()})()`))
   }
-  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !practiceLayoutOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--vocals') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     if (!process.argv.includes('--mixer')) {
       console.log(await evaluate(`(${libraryChecks.toString()})()`))
       console.log(await libraryPointerChecks(evaluate, call))
@@ -314,7 +411,7 @@ try {
     }
     console.log(await evaluate(`(${persistenceCheck.toString()})()`))
   }
-  if (!frettedOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
+  if (!frettedOnly && !practiceLayoutOnly && !jobPreviewOnly && !meterOnly && !instrumentOnly && !timingOnly && !scrollOnly && !deleteOnly && !readabilityOnly && !courseOnly && !pianoOnly && !process.argv.includes('--layout') && !process.argv.includes('--mixer') && !drumsOnly && !chartsOnly && !process.argv.includes('--harmony')) {
     console.log(await evaluate(`(${vocalChecks.toString()})()`))
     for (const [width, height] of [[1440, 900], [1024, 640]]) {
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -325,6 +422,10 @@ try {
   console.error(error)
   process.exitCode = 1
 } finally {
+  const screenshotResults = await Promise.allSettled(screenshotJobs)
+  for (const result of screenshotResults) {
+    if (result.status === 'rejected') console.error('Screenshot capture failed:', result.reason)
+  }
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ id: -1, method: 'Browser.close' }))
     await sleep(1000)
