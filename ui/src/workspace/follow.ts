@@ -20,5 +20,10 @@ export function usableSpan(container: HTMLElement): Span {
     const rect = child.getBoundingClientRect()
     if (rect.height && Math.abs(rect.bottom - box.bottom) < 2) bottom = Math.min(bottom, rect.top)
   }
+  const foot = container.closest<HTMLElement>('.ws')?.querySelector<HTMLElement>('.ws-foot')
+  if (foot) {
+    const rect = foot.getBoundingClientRect()
+    if (rect.height && rect.top < bottom && rect.bottom > box.top) bottom = Math.min(bottom, rect.top)
+  }
   return { top: box.top, bottom }
 }
