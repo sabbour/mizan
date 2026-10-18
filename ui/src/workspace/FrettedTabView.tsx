@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import type { Song, Track } from './song'
-import { useSize } from './hooks'
+import { usableSpan } from './follow'
+import { useReducedMotion, useSize } from './hooks'
 import {
   notesForTrack, notesByMeasure, measureAtBeat, planFrettedTab, frettedPitchName,
   type FrettedInstrumentConfig, type FrettedTabNote,
@@ -15,6 +16,7 @@ export type FrettedPracticeProps = {
   playing: boolean
   countingIn?: boolean
   onPick: (beat: number) => void
+  seekRevision?: number
 }
 
 type Props = FrettedPracticeProps & { config: FrettedInstrumentConfig }
@@ -75,7 +77,7 @@ function RhythmMark({ x, y, beats, rest = false, beamed = false }: {
   </g>
 }
 
-export function FrettedTabView({ song, track, trackId, beat, playing, countingIn = false, onPick, config }: Props) {
+export function FrettedTabView({ song, track, trackId, beat, playing, countingIn = false, onPick, seekRevision = 0, config }: Props) {
   const source = notesForTrack(song, track, trackId)
   const notes = useMemo(() => planFrettedTab(source, config), [source, config])
   const bars = useMemo(() => notesByMeasure(song, notes), [song, notes])
@@ -86,6 +88,7 @@ export function FrettedTabView({ song, track, trackId, beat, playing, countingIn
   const rowY = (row: number) => 50 + row * 18
   const bottom = rowY(rowStrings.length - 1)
   const [staffRef, availableWidth] = useSize<HTMLDivElement>()
+  const reduced = useReducedMotion()
   let left = 52
   const layouts = shown.map((measure) => {
     const { bar, notes: inBar } = measure
@@ -127,7 +130,25 @@ export function FrettedTabView({ song, track, trackId, beat, playing, countingIn
     if (left < element.scrollLeft + 12) element.scrollLeft = Math.max(0, left - 12)
     else if (left + width > element.scrollLeft + element.clientWidth - 12)
       element.scrollLeft = Math.max(0, left + width - element.clientWidth + 12)
-  }, [active, currentLayout.left, currentLayout.width, availableWidth, staffRef])
+    const revealActiveBar = () => {
+      const viewport = element.closest<HTMLElement>('.fretted-practice, .ws > .fretted-tab')
+      const target = element.querySelector<SVGGraphicsElement>(`[data-bar="${active + 1}"]`)
+      if (!viewport || !target) return
+      const usable = usableSpan(viewport)
+      const bounds = target.getBoundingClientRect()
+      const height = Math.max(0, usable.bottom - usable.top)
+      const margin = Math.min(8, height / 2)
+      let delta = 0
+      if (bounds.height > height || bounds.top < usable.top + margin)
+        delta = bounds.top - (usable.top + margin)
+      else if (bounds.bottom > usable.bottom - margin)
+        delta = bounds.bottom - (usable.bottom - margin)
+      if (Math.abs(delta) > 1) viewport.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' })
+    }
+    revealActiveBar()
+    window.addEventListener('resize', revealActiveBar)
+    return () => window.removeEventListener('resize', revealActiveBar)
+  }, [active, currentLayout.left, currentLayout.width, availableWidth, reduced, seekRevision, staffRef])
   const unplacedGroups = new Map<string, FrettedTabNote[]>()
   for (const note of notes) if (!note.position && note.reason) {
     const key = `${note.reason}:${note.midi}`

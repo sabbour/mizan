@@ -51,8 +51,9 @@ const EMPTY_STEMS: Stem[] = []
 
 type StoredMixer = { muted: string[]; volumes: Record<string, number>; soloId?: string; beforeSolo?: string[]; enabledStems?: string[] }
 
-function FrettedPractice({ song, track, engine, instrument, view }: {
+function FrettedPractice({ song, track, engine, instrument, view, seekRevision, onSeek }: {
   song: Song; track: Track; engine: Engine; instrument: 'guitar' | 'bass'; view: PracticeView
+  seekRevision: number; onSeek: (beat: number) => void
 }) {
   const [transport, setTransport] = useState(() => engine.read())
   const [handedness, setHandedness] = useState(() => loadPrefs().frettedHandedness ?? 'right')
@@ -62,7 +63,7 @@ function FrettedPractice({ song, track, engine, instrument, view }: {
   })
   const Tab = instrument === 'guitar' ? GuitarTabView : BassTabView
   const props = { song, track, beat: transport.beat, playing: transport.playing,
-    countingIn: transport.countingIn, onPick: (beat: number) => engine.seek(beat) }
+    countingIn: transport.countingIn, onPick: onSeek, seekRevision }
   if (view === 'tab') return <Tab {...props} />
   const PhysicalView = instrument === 'guitar' ? GuitarView : BassView
   return <PhysicalView {...props} engine={engine} handedness={handedness} onHandednessChange={(value) => {
@@ -87,6 +88,7 @@ export function Workspace({
   }, [saved, song.bars])
 
   const [trackId, setTrackId] = useState(() => start?.trackId ?? song.tracks[0]?.id ?? '')
+  const [seekRevision, setSeekRevision] = useState(0)
   // Count-in, speed, click and sticking letters follow the player everywhere once chosen; until then, this song's own setup.
   const [prefs] = useState(loadPrefs)
   const [rate, setRate] = useState(prefs.rate ?? start?.rate ?? 1)
@@ -335,7 +337,11 @@ export function Workspace({
     else void engine.play()
   }, [engine])
 
-  const jump = useCallback((bar: number) => engine.seek(barStart(song, Math.max(1, Math.min(song.bars, bar)) - 1)), [engine, song])
+  const seek = useCallback((beat: number) => {
+    engine.seek(beat)
+    setSeekRevision((revision) => revision + 1)
+  }, [engine])
+  const jump = useCallback((bar: number) => seek(barStart(song, Math.max(1, Math.min(song.bars, bar)) - 1)), [seek, song])
 
   const section = song.sections[sectionAt(song, pos.bar)]
   const confidence = song.confidence[track?.chordal ? 'chords' : viewInstrument] ?? []
@@ -567,7 +573,7 @@ export function Workspace({
         {/* Notices share one compact row under the controls, wrapping only when the window is narrow. */}
         {(analysisNotice || playable.summary) && <div className="ws-notices">
           {analysisNotice}
-          {playable.summary && <PlayabilityNote summary={playable.summary} song={chosen} engine={engine} asTranscribed={asTranscribed} onToggle={setAsTranscribed} />}
+          {playable.summary && <PlayabilityNote summary={playable.summary} song={chosen} onSeek={seek} asTranscribed={asTranscribed} onToggle={setAsTranscribed} />}
         </div>}
       </header>
 
@@ -575,23 +581,24 @@ export function Workspace({
       {audioLoading && <div className="audio-error" role="status">Preparing sounds...</div>}
 
       {frettedInstrument && track && practice[frettedInstrument] !== 'score' ? (
-        <FrettedPractice song={viewed} track={track} engine={engine} instrument={frettedInstrument} view={practice[frettedInstrument]} />
+        <FrettedPractice song={viewed} track={track} engine={engine} instrument={frettedInstrument} view={practice[frettedInstrument]}
+          seekRevision={seekRevision} onSeek={seek} />
       ) : kitPane ? (
         <div className="ws-split">
-          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={false} instrument="drums" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="kit" onPick={pick} previewId={track?.id ?? 'chords'} />
+          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={false} instrument="drums" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="kit" onPick={pick} seekRevision={seekRevision} previewId={track?.id ?? 'chords'} />
           {/* The 3D kit sits beside the score, outside it, so redrawing the score never restarts the kit. */}
           <DrumKitView song={viewed} engine={engine} sticking={sticking} style={kitStyle} onStyle={chooseKitStyle} />
         </div>
       ) : keyboardPane ? (
         <div className="ws-split">
-          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames} instrument="piano" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="keyboard" onPick={pick} previewId={track?.id ?? 'chords'} />
+          <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames} instrument="piano" playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} practice="keyboard" onPick={pick} seekRevision={seekRevision} previewId={track?.id ?? 'chords'} />
           {/* Like the kit, the 3D keyboard sits beside the score so redrawing the score never restarts it. */}
           <PianoView song={viewed} engine={engine} fingering={fingering} letters={noteNames} />
         </div>
       ) : chart ? (
         <ChordChart song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} onPick={pick} previewId={track?.id ?? 'chords'} />
       ) : (
-        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={viewInstrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={viewInstrument === 'vocals'} instrumentGuide={viewInstrument === 'other' ? track?.id : undefined} practice={practiceInstrument === 'piano' ? pianoPracticeView : viewInstrument === 'drums' ? practice.drums : 'score'} fingering={fingering} onPick={pick} previewId={track?.id ?? 'chords'} />
+        <Score xml={xml} song={viewed} engine={engine} bar={pos.bar} loop={loop} confidence={confidence} noteNames={noteNames && pitched} instrument={viewInstrument} playing={pos.playing} audioLoading={audioLoading} audioError={!!audioError} vocalGuide={viewInstrument === 'vocals'} instrumentGuide={viewInstrument === 'other' ? track?.id : undefined} practice={practiceInstrument === 'piano' ? pianoPracticeView : viewInstrument === 'drums' ? practice.drums : 'score'} fingering={fingering} onPick={pick} seekRevision={seekRevision} previewId={track?.id ?? 'chords'} />
       )}
 
       <footer className="ws-foot">
