@@ -1,4 +1,5 @@
 import type { DecodingErrors, Song } from '../workspace/song'
+import type { PlayabilitySaveRequest } from '../workspace/playability'
 import { mockHost } from './mock'
 
 export type Source = 'youtube' | 'midi' | 'musicxml'
@@ -542,6 +543,8 @@ export const host = {
   move: (id: string, order: number) => call('move_job', id, order),
   dismiss: (id: string) => call('dismiss_job', id),
   open: (id: string) => call<Opened>('open_song', id),
+  savePlayability: (id: string, result: PlayabilitySaveRequest) =>
+    call('save_playability', id, result),
   savePosition: (id: string, position: Position) => call('save_position', id, position),
   remove: (id: string) => call('delete_song', id),
   deleteScoreTrack: (songId: string, trackId: string) =>

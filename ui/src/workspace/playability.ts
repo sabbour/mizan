@@ -1,17 +1,25 @@
 import { keyOf, pedalCarries, suggestFingers } from './fingers'
 import {
-  BASS, GUITAR, planFrettedTab, positionsForMidi,
+  BASS, GUITAR, identifiesInstrument, planFrettedTab, positionsForMidi,
   type FrettedInstrumentConfig, type FrettedPosition,
 } from './fretboard'
-import type { Chord, MelodyNote, Pedal, PianoNote, Song, Track } from './song'
+import { kitStrike } from './kit'
+import { drumNotationBeats } from './musicxml'
+import { suggestSticking } from './sticking'
+import type {
+  Chord, DrumHit, MelodyNote, Pedal, PianoNote, PlayabilitySummary, Song, StoredPlayability, Track,
+} from './song'
+
+export type { PlayabilityIssue, PlayabilitySummary } from './song'
 
 /**
  * Playability checks and repairs for transcribed music. Transcribers and importers split piano notes between the hands by
  * pitch alone and pick a guitar string for each note on its own, so a moment can ask one hand for more than it can do.
- * The repair here runs on the stored song every time it is opened; the stored notes are never changed.
+ * Repairs are stored as a separate derived layer; the source notes remain unchanged.
  */
 
 const EPS = 1e-6
+export const PLAYABILITY_VERSION = 'constrained-path-v3'
 
 /** Most keys one hand can hold down at once. */
 export const PIANO_MAX_NOTES = 5
@@ -26,28 +34,6 @@ const CROSS_SECONDS = 0.5
 /** Without written pedals, a held note this far below the hand's newest notes is taken as carried by the sustain pedal. */
 const PEDAL_GAP = 9
 const BEAM = 6
-
-export type PlayabilityIssue = {
-  beat: number
-  kind: 'moved' | 'octave' | 'unplayable' | 'jump'
-  count: number
-}
-
-export type PlayabilitySummary = {
-  instrument: 'piano' | 'guitar' | 'bass'
-  /** Moments that could not be played as written. */
-  flagged: number
-  /** Notes moved to the other hand (piano) or adjusted in tab (guitar, bass). */
-  moved: number
-  /** Fretted chord tones folded by an octave to keep the voicing playable. */
-  octaveAdjusted: number
-  /** Moments still not playable after the repair; their notes are marked. */
-  unplayable: number
-  unplayableNotes: number
-  /** Quick jumps between hand positions: hard, not impossible, and never repaired. */
-  warnings: number
-  issues: PlayabilityIssue[]
-}
 
 const empty = (instrument: PlayabilitySummary['instrument']): PlayabilitySummary =>
   ({ instrument, flagged: 0, moved: 0, octaveAdjusted: 0, unplayable: 0, unplayableNotes: 0, warnings: 0, issues: [] })
@@ -441,6 +427,19 @@ export function repairFretted(
   for (let index = items.length - 1; index >= 0; index--)
     if (!items[index].candidates.length) items.splice(index, 1)
 
+  const chordAnchors = new Set<number>()
+  if (config.id === 'guitar') {
+    for (const chord of options.chords ?? []) {
+      if (chord.confidence < 0.5 || chord.beats <= 0) continue
+      const sounding = items.filter((item) =>
+        item.start < chord.startBeat + chord.beats && item.end > chord.startBeat)
+      if (sounding.length) {
+        const lowest = sounding.reduce((best, next) => next.midi < best.midi ? next : best)
+        chordAnchors.add(lowest.index)
+      }
+    }
+  }
+
   const groups: Item[][] = []
   const originalGroups: Item[][] = []
   for (const item of items) {
@@ -460,13 +459,21 @@ export function repairFretted(
     const t = group[0].start
     sounding = sounding.filter((item) => item.end > t + EPS).concat(group)
     const spots = sounding.map((item) => baseline[item.index].position)
-    if (spots.some((spot) => !spot) || !shapeFits(spots as Pos[], config)) bad.push(group[0].index)
+    if (spots.some((spot) => !spot) || !shapeFits(spots as Pos[], config)) bad.push(t)
   })
   summary.flagged = bad.length
   if (!bad.length && !items.some((item) => !item.originallyPlayable)) return { notes: input as FrettedNote[], summary }
 
+  // Keep alternate positions for held notes around an impossible moment so a greedy prefix cannot force a later drop.
+  const criticalGroups = new Set<number>()
+  for (const beat of bad) {
+    groups.forEach((group, index) => {
+      if (group[0].start <= beat + EPS && group.some((item) => item.end > beat + EPS)) criticalGroups.add(index)
+    })
+  }
+
   /** What a placement costs: stretch, hand movement, higher frets, octave folds, and leaving the first placement. */
-  const leafOf = (held: Placed[], chosen: Placed[], pos: number | null) => {
+  const leafOf = (held: Placed[], chosen: Placed[], pos: number | null, anchors: ReadonlySet<number>) => {
     const fretted = held.concat(chosen).filter((item) => item.fret > 0).map((item) => item.fret)
     let cost = 0
     let nextPos = pos
@@ -479,13 +486,14 @@ export function repairFretted(
     for (const place of chosen) {
       const item = where.get(place.index)!
       cost += place.fret * 0.02
-      if (place.midi !== item.midi) cost += 12
+      if (place.midi !== item.midi) cost += anchors.has(place.index) ? 24 : 12
       if (!sameSpot(item.preferred, place) || place.midi !== item.midi) cost += 6
     }
     return { placed: chosen, cost, pos: nextPos }
   }
 
-  const enumerate = (kept: Item[], held: Placed[], pos: number | null, allowOctaveFolds = false) => {
+  const enumerate = (kept: Item[], held: Placed[], pos: number | null,
+    endpoints: ReadonlySet<number>, allowOctaveFolds = false) => {
     const order = [...kept].sort((a, b) => a.candidates.length - b.candidates.length || a.midi - b.midi || a.index - b.index)
     const leaves: { placed: Placed[]; cost: number; pos: number | null }[] = []
     const chosen: Placed[] = []
@@ -495,11 +503,12 @@ export function repairFretted(
       if (visits > 48) return
       if (depth === order.length) {
         visits++
-        leaves.push(leafOf(held, [...chosen], pos))
+        leaves.push(leafOf(held, [...chosen], pos, endpoints))
         return
       }
       const item = order[depth]
-      for (const candidate of item.candidates.filter((place) => allowOctaveFolds || !place.octaveFold)) {
+      for (const candidate of item.candidates.filter((place) =>
+        !place.octaveFold || allowOctaveFolds && (config.id === 'guitar' || !endpoints.has(item.index)))) {
         const place: Placed = { index: item.index, midi: candidate.midi, string: candidate.string, fret: candidate.fret, end: item.end }
         stack.push(place)
         if (!shapeFits(stack, config)) { stack.pop(); continue }
@@ -513,18 +522,30 @@ export function repairFretted(
     return leaves.sort((a, b) => a.cost - b.cost).slice(0, 4)
   }
 
+  const uniqueLeaves = (leaves: { placed: Placed[]; cost: number; pos: number | null }[]) => {
+    const unique = new Map<string, typeof leaves[number]>()
+    for (const leaf of leaves) {
+      const key = leaf.placed.map((place) =>
+        `${place.index}:${place.string}:${place.fret}:${place.midi}`).sort().join('|')
+      if (!unique.has(key)) unique.set(key, leaf)
+    }
+    return [...unique.values()].sort((a, b) => a.cost - b.cost).slice(0, 4)
+  }
+
   let beam: Node[] = [{ cost: 0, pos: null, active: [], parent: null, placed: [], dropped: [], key: '' }]
-  for (const group of groups) {
+  for (const [groupIndex, group] of groups.entries()) {
     const t = group[0].start
     const byMidi = [...group].sort((a, b) => a.midi - b.midi || a.index - b.index)
-    // Keep the lowest and highest notes longest; the inner notes are the first to go.
+    // Keep the bass anchor and distinct chord tones; redundant tones are the first to go.
     const priority: Item[] = []
     for (let low = 0, high = byMidi.length - 1; low <= high; low++, high--) {
       priority.push(byMidi[low])
       if (high !== low) priority.push(byMidi[high])
     }
     const rank = new Map(priority.map((item, index) => [item.index, index]))
-    const endpoints = new Set([byMidi[0]?.index, byMidi.at(-1)?.index])
+    const distinctPitches = new Set(byMidi.map((item) => item.midi)).size
+    const endpoints = new Set(chordAnchors)
+    if (distinctPitches > 1) endpoints.add(byMidi[0].index)
     const distinctChordTones = new Set<number>()
     const seenChordTones = new Set<number>()
     for (const item of byMidi) {
@@ -547,12 +568,17 @@ export function repairFretted(
     for (const node of beam) {
       const held = node.active.filter((place) => place.end > t + EPS)
       // Where the first placement already works, keep it and spare the search.
-      const quick = first && shapeFits([...held, ...first], config) ? [leafOf(held, first, node.pos)] : null
+      const quick = first && shapeFits([...held, ...first], config) ? [leafOf(held, first, node.pos, endpoints)] : null
       if (!quick) easy = false
+      if (quick && criticalGroups.has(groupIndex)) easy = false
       for (let kept = priority.length; kept >= 0; kept--) {
         const selected = priority.slice(0, kept)
-        const standard = quick ?? (kept ? enumerate(selected, held, node.pos) : [{ placed: [], cost: 0, pos: node.pos }])
-        const leaves = standard.length || !kept ? standard : enumerate(selected, held, node.pos, true)
+        const standard = quick
+          ? criticalGroups.has(groupIndex)
+            ? uniqueLeaves([...quick, ...enumerate(group, held, node.pos, endpoints)])
+            : quick
+          : kept ? enumerate(selected, held, node.pos, endpoints) : [{ placed: [], cost: 0, pos: node.pos }]
+        const leaves = standard.length || !kept ? standard : enumerate(selected, held, node.pos, endpoints, true)
         if (!leaves.length) continue
         const dropped = priority.slice(kept).map((item) => item.index)
         for (const leaf of leaves) {
@@ -617,21 +643,246 @@ export type Playable = { song: Song; summary: PlayabilitySummary | null }
 
 const cache = new WeakMap<readonly unknown[], Map<string, { notes: readonly unknown[]; summary: PlayabilitySummary }>>()
 
+export type PlayabilitySaveRequest = {
+  version: string
+  parts: Record<string, {
+    sourceNotes: (PianoNote | MelodyNote)[]
+    sourceSignature: string
+    notes: (PianoNote | MelodyNote)[]
+    summary: PlayabilitySummary
+  }>
+  drums?: {
+    sourceHits: DrumHit[]
+    sourceSignature: string
+    hits: DrumHit[]
+    summary: PlayabilitySummary
+    trackSummaries: Record<string, PlayabilitySummary>
+  }
+}
+
+export type PreparedPlayability = { song: Song; request: PlayabilitySaveRequest | null }
+
+function sourceSignature(
+  song: Song,
+  instrument: PlayabilitySummary['instrument'],
+  notes: readonly (PianoNote | MelodyNote)[],
+): string {
+  const context = instrument === 'piano'
+    ? { bpm: song.bpm, pedals: song.pedals ?? [] }
+    : { chords: (song.chords ?? []).map((chord) => [chord.startBeat, chord.beats, chord.confidence, chord.tones]) }
+  return signatureOf([PLAYABILITY_VERSION, instrument, context, notes])
+}
+
+function signatureOf(value: unknown): string {
+  const text = JSON.stringify(value)
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index++) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193)
+  }
+  return `${(hash >>> 0).toString(16)}:${text.length}`
+}
+
+const trackPartKey = (id: string) => `track:${id}`
+
+function repairDrumPart(song: Song): { hits: DrumHit[]; summary: PlayabilitySummary } {
+  const hands = song.drums.some((hit) => hit.hand)
+    ? song.drums.map((hit) => hit.hand)
+    : suggestSticking(song)
+  const hits = song.drums.map((hit, index) => hit.hand || !hands[index] ? hit : { ...hit, hand: hands[index] })
+  const summary = empty('drums')
+  const writtenBeats = drumNotationBeats(song)
+  const moments = new Map<number, Map<string, number[]>>()
+  song.drums.forEach((hit, index) => {
+    if (kitStrike(hit).foot) return
+    const beat = Math.round(writtenBeats[index] * 1e6) / 1e6
+    const sound = `${hit.lane}:${hit.sourceMidi ?? ''}`
+    const strokes = moments.get(beat) ?? new Map<string, number[]>()
+    strokes.set(sound, [...(strokes.get(sound) ?? []), index])
+    moments.set(beat, strokes)
+  })
+  const assignedAt = new Map<number, number>()
+  const unassignedAt = new Map<number, number>()
+  for (const [beat, strokes] of moments) {
+    if (strokes.size > 2) {
+      summary.flagged++
+      unassignedAt.set(beat, [...strokes.values()].flat().length)
+    }
+    for (const indexes of strokes.values()) {
+      const assigned = indexes.filter((index) => hits[index].hand)
+      const newlyAssigned = assigned.filter((index) => !song.drums[index].hand)
+      if (newlyAssigned.length) assignedAt.set(beat, (assignedAt.get(beat) ?? 0) + 1)
+    }
+  }
+  summary.moved = [...assignedAt.values()].reduce((sum, count) => sum + count, 0)
+  summary.unplayable = unassignedAt.size
+  summary.unplayableNotes = [...unassignedAt.values()].reduce((sum, count) => sum + count, 0)
+  for (const [beat, count] of assignedAt) summary.issues.push({ beat, kind: 'moved', count })
+  for (const [beat, count] of unassignedAt) summary.issues.push({ beat, kind: 'unplayable', count })
+
+  const secondsPerBeat = 60 / (song.bpm > 0 ? song.bpm : 120)
+  const lastByHand = new Map<'left' | 'right', { beat: number; sound: string; cymbal: boolean }>()
+  const repeatsAt = new Map<number, number>()
+  const uniqueStrokes = [...moments.entries()].flatMap(([beat, strokes]) =>
+    [...strokes.entries()].map(([sound, indexes]) => ({ beat, sound, index: indexes[0] })))
+      .sort((a, b) => a.beat - b.beat || a.index - b.index)
+  for (const stroke of uniqueStrokes) {
+    const hit = hits[stroke.index]
+    if (!hit.hand) continue
+    const current = { beat: stroke.beat, sound: stroke.sound, cymbal: ['hihat', 'openhat', 'ride', 'crash'].includes(hit.lane) }
+    const previous = lastByHand.get(hit.hand)
+    if (previous) {
+      const gap = (current.beat - previous.beat) * secondsPerBeat
+      const limit = current.cymbal && previous.cymbal && current.sound === previous.sound ? 0.14 : 0.3
+      if (gap > EPS && gap < limit) {
+        summary.warnings++
+        repeatsAt.set(hit.startBeat, (repeatsAt.get(hit.startBeat) ?? 0) + 1)
+      }
+    }
+    lastByHand.set(hit.hand, current)
+  }
+  for (const [beat, count] of repeatsAt) summary.issues.push({ beat, kind: 'repeat', count })
+  summary.issues.sort((a, b) => a.beat - b.beat)
+  return { hits, summary }
+}
+
+function repairDrumSticking(song: Song): {
+  hits: DrumHit[]
+  summary: PlayabilitySummary
+  trackSummaries: Record<string, PlayabilitySummary>
+} {
+  const hits = [...song.drums]
+  const summary = empty('drums')
+  const trackSummaries: Record<string, PlayabilitySummary> = {}
+  const groups = new Map<string | null, number[]>()
+  song.drums.forEach((hit, index) => {
+    const trackId = hit.trackId || null
+    groups.set(trackId, [...(groups.get(trackId) ?? []), index])
+  })
+  for (const [trackId, indexes] of groups) {
+    const repaired = repairDrumPart({ ...song, drums: indexes.map((index) => song.drums[index]) })
+    repaired.hits.forEach((hit, index) => { hits[indexes[index]] = hit })
+    for (const field of ['flagged', 'moved', 'octaveAdjusted', 'unplayable', 'unplayableNotes', 'warnings'] as const) {
+      summary[field] += repaired.summary[field]
+    }
+    summary.issues.push(...repaired.summary.issues)
+    if (trackId) trackSummaries[trackId] = repaired.summary
+  }
+  summary.issues.sort((a, b) => a.beat - b.beat)
+  return { hits, summary, trackSummaries }
+}
+
+/**
+ * Create the complete post-transcription practice layer. Existing stored parts are reused only when their source
+ * fingerprint still matches; a missing or stale part is repaired before the song is opened.
+ */
+export function preparePlayableSong(song: Song): PreparedPlayability {
+  const targets: { key: string; instrument: PlayabilitySummary['instrument']; notes: readonly (PianoNote | MelodyNote)[] }[] = []
+  const pianoTracks = song.tracks.filter((track) => track.group !== 'creative' && track.instrument === 'piano')
+  if (pianoTracks.length <= 1 && song.piano.length) {
+    targets.push({ key: 'piano', instrument: 'piano', notes: song.piano })
+  } else {
+    for (const track of pianoTracks) {
+      const notes = song.piano.filter((note) => note.trackId === track.id)
+      if (notes.length) targets.push({ key: trackPartKey(track.id), instrument: 'piano', notes })
+    }
+  }
+  for (const track of song.tracks) {
+    if (track.group === 'creative' || track.instrument !== 'other') continue
+    const notes = song.instrumentNotes?.[track.id]
+    if (!notes?.length) continue
+    if (Number.isInteger(track.gmProgram) && track.gmProgram! >= 0 && track.gmProgram! <= 7) {
+      targets.push({ key: trackPartKey(track.id), instrument: 'piano', notes })
+    } else if (identifiesInstrument(track, 'bass')) {
+      targets.push({ key: trackPartKey(track.id), instrument: 'bass', notes })
+    } else if (identifiesInstrument(track, 'guitar')) {
+      targets.push({ key: trackPartKey(track.id), instrument: 'guitar', notes })
+    }
+  }
+  const existing = song.playability?.version === PLAYABILITY_VERSION ? song.playability.parts : null
+  const drumSignature = song.drums.length
+    ? signatureOf([PLAYABILITY_VERSION, 'drums', song.bpm, song.drums])
+    : null
+  const drumTrackIds = new Set(song.drums.map((hit) => hit.trackId).filter((id): id is string => !!id))
+  const matches = targets.every((target) => existing?.[target.key]?.sourceSignature ===
+    sourceSignature(song, target.instrument, target.notes)) &&
+    (!drumSignature || (song.playability?.drums?.sourceSignature === drumSignature &&
+      [...drumTrackIds].every((id) => song.playability?.drums?.trackSummaries[id]?.instrument === 'drums')))
+  if (matches) return { song, request: null }
+  if (!targets.length && !drumSignature) return { song, request: null }
+
+  const parts: StoredPlayability['parts'] = {}
+  const saveParts: PlayabilitySaveRequest['parts'] = {}
+  for (const target of targets) {
+    const signature = sourceSignature(song, target.instrument, target.notes)
+    const result = target.instrument === 'piano'
+      ? repairPiano(target.notes as readonly PianoNote[], { bpm: song.bpm, pedals: song.pedals })
+      : repairFretted(target.notes as readonly MelodyNote[], target.instrument === 'bass' ? BASS : GUITAR,
+        { chords: song.chords })
+    const record = { sourceSignature: signature, notes: result.notes, summary: result.summary }
+    parts[target.key] = record
+    saveParts[target.key] = { ...record, sourceNotes: [...target.notes] }
+  }
+  const repairedDrums = drumSignature ? repairDrumSticking(song) : null
+  const drums = repairedDrums && drumSignature
+    ? {
+      sourceSignature: drumSignature, hits: repairedDrums.hits, summary: repairedDrums.summary,
+      trackSummaries: repairedDrums.trackSummaries,
+    }
+    : undefined
+  const saveDrums = repairedDrums && drumSignature
+    ? { ...drums!, sourceHits: [...song.drums] }
+    : undefined
+  return {
+    song: { ...song, playability: { version: PLAYABILITY_VERSION, parts, ...(drums ? { drums } : {}) } },
+    request: { version: PLAYABILITY_VERSION, parts: saveParts, ...(saveDrums ? { drums: saveDrums } : {}) },
+  }
+}
+
 /**
  * The song as it should be practised: hands and string choices made playable. The stored song is left as it is, so the
  * repair is always worked out again from the transcription.
  */
 export function applyPlayability(song: Song, target: PracticeTarget): Playable {
   const { instrument, track } = target
-  if (!instrument) return { song, summary: null }
+  if (!instrument) {
+    const storedDrums = track?.instrument === 'drums' && song.playability?.version === PLAYABILITY_VERSION
+      ? song.playability.drums : undefined
+    if (!storedDrums) return { song, summary: null }
+    const drumTracks = song.tracks.filter((item) => item.group !== 'creative' && item.instrument === 'drums')
+    const perTrack = !!track && drumTracks.length > 1
+    const hits = perTrack
+      ? storedDrums.hits.filter((hit) => hit.trackId === track.id)
+      : storedDrums.hits
+    const summary = perTrack
+      ? storedDrums.trackSummaries[track.id] ?? empty('drums')
+      : storedDrums.summary
+    return { song: { ...song, drums: hits }, summary }
+  }
   let source: 'piano' | string | null = 'piano'
-  if (instrument !== 'piano') {
+  let storedKey = 'piano'
+  if (instrument === 'piano') {
+    const multiplePianoTracks = song.tracks.filter(
+      (item) => item.group !== 'creative' && item.instrument === 'piano',
+    ).length > 1
+    if (track?.id && (track.instrument === 'other' || (track.instrument === 'piano' && multiplePianoTracks))) {
+      storedKey = trackPartKey(track.id)
+    }
+  } else {
     const id = track?.id
     source = track?.instrument === 'piano' || !id ? 'piano'
       : song.instrumentNotes?.[id] ? id : track.instrument !== 'other' ? 'piano' : null
+    if (source && source !== 'piano') storedKey = trackPartKey(source)
   }
   if (!source) return { song, summary: null }
   const notes: readonly (PianoNote | MelodyNote)[] = source === 'piano' ? song.piano : song.instrumentNotes![source]
+  const stored = song.playability?.version === PLAYABILITY_VERSION ? song.playability.parts[storedKey] : undefined
+  if (stored && stored.notes.length === notes.length) {
+    return {
+      song: source === 'piano' ? { ...song, piano: stored.notes as PianoNote[] }
+        : { ...song, instrumentNotes: { ...song.instrumentNotes, [source]: stored.notes as MelodyNote[] } },
+      summary: stored.summary,
+    }
+  }
   const pedalKey = song.pedals?.map((pedal) => `${pedal.controller}@${pedal.startBeat}+${pedal.beats}`).join() ?? ""
   const harmonyKey = song.chords?.map((chord) =>
     `${chord.startBeat}+${chord.beats}:${chord.confidence}:${chord.tones.join('.')}`).join(';') ?? ""
@@ -661,9 +912,15 @@ export function playabilityNotice(summary: PlayabilitySummary | null): string[] 
   const lines: string[] = []
   if (summary.moved) lines.push(summary.instrument === 'piano'
     ? `Hands adjusted for playability: ${plural(summary.moved, 'note')} moved to the other hand.`
-    : `Tab notes adjusted for playability: ${plural(summary.moved, 'note')}.`)
+    : summary.instrument === 'drums'
+      ? `Suggested sticking assigned to ${plural(summary.moved, 'stroke')}.`
+      : `Tab notes adjusted for playability: ${plural(summary.moved, 'note')}.`)
   if (summary.octaveAdjusted) lines.push(`${plural(summary.octaveAdjusted, 'chord tone')} shifted by an octave to keep the voicing playable.`)
-  if (summary.unplayable) lines.push(`${plural(summary.unplayable, 'moment')} can't be played as written; marked in the score${summary.instrument === 'piano' ? '' : ' and tab'}.`)
-  if (summary.warnings) lines.push(`${plural(summary.warnings, 'quick jump')} between hand positions may be hard to play.`)
+  if (summary.unplayable) lines.push(summary.instrument === 'drums'
+    ? `${plural(summary.unplayable, 'moment')} exceed the two available hands; those strokes remain unassigned.`
+    : `${plural(summary.unplayable, 'moment')} can't be played as written; marked in the score${summary.instrument === 'piano' ? '' : ' and tab'}.`)
+  if (summary.warnings) lines.push(summary.instrument === 'drums'
+    ? `${plural(summary.warnings, 'rapid same-hand repeat')} may be hard to play.`
+    : `${plural(summary.warnings, 'quick jump')} between hand positions may be hard to play.`)
   return lines
 }
