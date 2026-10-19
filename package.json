@@ -1,7 +1,7 @@
 {
   "name": "mizan",
   "private": true,
-  "version": "0.2.6",
+  "version": "0.2.7",
   "scripts": {
     "changeset": "changeset",
     "changeset:status": "changeset status",
