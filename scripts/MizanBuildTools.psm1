@@ -118,7 +118,7 @@ function Resolve-TrustedSigningDlib {
     $bootstrap = Join-Path $WorkDirectory "signing-client"
     & dotnet new classlib --output $bootstrap --force | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not create the Trusted Signing restore project." }
-    & dotnet add (Join-Path $bootstrap "signing-client.csproj") package Microsoft.Trusted.Signing.Client
+    & dotnet add (Join-Path $bootstrap "signing-client.csproj")     package Microsoft.Trusted.Signing.Client | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "Trusted Signing client restore failed. Check your NuGet sources and sign-in, or pass -DlibPath."
     }
