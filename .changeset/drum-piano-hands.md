@@ -1,5 +1,0 @@
----
-"mizan": patch
----
-
-Show hands on the 3D drum kit and the 3D piano. On the kit, a left and a right hand each grip a drumstick, and the stick tip lands on the struck drum, cymbal, or hi-hat at the moment of each note, following the lesson's sticking (or the suggested right-hand-lead sticking when the sticking letters are off). On the piano, two hands sit palms down over the keys: the finger the music names presses each sounding key and the others hover just above, and the hands glide to the next notes just before they sound. Both views pose the hands from the playback time alone, so seeking, looping, pausing, and the count-in always show a consistent picture, and reduced motion keeps the hands still at their targets. The hands load only when the 3D view opens, the kit and keyboard keep working if they cannot load, and the hint says plainly that the motion is a suggestion, not a recording. Each hand ends in a short natural wrist that fades out; there are no arms, elbows or seated body.
