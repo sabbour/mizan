@@ -11,14 +11,9 @@ open MIDI and MusicXML scores. Musicians can review parts in score and
 instrument workspaces, slow down and loop playback, and export MIDI or
 MusicXML. The app also includes original guitar and bass studies.
 
-Audio processing runs locally by default. An optional cloud worker can run in
-an account you control. Transcriptions and scores are drafts for study, not
-authoritative notation.
+Audio processing runs locally by default. An optional cloud worker can run in.
 
 ## Screenshots
-
-The examples below use an isolated synthetic library and original study
-material; they do not show a real user's library.
 
 ![Library with original demo studies](docs/media/mizan-library.png)
 
@@ -35,7 +30,7 @@ material; they do not show a real user's library.
 ## Hands in practice
 
 These short demos pair the app's practice views with original, computer-
-generated exercises. No commercial recording or sample is used.
+generated exercises.
 
 **Drums — generated eight-bar groove with score, variations, and fills (17 seconds)**
 
@@ -69,8 +64,7 @@ privacy, and costs.
 
 ## Project notes
 
-MuScriptor model weights are not included. Its gated checkpoints have
-noncommercial license terms. See [model notes](host/ENGINE.md) and
+MuScriptor model weights are not included. See [model notes](host/ENGINE.md) and
 [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Mizan uses the [MIT License](LICENSE). Dependencies and model weights have
