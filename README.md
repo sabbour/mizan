@@ -11,7 +11,7 @@ open MIDI and MusicXML scores. Musicians can review parts in score and
 instrument workspaces, slow down and loop playback, and export MIDI or
 MusicXML. The app also includes original guitar and bass studies.
 
-Audio processing runs locally by default. An optional cloud worker can run in.
+Audio processing runs locally by default. An optional cloud worker can run in Azure, Google Cloud, and Amazon Web Services.
 
 ## Screenshots
 
