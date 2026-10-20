@@ -37,17 +37,17 @@ material; they do not show a real user's library.
 These short demos pair the app's practice views with original, computer-
 generated exercises. No commercial recording or sample is used.
 
-**Drums — generated kick, snare, and hi-hat groove**
+**Drums — generated eight-bar groove with score, variations, and fills (17 seconds)**
 
-https://github.com/user-attachments/assets/c6ab9c39-bb71-43e7-b2bc-55ae93bbd917
+https://github.com/user-attachments/assets/8ce4c738-b1eb-49d3-9959-74391cbbd8fe
 
-**Piano — generated two-chord exercise**
+**Piano — generated melody with changing left-hand accompaniment (18 seconds)**
 
-https://github.com/user-attachments/assets/22e02033-e4f8-4d28-8820-0efb7763fc0e
+https://github.com/user-attachments/assets/24523ebb-e5d3-4a17-a8a1-3079b9195c37
 
-**Guitar — generated plucked-string exercise**
+**Guitar — generated study moving across frets 2 to 12 (12 seconds)**
 
-https://github.com/user-attachments/assets/adcca28b-f262-4739-8025-e60faced7189
+https://github.com/user-attachments/assets/51b33939-686d-4c37-9be4-a1e8f5fe1145
 
 ## Architecture
 
