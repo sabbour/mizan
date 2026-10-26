@@ -379,7 +379,7 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             "author": "Python Software Foundation",
             "url": "https://www.python.org/",
             "group": "Tools",
-            "note": "The ARM64 runtime is bundled in the MSIX.",
+            "note": "The runtime matching the package architecture is bundled in the MSIX.",
             "_license": save_license(
                 "tool-python",
                 (Path(os.sys.base_prefix) / "LICENSE.txt").read_text(encoding="utf-8"),
@@ -405,7 +405,7 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             "author": "Microsoft Corporation",
             "url": "https://github.com/dotnet/runtime",
             "group": "Tools",
-            "note": "The ARM64 runtime is bundled in the MSIX.",
+            "note": "The runtime matching the package architecture is bundled in the MSIX.",
             "_license": save_license(
                 "tool-dotnet-runtime",
                 (Path(os.environ["ProgramFiles"]) / "dotnet" / "LICENSE.txt").read_text(encoding="utf-8"),
@@ -418,7 +418,7 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
             "author": "Copyright (c) Microsoft Corporation",
             "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
             "group": "Tools",
-            "note": "The self-contained ARM64 runtime is bundled in the MSIX.",
+            "note": "The self-contained runtime matching the package architecture is bundled in the MSIX.",
             "_license": save_license("tool-windows-app-sdk", windows_mit),
         },
         {

@@ -106,7 +106,7 @@ Development and probe-only packages installed in the venv are excluded.
 | botocore | 1.40.76 | [Apache-2.0](licenses/host-botocore.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/botocore |
 | bottle | 0.13.4 | [MIT](licenses/host-bottle.txt) | Copyright (c) 2009-2024, Marcel Hellkamp. | http://bottlepy.org/ |
 | cachetools | 6.2.6 | [MIT](licenses/host-cachetools.txt) | Copyright (c) 2014-2026 Thomas Kemmer | https://github.com/tkem/cachetools/ |
-| certifi | 2026.7.22 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
+| certifi | 2026.10.19 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
 | cffi | 2.1.1 | [MIT-0](licenses/host-cffi.txt) | Copyright Armin Rigo and contributors | https://cffi.readthedocs.io/en/latest/whatsnew.html |
 | charset-normalizer | 3.5.2 | [MIT](licenses/host-charset-normalizer.txt) | Copyright (c) 2025 TAHRI Ahmed R. | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
 | click | 8.5.0 | [BSD-3-Clause](licenses/host-click.txt) | Copyright 2014 Pallets | https://github.com/pallets/click/ |
@@ -114,7 +114,7 @@ Development and probe-only packages installed in the venv are excluded.
 | colorama | 0.4.6 | [BSD-3-Clause](licenses/host-colorama.txt) | Copyright (c) 2010 Jonathan Hartley | https://github.com/tartley/colorama |
 | cryptography | 46.0.3 | [Apache-2.0 OR BSD-3-Clause](licenses/host-cryptography.txt) | Project contributors | https://github.com/pyca/cryptography |
 | einops | 0.8.2 | [MIT](licenses/host-einops.txt) | Copyright (c) 2018 Alex Rogozhnikov | https://github.com/arogozhnikov/einops |
-| filelock | 4.1.0 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/py-filelock |
+| filelock | 4.2.4 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/py-filelock |
 | flatbuffers | 25.12.19 | [Apache-2.0](licenses/host-flatbuffers.txt) | Copyright Google LLC | https://google.github.io/flatbuffers/ |
 | fsspec | 2026.9.0 | [BSD-3-Clause](licenses/host-fsspec.txt) | Copyright (c) 2018, Martin Durant | https://github.com/fsspec/filesystem_spec |
 | google-auth | 2.41.1 | [Apache-2.0](licenses/host-google-auth.txt) | copyright notice that is included in or attached to the work | https://github.com/googleapis/google-auth-library-python |
@@ -257,17 +257,17 @@ Development and probe-only packages installed in the venv are excluded.
 | Name | Version | License | Copyright holder | Source |
 |---|---|---|---|---|
 | .NET Runtime | 10 | [LicenseRef-Microsoft-.NET-Library](licenses/tool-dotnet-runtime.txt) | Microsoft Corporation | https://github.com/dotnet/runtime |
-|  |  |  |  | *The ARM64 runtime is bundled in the MSIX.* |
+|  |  |  |  | *The runtime matching the package architecture is bundled in the MSIX.* |
 | Microsoft Edge WebView2 Runtime | System installed | LicenseRef-Microsoft-WebView2-Runtime | Microsoft Corporation | https://developer.microsoft.com/microsoft-edge/webview2/ |
 |  |  |  |  | *Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime.* |
 | Node.js JavaScript runtime | 24.22.0 | [MIT](licenses/tool-nodejs-runtime.txt) | Copyright Node.js contributors | https://nodejs.org/ |
 |  |  |  |  | *A Windows x64/ARM64 runtime is bundled in the MSIX for yt-dlp's YouTube challenge solver.* |
 | Python | 3.12 | [PSF-2.0](licenses/tool-python.txt) | Python Software Foundation | https://www.python.org/ |
-|  |  |  |  | *The ARM64 runtime is bundled in the MSIX.* |
+|  |  |  |  | *The runtime matching the package architecture is bundled in the MSIX.* |
 | Qualcomm QNN execution provider | Catalog acquired | LicenseRef-Qualcomm-QNN | Qualcomm Technologies, Inc. | https://learn.microsoft.com/windows/ai/new-windows-ml/supported-execution-providers |
 |  |  |  |  | *Optional proprietary provider downloaded by Windows ML on supported devices; review its displayed terms before redistribution.* |
 | Windows App SDK Runtime | 1.8.260921001 | [MIT](licenses/tool-windows-app-sdk.txt) | Copyright (c) Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads |
-|  |  |  |  | *The self-contained ARM64 runtime is bundled in the MSIX.* |
+|  |  |  |  | *The self-contained runtime matching the package architecture is bundled in the MSIX.* |
 | Windows ML Runtime and execution provider catalog | 1.8.260209005 | [MIT](licenses/tool-windows-app-sdk.txt) | Copyright (c) Microsoft Corporation | https://learn.microsoft.com/windows/ai/new-windows-ml/ |
 |  |  |  |  | *CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms.* |
 | yt-dlp | 2026.8.19 | [Unlicense](licenses/host-yt-dlp.txt) | Public-domain dedication by yt-dlp contributors | https://github.com/yt-dlp/yt-dlp |

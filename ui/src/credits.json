@@ -730,7 +730,7 @@
   },
   {
     "name": "certifi",
-    "version": "2026.7.22",
+    "version": "2026.10.19",
     "license": "Mozilla Public License 2.0 (MPL 2.0)",
     "author": "Project contributors",
     "url": "https://github.com/certifi/python-certifi",
@@ -794,7 +794,7 @@
   },
   {
     "name": "filelock",
-    "version": "4.1.0",
+    "version": "4.2.4",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
     "url": "https://github.com/tox-dev/py-filelock",
@@ -1834,7 +1834,7 @@
     "author": "Microsoft Corporation",
     "url": "https://github.com/dotnet/runtime",
     "group": "Tools",
-    "note": "The ARM64 runtime is bundled in the MSIX."
+    "note": "The runtime matching the package architecture is bundled in the MSIX."
   },
   {
     "name": "Microsoft Edge WebView2 Runtime",
@@ -1861,7 +1861,7 @@
     "author": "Python Software Foundation",
     "url": "https://www.python.org/",
     "group": "Tools",
-    "note": "The ARM64 runtime is bundled in the MSIX."
+    "note": "The runtime matching the package architecture is bundled in the MSIX."
   },
   {
     "name": "Qualcomm QNN execution provider",
@@ -1879,7 +1879,7 @@
     "author": "Copyright (c) Microsoft Corporation",
     "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
     "group": "Tools",
-    "note": "The self-contained ARM64 runtime is bundled in the MSIX."
+    "note": "The self-contained runtime matching the package architecture is bundled in the MSIX."
   },
   {
     "name": "Windows ML Runtime and execution provider catalog",
