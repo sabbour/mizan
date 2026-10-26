@@ -226,9 +226,76 @@ try {
     await open(query)
     assert.equal(await dataset('handsShown'), 'true', `${view}: Hands on is remembered too`)
   }
+  // ---------- Piano top view ----------
+  await evaluate('localStorage.removeItem("mizan:practice")')
+  await open('view=piano&example=black')
+  const topToggle = '.kit-toolbar [data-kit-toggle="top"]'
+  assert.equal(await evaluate(`document.querySelector('${topToggle}')?.textContent`), 'Top view', 'piano: the toolbar has a Top view toggle')
+  assert.equal(await dataset('camera'), 'perspective', 'piano: the existing perspective remains the default')
+  assert.equal(await evaluate(`document.querySelector('${topToggle}').getAttribute('aria-pressed')`), 'false', 'piano: Top view starts off')
+  const perspectiveHands = await at(0.5)
+  await evaluate(`document.querySelector('${topToggle}').click()`)
+  for (let attempt = 0; attempt < 50 && (await dataset('camera')) !== 'top'; attempt++) await sleep(20)
+  assert.equal(await dataset('camera'), 'top', 'piano: Top view switches to an overhead camera')
+  assert.equal(await evaluate(`document.querySelector('${topToggle}').getAttribute('aria-pressed')`), 'true', 'piano: the toggle reports Top view on')
+  const topHands = await at(0.5)
+  assert.deepEqual(topHands, perspectiveHands, 'piano: changing camera keeps the same hands pose at the same beat')
+  assert.equal(await dataset('pressed'), '61R2', 'piano: the same black key remains pressed from above')
+  assert.ok(await evaluate('document.querySelectorAll(".piano-finger").length > 0'), 'piano: finger labels redraw after the camera changes')
+  const topFrame = async () => (await dataset('frame')).split(',').map(Number)
+  assert.ok((await topFrame()).every((edge) => Math.abs(edge) <= 0.91), `piano: the overhead keyboard and wrist margin fit (${await dataset('frame')})`)
+  await at(2.5)
+  await at(0.1)
+  assert.deepEqual(await at(0.5), topHands, 'piano: overhead hands return to the same pose after seeking')
+  const pausedTop = await at(1.5, { playing: false })
+  assert.ok(pausedTop.right.fingers.every((finger) => finger.pressing === null), 'piano: overhead hands release their keys when paused')
+  assert.equal(await dataset('depressed'), '', 'piano: overhead keys rest up while paused')
+  await evaluate(`document.querySelector('${topToggle}').focus()`)
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+  await sleep(100)
+  assert.equal(await dataset('camera'), 'perspective', 'piano: Space operates the focused Top view toggle')
+  assert.deepEqual(await at(1.5, { playing: false }), pausedTop, 'piano: switching the paused camera does not change hand pose')
+  await evaluate(`document.querySelector('${topToggle}').click()`)
+  await evaluate(`window.__setPianoExample('registers')`)
+  await sleep(100)
+  await at(0)
+  assert.equal(await dataset('pressed'), '21L5', 'piano: the generated full-register example updates the keys reactively')
+  const topKeys = await evaluate(`({ low: window.__mizanPianoKeyAt(21), middle: window.__mizanPianoKeyAt(60), high: window.__mizanPianoKeyAt(108) })`)
+  assert.ok(topKeys.low && topKeys.middle && topKeys.high && topKeys.low.x < topKeys.middle.x && topKeys.middle.x < topKeys.high.x,
+    'piano: low, middle and high notes remain left-to-right across the full keyboard')
+  for (const [beat, key] of [[0.5, 21], [2.5, 60], [3.5, 61], [5.5, 108]]) {
+    const state = await at(beat)
+    const pressing = Object.values(state).flatMap((hand) => hand.fingers).filter((finger) => finger.pressing !== null)
+    assert.ok(pressing.some((finger) => finger.pressing === key), `piano: overhead fingers follow register key ${key}`)
+    assert.ok(pressing.every((finger) => finger.error < 0.004), `piano: overhead fingertips align with black/white key ${key}`)
+  }
+  await evaluate(`document.querySelector('.kit-toolbar [data-kit-toggle="hands"]').click()`)
+  await sleep(200)
+  assert.equal(await dataset('handsShown'), 'off', 'piano: Hands can be hidden while Top view is on')
+  assert.equal(await dataset('camera'), 'top', 'piano: hiding Hands does not change the camera')
+  assert.equal(await evaluate(`document.querySelector('${topToggle}').getAttribute('aria-pressed')`), 'true', 'piano: Top view stays on while Hands is off')
+  for (const look of ['Realistic', 'ClayStudyModel', 'NeonRhythm', 'TechnicalBlueprint']) {
+    await evaluate(`(() => { const select = document.querySelector('.kit-look select'); select.value = ${JSON.stringify(look)}; select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const ready = await evaluate(`document.querySelector('.practice-kit').dataset.ready === 'true' && document.querySelector('.practice-kit').dataset.look === ${JSON.stringify(look)}`)
+      if (ready) break
+      await sleep(100)
+    }
+    assert.equal(await dataset('camera'), 'top', `piano, ${look}: Top view is retained`)
+    assert.ok((await topFrame()).every((edge) => Math.abs(edge) <= 0.91), `piano, ${look}: the whole keyboard stays in frame`)
+  }
+  await open('view=piano&example=black', { width: 617, height: 900, scale: 2 })
+  assert.equal(await dataset('camera'), 'top', 'piano: Top view is remembered after reload')
+  assert.equal(await dataset('handsShown'), 'off', 'piano: the Hands setting remains independent after reload')
+  assert.ok((await topFrame()).every((edge) => Math.abs(edge) <= 0.91), 'piano: the overhead framing fits a compact high-DPI stage')
+  await evaluate(`document.querySelector('${topToggle}').click()`)
+  await sleep(100)
+  assert.equal(await dataset('camera'), 'perspective', 'piano: Top view can be switched off')
+  assert.equal(await dataset('handsShown'), 'off', 'piano: switching the camera does not turn Hands back on')
   const errors = logs.filter((line) => line.startsWith('exception'))
   assert.deepEqual(errors, [], 'no script errors')
-  console.log('Kit hands browser checks passed: drums (both kits, fill, paused, seeking, reduced motion, narrow screen, missing models) and piano (chord, seeking, paused, pitch-placed, reduced motion, missing models).')
+  console.log('Kit hands browser checks passed: drums (both kits, fill, paused, seeking, reduced motion, narrow screen, missing models) and piano (chord, seeking, paused, pitch-placed, reduced motion, missing models, top view).')
 } catch (error) {
   failed = true
   throw error

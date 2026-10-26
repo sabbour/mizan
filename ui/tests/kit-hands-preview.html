@@ -48,17 +48,22 @@
         nohands: [note(60, 0, 1), note(64, 1, 1), note(67, 2, 1), note(48, 0, 4), note(72, 3, 1)],
         suggested: [note(60, 0, 1, 'right'), note(62, 1, 1, 'right'), note(64, 2, 1, 'right'), note(48, 0, 2, 'left'), note(55, 0, 2, 'left')],
         black: [note(61, 0, 1, 'right', 2), note(63, 1, 1, 'right', 3), note(66, 2, 1, 'right', 2), note(68, 3, 1, 'right', 3)],
+        registers: [note(21, 0, 1, 'left', 5), note(48, 1, 1, 'left', 1), note(60, 2, 1, 'right', 1),
+          note(61, 3, 1, 'right', 2), note(84, 4, 1, 'right', 4), note(108, 5, 1, 'right', 5)],
       }
       const base = buildSong()
-      const song = { ...base, title: 'Visual check', bars: 4, bpm: 100, beatsPerBar: 4, chords: [], chordLabels: [], source: 'course',
-        drums: view === 'drums' ? (drumExamples[example] ?? groove) : [], piano: view === 'piano' ? (pianoExamples[example] ?? pianoExamples.chord) : [] }
+      const makeSong = (pianoExample) => ({ ...base, title: 'Visual check', bars: 4, bpm: 100, beatsPerBar: 4, chords: [], chordLabels: [], source: 'course',
+        drums: view === 'drums' ? (drumExamples[example] ?? groove) : [], piano: view === 'piano' ? (pianoExamples[pianoExample] ?? pianoExamples.chord) : [] })
       // A taller stage stands in for the workspace, where the kit stage grows to fill the split view.
       if (query.get('stage')) document.head.append(Object.assign(document.createElement('style'), { textContent: `.practice-kit .practice-stage { height: ${query.get('stage')}px !important; }` }))
       window.__t = { playing: false, countingIn: false, countBeat: 0, beat: Number(query.get('beat') ?? 0) }
       const engine = { loop: null, getEffectiveQuarterBpm: () => 100, read: () => window.__t }
       window.__engine = engine
-      window.__song = song
       function App() {
+        const [pianoExample, setPianoExample] = React.useState(example)
+        const song = React.useMemo(() => makeSong(pianoExample), [pianoExample])
+        window.__song = song
+        window.__setPianoExample = (name) => setPianoExample(name)
         const [style, setStyle] = React.useState(query.get('style') ?? 'electronic:Realistic')
         const sticking = query.get('sticking') === 'off' ? undefined : stickingFor(song)
         return React.createElement('main', null, view === 'drums'

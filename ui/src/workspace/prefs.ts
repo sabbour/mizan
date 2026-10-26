@@ -35,6 +35,7 @@ export type PracticePrefs = {
   drumsView?: Extract<PracticeView, 'score' | 'kit'>
   guitarView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
   bassView?: Extract<PracticeView, 'score' | 'tab' | 'fretboard'>
+  pianoTopView?: boolean
   frettedHandedness?: 'right' | 'left'
   frettedView?: 'guide' | 'mirror'
   frettedLook?: Look
@@ -96,7 +97,7 @@ function read(warn: boolean): PracticePrefs {
     if ((LOOKS as readonly unknown[]).includes(saved.frettedLook)) prefs.frettedLook = saved.frettedLook as Look
     else if (warn) console.warn('Ignoring the saved guitar or bass look; it is not one of the offered looks.', saved.frettedLook)
   }
-  for (const key of ['frettedNames', 'frettedGuides', 'hands'] as const) {
+  for (const key of ['pianoTopView', 'frettedNames', 'frettedGuides', 'hands'] as const) {
     if (!(key in saved)) continue
     if (typeof saved[key] === 'boolean') prefs[key] = saved[key]
     else if (warn) console.warn(`Ignoring the saved ${key} preference; it is not on or off.`, saved[key])
