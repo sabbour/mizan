@@ -441,6 +441,7 @@ async function call<T = object>(name: string, ...args: unknown[]): Promise<T> {
 let subscriptionsRequest: Promise<AzureSubscription[]> | null = null
 
 export const host = {
+  checkReleaseUpdates: () => call<unknown>('github_release_update_check'),
   cloudProviders: () =>
     call<{ providers: CloudProviderInfo[]; activeProvider: CloudProvider | null; issue?: string }>('cloud_providers'),
   cloudSettings: <P extends CloudProvider>(provider: P) =>

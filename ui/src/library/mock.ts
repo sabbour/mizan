@@ -188,6 +188,29 @@ setInterval(advance, 500)
 
 const ok = <T extends object>(v: T) => Promise.resolve({ ok: true as const, ...v })
 const fail = (code: string, message: string, fix?: string) => Promise.resolve({ ok: false as const, error: { code, message, fix } })
+const RELEASE_UPDATE_FIXTURE_KEY = 'mizan:dev-release-update-fixture'
+
+function readReleaseUpdateFixture(): Record<string, unknown> | null {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return null
+  try {
+    const fixture: unknown = JSON.parse(window.localStorage.getItem(RELEASE_UPDATE_FIXTURE_KEY) ?? 'null')
+    return fixture && typeof fixture === 'object' && !Array.isArray(fixture)
+      ? fixture as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+function readReleaseUpdateFixtureArray<T>(key: string): T[] | null {
+  const value = readReleaseUpdateFixture()?.[key]
+  return Array.isArray(value) ? value as T[] : null
+}
+function readReleaseUpdateResultFixture(): Record<string, unknown> | null {
+  const value = readReleaseUpdateFixture()?.releaseUpdate
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
 const find = (id: string) => jobs.find((j) => j.id === id)
 const visible = () => jobs.filter((j) => j.status !== 'cancelled' && j.order > -100).sort((a, b) => a.order - b.order)
 const scores = new Map<string, ReturnType<typeof buildSong>>()
@@ -243,6 +266,15 @@ const mockDownloads: ModelDownloads = {
   'muscriptor-large': { downloaded: false, active: false, bytesReceived: 0, totalBytes: 5465642136, bytesPerSecond: null, error: null },
 }
 export const mockHost = {
+  github_release_update_check: () => ok(readReleaseUpdateResultFixture() ?? {
+    status: 'unsupported',
+    currentVersion: null,
+    latestVersion: null,
+    tagName: null,
+    releaseNotes: null,
+    releaseUrl: null,
+    message: 'Update checks are available only in the installed Windows app.',
+  }),
   model_download_status: () => ok({ models: structuredClone(mockDownloads) }),
   cloud_providers: () => ok({ providers: mockCloudProviders, activeProvider: mockCloudProvider }),
   cloud_settings: (provider: CloudProvider) => ok({ provider, settings: { provider } }),
@@ -632,8 +664,14 @@ export const mockHost = {
     entries.unshift(entry)
     return ok({ entry })
   },
-  list_library: () => ok({ entries: [...entries].sort((a, b) => (b.practicedAt ?? b.createdAt).localeCompare(a.practicedAt ?? a.createdAt)) }),
-  list_folders: () => (recount(), ok({ folders: folders.map((folder) => ({ ...folder })) })),
+  list_library: () => ok({ entries: readReleaseUpdateFixtureArray<Entry>('libraryEntries')
+    ?? [...entries].sort((a, b) => (b.practicedAt ?? b.createdAt).localeCompare(a.practicedAt ?? a.createdAt)) }),
+  list_folders: () => {
+    const fixtureFolders = readReleaseUpdateFixtureArray<Folder>('folderEntries')
+    return fixtureFolders
+      ? ok({ folders: fixtureFolders })
+      : (recount(), ok({ folders: folders.map((folder) => ({ ...folder })) }))
+  },
   create_folder(name: string) {
     name = name.trim()
     if (!name || name.length > 60) return fail('invalid_folder_name', 'Folder names must be between 1 and 60 characters.', 'Use a shorter name.')
@@ -665,7 +703,8 @@ export const mockHost = {
     recount()
     return ok({})
   },
-  list_queue: () => ok({ jobs: visible().map((j) => ({ ...j })) }),
+  list_queue: () => ok({ jobs: readReleaseUpdateFixtureArray<QueueJob>('queueJobs')
+    ?? visible().map((j) => ({ ...j })) }),
   resource_usage: () => ok({ usage: visible().some((j) => j.status === 'running')
     ? { cpu: null, ramBytes: null, gpu: null, npu: null } : null }),
   get_job: (id: string) => (find(id) ? ok({ job: { ...find(id)! } }) : fail('not_found', 'That job no longer exists.')),

@@ -11,6 +11,7 @@ import { LESSONS } from '../course/curriculum'
 import { PIANO_LESSONS } from '../course/piano'
 import { FRETTED_BROWSE_LESSONS } from '../course/fretted'
 import { PIANO_INSPIRED } from '../course/pianoInspired'
+import type { ReleaseUpdateUiState } from '../release/updates'
 import './library.css'
 
 type Problem = { message: string; fix: string | null; code?: string }
@@ -43,6 +44,8 @@ type Props = {
   onDetails: (job: QueueJob) => void
   selectedJob?: string
   onCredits: () => void
+  releaseUpdate: ReleaseUpdateUiState
+  onCheckReleaseUpdates: () => void
 }
 
 type LibraryFolder = { id: string; name: string; count: number; user?: boolean }
@@ -105,7 +108,7 @@ const TABS: { id: LibraryTab; label: string }[] = [
   { id: 'course', label: 'Course' },
 ]
 
-export function Library({ jobs, version, onQueueChange, onOpen, onLesson, courseBrowse, onCourseBrowse, onDetails, selectedJob, onCredits, tab, onTab: setTab }: Props) {
+export function Library({ jobs, version, onQueueChange, onOpen, onLesson, courseBrowse, onCourseBrowse, onDetails, selectedJob, onCredits, tab, onTab: setTab, releaseUpdate, onCheckReleaseUpdates }: Props) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedFolder, setSelectedFolder] = useState('all')
@@ -1479,6 +1482,16 @@ export function Library({ jobs, version, onQueueChange, onOpen, onLesson, course
             <strong>{import.meta.env.VITE_MIZAN_VERSION ? `v${import.meta.env.VITE_MIZAN_VERSION}` : 'Development build'}</strong>
             <a href="https://github.com/sabbour/mizan/releases" target="_blank" rel="noopener noreferrer">Release notes <ExternalLink size={14} aria-hidden /></a>
           </p>
+          <div className="about-update-check">
+            <button type="button" className="btn" disabled={releaseUpdate.checking} onClick={onCheckReleaseUpdates}>
+              {releaseUpdate.checking ? 'Checking…' : 'Check for updates'}
+            </button>
+            {(releaseUpdate.checking || releaseUpdate.statusMessage) && (
+              <p role="status" aria-live="polite">
+                {releaseUpdate.checking ? 'Checking GitHub Releases…' : releaseUpdate.statusMessage}
+              </p>
+            )}
+          </div>
           <div className="about-links">
             <a href="https://github.com/sabbour/mizan" target="_blank" rel="noopener noreferrer">Source on GitHub <ExternalLink size={14} aria-hidden /></a>
             <a href="https://github.com/sabbour/mizan/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license <ExternalLink size={14} aria-hidden /></a>

@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ErrorInfo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Workspace } from './workspace/Workspace'
 import { AnalysisNotice } from './workspace/AnalysisNotice'
@@ -16,9 +16,25 @@ import { browseTo, DEFAULT_BROWSE, type CourseBrowse } from './course/browse'
 import { pianoLessonById, pianoLessonNote, pianoLessonSong } from './course/piano'
 import { frettedLessonById, frettedLessonNote, frettedLessonSong } from './course/fretted'
 import { lessonPosition, saveLessonPosition } from './course/state'
+import { ReleaseUpdateNotice } from './release/ReleaseUpdateNotice'
+import {
+  ReleaseUpdateController,
+  summarizeReleaseNotes,
+} from './release/updates'
 
 type View = { kind: 'library' } | { kind: 'job'; id: string; opened?: Opened } | { kind: 'song'; opened: Opened } | { kind: 'credits' } | { kind: 'lesson'; id: string }
 type LessonGuides = { noteNames?: boolean; fingering?: boolean }
+
+const UPDATE_LAST_CHECK_KEY = 'mizan:release-update:last-attempt'
+const UPDATE_DISMISSED_VERSION_KEY = 'mizan:release-update:dismissed-version'
+
+function getUpdatePreference(key: string): string | null {
+  try { return window.localStorage?.getItem(key) ?? null } catch { return null }
+}
+
+function setUpdatePreference(key: string, value: string): void {
+  try { window.localStorage?.setItem(key, value) } catch { /* Update preferences are optional. */ }
+}
 
 const NOTE: Record<Entry['source'], string> = { youtube: 'Draft transcription', midi: 'Imported MIDI', musicxml: 'Imported MusicXML' }
 
@@ -53,6 +69,23 @@ class WorkspaceBoundary extends Component<{ children: ReactNode; onBack: () => v
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
+  const [releaseUpdateController] = useState(() => new ReleaseUpdateController({
+    check: () => host.checkReleaseUpdates(),
+    readLastAttempt: () => getUpdatePreference(UPDATE_LAST_CHECK_KEY),
+    readDismissedVersion: () => getUpdatePreference(UPDATE_DISMISSED_VERSION_KEY),
+    writeLastAttempt: (timestamp) => setUpdatePreference(UPDATE_LAST_CHECK_KEY, timestamp),
+    writeDismissedVersion: (version) => setUpdatePreference(UPDATE_DISMISSED_VERSION_KEY, version),
+  }))
+  const releaseUpdate = useSyncExternalStore(
+    releaseUpdateController.subscribe,
+    releaseUpdateController.getSnapshot,
+    releaseUpdateController.getSnapshot,
+  )
+  const checkReleaseUpdates = useCallback((manual = false) => {
+    void releaseUpdateController.check(manual)
+  }, [releaseUpdateController])
+  const dismissReleaseUpdate = useCallback(() => releaseUpdateController.dismiss(), [releaseUpdateController])
+  useEffect(() => { void releaseUpdateController.start() }, [releaseUpdateController])
   // The selected library tab is kept while a song or lesson is open so Back returns to it.
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('catalog')
   // Where the Course tab is (instrument, drum list, genre); Back shows the list a lesson came from. Not stored.
@@ -270,6 +303,8 @@ export default function App() {
           onCourseBrowse={setCourseBrowse}
           tab={libraryTab}
           onTab={setLibraryTab}
+          releaseUpdate={releaseUpdate}
+          onCheckReleaseUpdates={() => checkReleaseUpdates(true)}
           onDetails={(j) => setView((v) => (v.kind === 'job' && v.id === j.id ? { kind: 'library' } : { kind: 'job', id: j.id }))}
         />
       )}
@@ -305,6 +340,15 @@ export default function App() {
           </button>
         </div>
       )}
+      {releaseUpdate.showNotification && releaseUpdate.result?.status === 'update-available'
+        && releaseUpdate.result.latestVersion && releaseUpdate.result.releaseUrl && (
+          <ReleaseUpdateNotice
+            version={releaseUpdate.result.tagName ?? `v${releaseUpdate.result.latestVersion}`}
+            summary={summarizeReleaseNotes(releaseUpdate.result.releaseNotes)}
+            releaseUrl={releaseUpdate.result.releaseUrl}
+            onDismiss={dismissReleaseUpdate}
+          />
+        )}
     </>
   )
 }
