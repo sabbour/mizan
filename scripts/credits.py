@@ -38,13 +38,29 @@ OVERRIDES = {
     "pywebview": "BSD-3-Clause",
     "scipy": "BSD-3-Clause",
 }
+# These corrections are verified against immutable upstream revisions and only
+# apply to the package versions installed in the reviewed release:
+# flatbuffers 25.12.19: https://github.com/google/flatbuffers/blob/7e163021e59cca4f8e1e35a7c828b5c6b7915953/LICENSE
+# proxy-tools 0.1.0: https://github.com/jtushman/proxy_tools/blob/db43f1e35d4f90a65c5a4d56d9e9af88212ec6e6/LICENSE.txt
+VERIFIED_PYTHON_LICENSES = {
+    "flatbuffers": {
+        "version": "25.12.19",
+        "license": "Apache-2.0",
+        "fallback_text": "scripts/licenses/apache-2.0.txt",
+    },
+    "proxy-tools": {
+        "version": "0.1.0",
+        "license": "BSD-2-Clause",
+        "text": "scripts/licenses/proxy-tools.txt",
+        "author": "Copyright (c) 2013 Armin Ronacher; Copyright (c) 2014 Jonathan Tushman",
+    },
+}
 HOLDERS = {
     "cffi": "Copyright Armin Rigo and contributors",
     "flatbuffers": "Copyright Google LLC",
     "lie": "Copyright Calvin Metcalf and contributors",
     "packaging": "Python Packaging Authority and contributors",
     "process-nextick-args": "Copyright Calvin Metcalf and contributors",
-    "proxy-tools": "Copyright Jacob Tushman and contributors",
     "typing-extensions": "Python Software Foundation and contributors",
     "yt-dlp": "Public-domain dedication by yt-dlp contributors",
 }
@@ -153,20 +169,37 @@ def python_credits() -> list[dict[str, str]]:
         canonical = canonicalize_name(package["Name"])
         if canonical not in wanted:
             continue
-        license_id = OVERRIDES.get(canonical, SPDX.get(package["License"], package["License"]))
-        text = package.get("LicenseText", "")
-        if not text or text == "UNKNOWN":
+        verified = VERIFIED_PYTHON_LICENSES.get(canonical)
+        if verified and package["Version"] != verified["version"]:
+            raise RuntimeError(
+                f"Verified license correction for {canonical} applies only to version "
+                f"{verified['version']}; found {package['Version']}."
+            )
+        license_id = (
+            verified["license"]
+            if verified
+            else OVERRIDES.get(canonical, SPDX.get(package["License"], package["License"]))
+        )
+        text = package.get("LicenseText") or ""
+        if verified and "text" in verified:
+            text = (ROOT / verified["text"]).read_text(encoding="utf-8")
+        elif verified and (not text.strip() or text.strip().upper() == "UNKNOWN"):
+            text = (ROOT / verified["fallback_text"]).read_text(encoding="utf-8")
+        if not text.strip() or text.strip().upper() == "UNKNOWN":
             if license_id == "MIT" and (canonical.startswith("winrt-") or canonical.startswith("wasdk-")):
                 text = windows_mit
             else:
                 text = f"No license file was exposed by the installed distribution.\nDeclared license: {license_id}\n"
+        author = verified.get("author") if verified else None
+        if not author:
+            author = HOLDERS.get(canonical, holder(text, package.get("Author", "")))
         group = "Tools" if canonical == "yt-dlp" else "Host/engine libraries"
         credits.append(
             {
                 "name": package["Name"],
                 "version": package["Version"],
                 "license": license_id,
-                "author": HOLDERS.get(canonical, holder(text, package.get("Author", ""))),
+                "author": author,
                 "url": package.get("URL", ""),
                 "group": group,
                 "note": "Invoked as an external process for permitted media access." if canonical == "yt-dlp" else "",

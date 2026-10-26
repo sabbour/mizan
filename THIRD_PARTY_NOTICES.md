@@ -138,7 +138,7 @@ Development and probe-only packages installed in the venv are excluded.
 | onnxruntime-windowsml | 1.27.1.202607110137 | [MIT](licenses/host-onnxruntime-windowsml.txt) | Copyright (c) Microsoft Corporation | https://onnxruntime.ai |
 | packaging | 26.3 | [Apache-2.0 OR BSD-2-Clause](licenses/host-packaging.txt) | Python Packaging Authority and contributors | https://github.com/pypa/packaging |
 | protobuf | 7.36.2 | [BSD-3-Clause](licenses/host-protobuf.txt) | Copyright 2008 Google Inc.  All rights reserved. | https://developers.google.com/protocol-buffers/ |
-| proxy_tools | 0.1.0 | [MIT](licenses/host-proxy-tools.txt) | Copyright Jacob Tushman and contributors | http://github.com/jtushman/proxy_tools |
+| proxy_tools | 0.1.0 | [BSD-2-Clause](licenses/host-proxy-tools.txt) | Copyright (c) 2013 Armin Ronacher; Copyright (c) 2014 Jonathan Tushman | http://github.com/jtushman/proxy_tools |
 | pyasn1 | 0.6.4 | [BSD-2-Clause](licenses/host-pyasn1.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1 |
 | pyasn1_modules | 0.4.2 | [BSD-3-Clause](licenses/host-pyasn1-modules.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1-modules |
 | pycparser | 3.11 | [BSD-3-Clause](licenses/host-pycparser.txt) | Copyright (c) 2008-2027, Eli Bendersky | https://github.com/eliben/pycparser |

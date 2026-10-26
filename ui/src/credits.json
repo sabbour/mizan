@@ -987,8 +987,8 @@
   {
     "name": "proxy_tools",
     "version": "0.1.0",
-    "license": "MIT",
-    "author": "Copyright Jacob Tushman and contributors",
+    "license": "BSD-2-Clause",
+    "author": "Copyright (c) 2013 Armin Ronacher; Copyright (c) 2014 Jonathan Tushman",
     "url": "http://github.com/jtushman/proxy_tools",
     "group": "Host/engine libraries"
   },
