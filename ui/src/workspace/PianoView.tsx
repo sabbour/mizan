@@ -3,7 +3,7 @@ import type { Engine } from './engine'
 import { useFrame, useReducedMotion } from './hooks'
 import { barStart, measures, pulseBeats } from './meter'
 import { keyLetter, noteName, type PianoNote, type Song } from './song'
-import { LOOKS, LOOK_LABEL, type Look } from './prefs'
+import { loadPrefs, LOOKS, LOOK_LABEL, savePref, type Look } from './prefs'
 import type { KeyTarget } from './kitAsset'
 import { KitRenderer, stageBackground, type Feedback } from './kitRenderer'
 import { feedbackAt, HAND_GLOW, type Strike } from './kitFeedback'
@@ -44,15 +44,18 @@ const multiply = (a: Float32Array, b: Float32Array) => {
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) out[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]
   return out
 }
-const lookAt = (eye: number[], target: number[]) => {
+const lookAt = (eye: number[], target: number[], up = [0, 1, 0]) => {
   const sub = (a: number[], b: number[]) => a.map((value, index) => value - b[index])
   const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
   const z = normalize(sub(eye, target))
-  const x = normalize(cross([0, 1, 0], z))
+  const x = normalize(cross(up, z))
   const y = cross(z, x)
   const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
   return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1])
 }
+const orthographic = (left: number, right: number, bottom: number, top: number, near: number, far: number) =>
+  new Float32Array([2 / (right - left), 0, 0, 0, 0, 2 / (top - bottom), 0, 0, 0, 0, -2 / (far - near), 0,
+    -(right + left) / (right - left), -(top + bottom) / (top - bottom), -(far + near) / (far - near), 1])
 
 type Held = { start: number; end: number; note: PianoNote }
 
@@ -68,6 +71,7 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
   const [manifest, setManifest] = useState<PianoManifest | null>(null)
   const [variantId, setVariantId] = useState<string | undefined>()
   const [look, setLook] = useState<Look>(session.look ?? 'Realistic')
+  const [topView, setTopView] = useState(() => loadPrefs().pianoTopView ?? false)
   const [failure, setFailure] = useState<string | null>(null)
   // A lost graphics context is temporary: the canvas stays mounted so the restore event can bring the keyboard back.
   const [lost, setLost] = useState(false)
@@ -224,9 +228,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     lastSignature.current = ''
   }, [handsKit, scene, context, rendererReady])
   const handsShown = !!(handsKit && timelines)
-  // Frame the keybed, front and centre from above, in a gentle perspective: every key from the lowest to the highest,
-  // with a little of the case at each end, and the legs and music rest left out. A narrow field of view keeps the end
-  // keys their true shape, and the framing depends only on the instrument and the stage size, not on the lesson's notes.
+  // Frame the whole keybed and front of the piano, leaving out the legs and music rest. The default perspective keeps
+  // the end keys their true shape; the orthographic top view also leaves room for the wrists. Neither depends on notes.
   useEffect(() => {
     const current = renderer.current
     const element = canvas.current
@@ -240,24 +243,46 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     // The keys' own width at the ends, a little case beyond them, and the key tops and fronts.
     min[0] -= 0.045; max[0] += 0.045; min[1] -= 0.02; max[1] += 0.03; min[2] -= 0.03; max[2] += 0.03
     const target = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
-    const direction = normalize([0, 1.15, 1])
-    const fov = 0.42
-    const aspect = width / height
-    const corners: number[][] = []
-    for (const x of [min[0], max[0]]) for (const y of [min[1], max[1]]) for (const z of [min[2], max[2]]) corners.push([x, y, z])
-    const project = (distance: number) => {
-      const eye = target.map((value, index) => value + direction[index] * distance)
-      const view = multiply(perspective(fov, aspect, Math.max(0.05, distance - 1.5), distance + 3), lookAt(eye, target))
-      const clip = corners.map(([x, y, z]) => {
+    let eye: number[], view: ReturnType<typeof multiply>, clip: number[][]
+    if (topView) {
+      // The overhead view keeps the whole keyboard and room for both wrists in frame, even on a narrow stage.
+      const topMin = [min[0] - 0.12, min[1], min[2] - 0.08]
+      const topMax = [max[0] + 0.12, max[1], max[2] + 0.28]
+      const topTarget = [(topMin[0] + topMax[0]) / 2, target[1], (topMin[2] + topMax[2]) / 2]
+      const topCorners: number[][] = []
+      for (const x of [topMin[0], topMax[0]]) for (const y of [min[1], max[1]]) for (const z of [topMin[2], topMax[2]]) topCorners.push([x, y, z])
+      const aspect = width / height
+      const halfHeight = Math.max((topMax[2] - topMin[2]) / 2, (topMax[0] - topMin[0]) / (2 * aspect)) / 0.9
+      eye = [topTarget[0], topTarget[1] + 4, topTarget[2]]
+      view = multiply(orthographic(-halfHeight * aspect, halfHeight * aspect, -halfHeight, halfHeight, 0.1, 10),
+        lookAt(eye, topTarget, [0, 0, -1]))
+      clip = topCorners.map(([x, y, z]) => {
         const w = view[3] * x + view[7] * y + view[11] * z + view[15]
         return [(view[0] * x + view[4] * y + view[8] * z + view[12]) / w, (view[1] * x + view[5] * y + view[9] * z + view[13]) / w]
       })
-      return { eye, view, clip, extent: Math.max(...clip.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))) }
+    } else {
+      const direction = normalize([0, 1.15, 1])
+      const fov = 0.42
+      const aspect = width / height
+      const corners: number[][] = []
+      for (const x of [min[0], max[0]]) for (const y of [min[1], max[1]]) for (const z of [min[2], max[2]]) corners.push([x, y, z])
+      const project = (distance: number) => {
+        const eye = target.map((value, index) => value + direction[index] * distance)
+        const view = multiply(perspective(fov, aspect, Math.max(0.05, distance - 1.5), distance + 3), lookAt(eye, target))
+        const clip = corners.map(([x, y, z]) => {
+          const w = view[3] * x + view[7] * y + view[11] * z + view[15]
+          return [(view[0] * x + view[4] * y + view[8] * z + view[12]) / w, (view[1] * x + view[5] * y + view[9] * z + view[13]) / w]
+        })
+        return { eye, view, clip, extent: Math.max(...clip.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))) }
+      }
+      // The nearest camera that keeps the whole keybed inside the stage with a margin.
+      let near = 0.2, far = 20
+      for (let i = 0; i < 40; i++) { const middle = (near + far) / 2; if (project(middle).extent > 0.9) near = middle; else far = middle }
+      const projected = project(far)
+      eye = projected.eye
+      view = projected.view
+      clip = projected.clip
     }
-    // The nearest camera that keeps the whole keybed inside the stage with a margin.
-    let near = 0.2, far = 20
-    for (let i = 0; i < 40; i++) { const middle = (near + far) / 2; if (project(middle).extent > 0.9) near = middle; else far = middle }
-    const { eye, view, clip } = project(far)
     current.renderer.view = view
     current.renderer.eye = eye
     camera.current = { view, width, height }
@@ -273,8 +298,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
       return { x: (view[0] * kx + view[4] * ky + view[8] * kz + view[12]) / w * 0.5 + 0.5, y: (view[1] * kx + view[5] * ky + view[9] * kz + view[13]) / w * 0.5 + 0.5 }
     }
     lastSignature.current = ''
-    lastLabels.current = ''
-  }, [scene, generation, context, rendererReady])
+    lastLabels.current = '\u0000'
+  }, [scene, generation, context, rendererReady, topView])
 
   useFrame(engine, (t) => {
     const loop = engine.loop
@@ -407,14 +432,14 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
     }
   })
   // A value no label set can have, so the next frame always redraws the labels (even to none).
-  useEffect(() => { lastSignature.current = ''; lastLabels.current = '\u0000' }, [scene, failure, lost, fingering, letters])
+  useEffect(() => { lastSignature.current = ''; lastLabels.current = '\u0000' }, [scene, failure, lost, fingering, letters, topView])
 
   // Loading until the scene for the chosen instrument and look has arrived.
   const loading = !failure && !lost && (!scene || scene.variant !== variantId || scene.look !== look)
   const outside = variant ? notes.filter((note) => Math.round(note.midi) < variant.low || Math.round(note.midi) > variant.high).length : 0
   const chooseLook = (value: Look) => { session.look = value; setLook(value) }
   return (
-    <section ref={section} className="practice-view practice-kit practice-piano" data-variant={variantId ?? ''} data-look={look} data-ready={!!scene && !loading && !failure && !lost} data-lost={lost || undefined} data-hands-shown={handsShown ? 'true' : !handsOn ? 'off' : handsFailed ? 'failed' : 'loading'}
+    <section ref={section} className="practice-view practice-kit practice-piano" data-variant={variantId ?? ''} data-look={look} data-camera={topView ? 'top' : 'perspective'} data-ready={!!scene && !loading && !failure && !lost} data-lost={lost || undefined} data-hands-shown={handsShown ? 'true' : !handsOn ? 'off' : handsFailed ? 'failed' : 'loading'}
       style={{ ['--stage-bg' as string]: `rgb(${stageBackground(look).map((x) => Math.round(x * 255)).join(' ')})` }}
       aria-label="3D keyboard: keys glow as their notes approach and press while they sound, in the colour of the hand that plays them">
       <div className="kit-toolbar" title="Changes only how the piano looks; the notes, sounds and playback stay the same">
@@ -425,6 +450,8 @@ export function PianoView({ song, engine, fingering = true, letters = false }: P
             {LOOKS.map((option) => <option key={option} value={option}>{LOOK_LABEL[option]}</option>)}
           </select>
         </label>
+        <button type="button" className="kit-toggle" data-kit-toggle="top" aria-pressed={topView}
+          onClick={() => setTopView((value) => { const next = !value; savePref('pianoTopView', next); return next })}>Top view</button>
         <button type="button" className="kit-toggle" data-kit-toggle="hands" aria-pressed={handsOn} onClick={toggleHands}>Hands</button>
       </div>
       {failure ? (

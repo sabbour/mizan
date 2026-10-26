@@ -40,6 +40,9 @@ https://github.com/user-attachments/assets/8ce4c738-b1eb-49d3-9959-74391cbbd8fe
 
 https://github.com/user-attachments/assets/24523ebb-e5d3-4a17-a8a1-3079b9195c37
 
+The 3D piano includes a remembered overhead view with independently toggleable
+animated hands, alongside the existing perspective and synchronized score.
+
 **Guitar — generated study moving across frets 2 to 12 (12 seconds)**
 
 https://github.com/user-attachments/assets/51b33939-686d-4c37-9be4-a1e8f5fe1145
