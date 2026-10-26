@@ -1805,6 +1805,21 @@
 .about-dialog a:hover { color: var(--ink); }
 .about-dialog a svg { vertical-align: -2px; }
 
+.about-update-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 14px;
+}
+
+.about-update-check p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
 .about-links {
   display: grid;
   gap: 1px;

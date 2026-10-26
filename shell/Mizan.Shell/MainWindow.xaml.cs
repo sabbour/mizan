@@ -138,6 +138,21 @@ public sealed class MainWindow : Window
                         await BrowseYoutubeCookiesAsync(browseCookiesId);
                         return;
                     }
+                    if (TryGetShellRequest(root, "github_release_update_check", out var releaseCheckId))
+                    {
+                        try
+                        {
+                            PostReleaseUpdateCheck(releaseCheckId, await ReleaseUpdateChecker.CheckAsync());
+                        }
+                        catch (Exception error)
+                        {
+                            ShellLog.Write($"GitHub release check failed unexpectedly: {error.Message}");
+                            PostReleaseUpdateCheck(releaseCheckId, new(
+                                "unavailable", null, null, null,
+                                "GitHub Releases could not be checked. Try again later."));
+                        }
+                        return;
+                    }
                     if (root.ValueKind == JsonValueKind.Object
                         && root.TryGetProperty("method", out var method)
                         && method.ValueKind == JsonValueKind.String
@@ -249,6 +264,22 @@ public sealed class MainWindow : Window
             id,
             ok = false,
             error = new { code, message },
+        }));
+
+    private void PostReleaseUpdateCheck(int id, ReleaseUpdateCheckResult result) =>
+        _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+        {
+            id,
+            ok = true,
+            result = new
+            {
+                ok = true,
+                status = result.Status,
+                currentVersion = result.CurrentVersion,
+                architecture = result.Architecture,
+                releasePayload = result.ReleasePayload,
+                message = result.Message,
+            },
         }));
 
     private async Task BrowseYoutubeCookiesAsync(int id)

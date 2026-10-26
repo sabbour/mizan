@@ -36,6 +36,17 @@ By default, the browser preview uses sample data, not the Python host.
 Run the native Windows shell to test the host bridge and real library data.
 See the [repository README](../README.md) for host setup and test commands.
 
+## Release updates
+
+The packaged Windows app checks GitHub Releases on launch at most once per day.
+Manual checks in About are available with a one-minute cooldown.
+When a newer stable release has a matching uploaded package for the installed
+architecture, Mizan shows a dismissible notification with a short release-note
+summary. **Update on GitHub** opens the release page; Mizan does not download,
+install, or restart itself. The dismissed version stays dismissed unless you
+choose **Check for updates** in **About**. Browser previews and unpackaged
+development builds report that release checks need the installed Windows app.
+
 Open `/?midi=live` on the Vite server to search real public MIDI sources.
 This mode supports search only; use the installed app to import a result.
 It uses the Python environment in `host\.venv`. Set `MIZAN_DEV_MIDI_PYTHON`
