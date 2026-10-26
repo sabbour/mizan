@@ -1,5 +1,11 @@
 # mizan
 
+## 0.3.1
+
+### Patch Changes
+
+- Include the complete FlatBuffers Apache 2.0 and proxy_tools BSD-2-Clause license texts in Windows packages, with both proxy_tools copyright notices and corrected credits.
+
 ## 0.3.0
 
 ### Minor Changes
