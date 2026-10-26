@@ -50,6 +50,13 @@ Before you distribute an installer:
 Do not treat this checklist as a completed legal review.
 Do not approve binary distribution while required source materials are missing.
 
+The credits generator supplies reviewed upstream license text for FlatBuffers
+25.12.19 and corrects proxy_tools 0.1.0's MIT metadata to its upstream BSD-2-Clause
+license, retaining Armin Ronacher's and Jonathan Tushman's copyright notices.
+The immutable source references are recorded in `scripts/credits.py`; the
+generator rejects other versions of these packages until their license data is
+reviewed. After generation, inspect the license contents, not only linked paths.
+
 After the requirements are met, set the Actions repository variable
 `MIZAN_BINARY_DISTRIBUTION_READY` to `true`.
 Only tag builds can then upload unsigned MSIX artifacts. Pull requests never
