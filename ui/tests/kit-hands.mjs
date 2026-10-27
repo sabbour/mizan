@@ -185,6 +185,14 @@ try {
         assert.ok(finger.error < 0.004, `${name}: ${side} finger ${finger.finger} reaches key ${finger.pressing} within ${mm(finger.error)} at beat ${beat}`)
         assert.ok(Math.abs(finger.pad[0] - key.x) < geometry.keyWidth / 2 && finger.pad[1] < key.top + 0.004, `${name}: the fingertip is on key ${finger.pressing} (${mm(finger.pad[1] - key.top)} above its top)`)
       }
+      for (const side of ['left', 'right']) {
+        const fingers = rig.state[side].fingers
+        const direction = side === 'right' ? 1 : -1
+        for (let index = 1; index < 4; index++) {
+          assert.ok(direction * (fingers[index + 1].pad[0] - fingers[index].pad[0]) > 0,
+            `${name}: adjacent non-thumb fingertips do not cross in the rendered ${side} hand at beat ${beat}`)
+        }
+      }
     }
     for (const beat of beats) {
       rig.update(timelines, geometry, clock(beat + 0.001), true)
@@ -212,13 +220,28 @@ try {
       if (last !== null) jump = Math.max(jump, Math.abs(centre - last))
       last = centre
     }
-    assert.ok(jump < 0.012, `${name}: the right hand glides, never jumps (largest step ${mm(jump)})`)
+    // The written upward 3-to-2 black-key transition requires a reposition after release. Do not glide away from a held key.
+    const largestStep = name === 'black keys' ? 0.08 : 0.012
+    assert.ok(jump < largestStep, `${name}: movement stays bounded (largest step ${mm(jump)})`)
     // Reduced motion: no gliding, a still hand over the notes.
     rig.update(timelines, geometry, clock(1.9, { reduced: true }), true)
     const still = rig.state.right.center
     rig.update(timelines, geometry, clock(1.99, { reduced: true }), true)
     assert.equal(rig.state.right.center, still, `${name}: reduced motion keeps the hand still until the next notes`)
     console.log(`${name}: pressing fingertips within ${mm(worstPress)} of their keys (worst finger anywhere ${mm(worstAny)})`)
+  }
+
+  // This written 3-to-2 upward transition needs a hand reposition, not an index finger passing through a held middle finger.
+  const reposition = rig.compile(buildPianoHandPlan([
+    note(63, 0, 1, 'right', 3), note(66, 1, 1, 'right', 2),
+  ], has), geometry)
+  for (let beat = 0.01; beat < 2; beat += 0.02) {
+    rig.update(reposition, geometry, clock(beat), true)
+    const fingers = rig.state.right.fingers
+    for (let index = 1; index < 4; index++) assert.ok(fingers[index + 1].pad[0] > fingers[index].pad[0],
+      `a reposition never crosses non-thumb fingertips at beat ${beat}`)
+    for (const finger of fingers.filter((item) => item.pressing !== null)) assert.ok(finger.error < 0.004,
+      `anticipating the next hand position does not pull a held fingertip away from its key at beat ${beat}`)
   }
 
   // Hands placed by pitch, and fingers suggested, when the music names neither.

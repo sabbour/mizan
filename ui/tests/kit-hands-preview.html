@@ -20,6 +20,7 @@
       import { PianoView } from '/src/workspace/PianoView.tsx'
       import { buildSong } from '/src/workspace/song.ts'
       import { stickingFor } from '/src/workspace/sticking.ts'
+      import { repairPiano } from '/src/workspace/playability.ts'
       import '/src/index.css'
       import '/src/workspace/workspace.css'
 
@@ -47,6 +48,11 @@
         scale: [[60, 1], [62, 2], [64, 3], [65, 1], [67, 2], [69, 3], [71, 4], [72, 5]].map(([midi, finger], index) => note(midi, index * 0.5, 0.5, 'right', finger)),
         nohands: [note(60, 0, 1), note(64, 1, 1), note(67, 2, 1), note(48, 0, 4), note(72, 3, 1)],
         suggested: [note(60, 0, 1, 'right'), note(62, 1, 1, 'right'), note(64, 2, 1, 'right'), note(48, 0, 2, 'left'), note(55, 0, 2, 'left')],
+        overlap: repairPiano([
+          note(48, -1, 0.5, 'left'),
+          ...[60, 64, 67].map((midi) => note(midi, 0, 4, 'right')),
+          ...[72, 74, 76, 71].map((midi, index) => note(midi, index * 0.5, 0.5, 'right')),
+        ], { bpm: 100 }).notes,
         black: [note(61, 0, 1, 'right', 2), note(63, 1, 1, 'right', 3), note(66, 2, 1, 'right', 2), note(68, 3, 1, 'right', 3)],
         registers: [note(21, 0, 1, 'left', 5), note(48, 1, 1, 'left', 1), note(60, 2, 1, 'right', 1),
           note(61, 3, 1, 'right', 2), note(84, 4, 1, 'right', 4), note(108, 5, 1, 'right', 5)],

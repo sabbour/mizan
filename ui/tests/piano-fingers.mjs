@@ -5,8 +5,9 @@ import { createServer } from 'vite'
 globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
-  const { suggestFingers, pedalCarries } = await vite.ssrLoadModule('/src/workspace/fingers.ts')
+  const { suggestFingers, pedalCarries, keyOf } = await vite.ssrLoadModule('/src/workspace/fingers.ts')
   const { repairPiano } = await vite.ssrLoadModule('/src/workspace/playability.ts')
+  const { buildPianoHandPlan } = await vite.ssrLoadModule('/src/workspace/pianoHands.ts')
 
   const line = (midis, hand, { step = 0.5, beats = step, start = 0 } = {}) =>
     midis.map((midi, index) => ({ midi, hand, startBeat: start + index * step, beats }))
@@ -23,6 +24,8 @@ try {
   assert.deepEqual(fingersOf(line(cMajor.map((m) => m - 24), 'left'), undefined), [5, 4, 3, 2, 1, 3, 2, 1], 'C major up, left hand: third finger over the thumb')
   assert.deepEqual(fingersOf(line([...cMajor].reverse(), 'right'), undefined), [5, 4, 3, 2, 1, 3, 2, 1], 'C major down, right hand: third finger over the thumb')
   assert.deepEqual(fingersOf(line([...cMajor].reverse().map((m) => m - 24), 'left'), undefined), [1, 2, 3, 1, 2, 3, 4, 5], 'C major down, left hand: thumb under')
+  assert.deepEqual(buildPianoHandPlan(line(cMajor, 'right'), () => true).right.map((event) => event.finger),
+    [1, 2, 3, 1, 2, 3, 4, 5], 'legal thumb-under transitions remain in the animated plan')
 
   // ---- Arpeggio and chords.
   if (dump) console.log('arpeggio', fingersOf(line([60, 64, 67, 72, 76, 79, 84], 'right'), undefined))
@@ -122,18 +125,88 @@ try {
   assert.ok(heldG.every((finger) => finger !== undefined) && heldG[2] === 1 && heldG[0] < heldG[1], `a held G keeps room for the thumb on the F below (${heldG})`)
   const overlapping = fingersOf(notesAt([[61, 0, 3], [72, 0.5, 1], [64, 1, 3], [66, 1.5, 1], [63, 2, 3], [71, 2.5, 1]]))
   assert.ok(overlapping.every((finger) => finger !== undefined), `overlapping held notes all get fingers (${overlapping})`)
+  const nested = notesAt([[60, 0, 3], [64, 0, 3], [67, 0, 3], [62, 0.5, 2.5], [66, 1, 1.5]])
+  const nestedFingers = suggestFingers(nested)
+  assert.ok(nested.every((note) => nestedFingers.has(note)), 'notes that fill the gaps between a held chord can be fingered')
+  for (let a = 0; a < nested.length; a++) for (let b = a + 1; b < nested.length; b++) {
+    if (nested[a].startBeat < nested[b].startBeat + nested[b].beats &&
+      nested[b].startBeat < nested[a].startBeat + nested[a].beats) {
+      assert.ok((nested[a].midi - nested[b].midi) * (nestedFingers.get(nested[a]).finger - nestedFingers.get(nested[b]).finger) > 0,
+        'fingers remain in pitch order while notes overlap; only non-overlapping passages may cross')
+    }
+  }
+  const nestedPlan = buildPianoHandPlan(nested, () => true)
+  assert.deepEqual(nested.map((note) => nestedPlan.right.find((event) => event.key === keyOf(note.midi) && event.start === note.startBeat)?.finger),
+    nested.map((note) => nestedFingers.get(note)?.finger), 'the animated hand plan preserves the no-crossing assignment')
+  for (const at of [0, 0.5, 1, 2]) {
+    const activeEvents = nestedPlan.right.filter((event) => event.start <= at && event.end > at)
+    const activeFingers = activeEvents.map((event) => event.finger)
+    assert.equal(new Set(activeFingers).size, activeFingers.length, `overlapping notes never occupy the same finger at beat ${at}`)
+  }
   // A sustain pedal that lifts before the note ends does not carry it: the finger must stay down.
   assert.equal(pedalCarries([{ controller: 64, startBeat: 0.5, beats: 3 }], 0, 4, 1), false, 'pedal lifting at 3.5 does not carry a note to 4')
   assert.equal(pedalCarries([{ controller: 64, startBeat: 0.5, beats: 3.5 }], 0, 4, 1), true, 'pedal held to 4 carries the note')
 
   // ---- The hand plan lets go of a pedalled key when the hand needs the finger, so it does not stretch to hold it.
-  const { buildPianoHandPlan } = await vite.ssrLoadModule('/src/workspace/pianoHands.ts')
   const stretch = notesAt([[57, 0, 3], [72, 1, 1], [62, 2, 1]])
   const lateLift = [{ controller: 64, startBeat: 0.5, beats: 3 }]
   const handPlan = buildPianoHandPlan(stretch, () => true, lateLift, 120)
   assert.deepEqual(handPlan.right.map((event) => event.finger), fingersOf(stretch, lateLift, { bpm: 120 }), 'the hand plan follows the pedal-aware fingers')
   assert.equal(handPlan.right[0].end, 1, 'the pedalled A is let go when the next note starts')
   assert.equal(buildPianoHandPlan(stretch, () => true, undefined, 120).right[0].end, 3, 'without a pedal the A is held to its end')
+  const inferredBass = [
+    { midi: 36, hand: 'left', startBeat: 0, beats: 4 },
+    ...[60, 64, 67].map((midi) => ({ midi, hand: 'left', startBeat: 1, beats: 2 })),
+  ]
+  const inferredPlan = buildPianoHandPlan(inferredBass, () => true)
+  const inferredSuggestions = suggestFingers(inferredBass, undefined, { inferBassPedalGap: true })
+  assert.equal(inferredPlan.left.length, inferredBass.length, 'the practice bass-pedal policy leaves the moved accompaniment visible')
+  assert.equal(inferredPlan.left[0].end, 1, 'an inferred pedalled bass releases physically when the left hand moves')
+  assert.deepEqual(inferredPlan.left.map((event) => event.finger), inferredBass.map((note) => inferredSuggestions.get(note)?.finger),
+    'the shared key-release policy gives flat and animated piano views the same suggestions')
+
+  // ---- A repeated key is released for its next attack, even when detected sound durations overlap.
+  const repeatedHeld = notesAt([[60, 0, 2], [60, 1, 0.5]])
+  const repeatedDry = suggestFingers(repeatedHeld)
+  assert.ok(repeatedDry.get(repeatedHeld[0]))
+  assert.ok(repeatedDry.get(repeatedHeld[1]), 'a repeated key may be released and rearticulated without a pedal')
+  const repeatedPedal = [{ controller: 64, startBeat: 0.5, beats: 2.5 }]
+  const repeatedWet = suggestFingers(repeatedHeld, repeatedPedal)
+  assert.ok(repeatedWet.get(repeatedHeld[0]) && repeatedWet.get(repeatedHeld[1]), 'the sustain pedal frees the key for rearticulation')
+  const repeatedPlan = buildPianoHandPlan(repeatedHeld, () => true)
+  assert.equal(repeatedPlan.right.length, 2, 'the 3D plan includes both attacks of a repeated key')
+  assert.equal(repeatedPlan.right[0].end, 1, 'the first physical contact ends at the next attack without altering sound duration')
+  const repeatedPedalPlan = buildPianoHandPlan(repeatedHeld, () => true, repeatedPedal)
+  assert.deepEqual(repeatedPedalPlan.right.map((event) => event.finger), fingersOf(repeatedHeld, repeatedPedal))
+  assert.equal(repeatedPedalPlan.right[0].end, 1, 'the first key is released when the pedal carries it and the key is reattacked')
+
+  // The hand plan uses the shared suggestions exactly, and no active finger is assigned twice.
+  const sparse = notesAt([[57, 0, 3], [72, 1, 1], [62, 2, 1]])
+  const sparsePedals = [{ controller: 67, startBeat: 0, beats: 4 }]
+  const sparseSuggestions = suggestFingers(sparse, sparsePedals)
+  const sparsePlan = buildPianoHandPlan(sparse, () => true, sparsePedals)
+  for (const note of sparse) {
+    const suggested = sparseSuggestions.get(note)?.finger
+    const event = sparsePlan.right.find((item) => item.key === keyOf(note.midi) && item.start === note.startBeat)
+    assert.equal(event?.finger, suggested, '3D uses a valid suggestion or leaves the note without a finger')
+  }
+  for (const at of [0, 1, 2]) {
+    const activeFingers = sparsePlan.right.filter((event) => event.start <= at && event.end > at).map((event) => event.finger)
+    assert.equal(new Set(activeFingers).size, activeFingers.length, `no finger is doubled at beat ${at}`)
+  }
+  const crossedWritten = [
+    { midi: 60, hand: 'right', startBeat: 0, beats: 2, finger: 5 },
+    { midi: 64, hand: 'right', startBeat: 0, beats: 2, finger: 1 },
+  ]
+  const crossedPlan = buildPianoHandPlan(crossedWritten, () => true)
+  assert.equal(crossedPlan.right.length, 1, 'the plan omits a written assignment that would cross active fingers')
+  const stretchedWritten = crossedWritten.map((note, index) => ({ ...note, midi: index ? 72 : 60, finger: index ? 5 : 4 }))
+  assert.equal(buildPianoHandPlan(stretchedWritten, () => true).right.length, 1,
+    'written ring and little fingers cannot be stretched an octave apart')
+
+  const unplaced = buildPianoHandPlan(notesAt([[48, 0, 1], [60, 0, 1]]).map(({ hand: _hand, ...note }) => note), () => true)
+  assert.equal(unplaced.placedByPitch, true, 'pitch placement still fills in missing hand labels')
+  assert.equal(unplaced.left.length + unplaced.right.length, 2, 'pitch-placed notes are included when the suggestions are constrained')
 
   console.log('piano-fingers: ok')
 } finally {

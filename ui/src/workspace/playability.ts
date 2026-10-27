@@ -19,7 +19,7 @@ export type { PlayabilityIssue, PlayabilitySummary } from './song'
  */
 
 const EPS = 1e-6
-export const PLAYABILITY_VERSION = 'constrained-path-v4'
+export const PLAYABILITY_VERSION = 'constrained-path-v5'
 
 /** Most keys one hand can hold down at once. */
 export const PIANO_MAX_NOTES = 5
@@ -93,6 +93,7 @@ export function repairPiano(
   const count = onsets.length
   const tier = new Array<number>(count).fill(reach)
   let crossLong = new Uint8Array(count)
+  const flaggedMoments = new Set<number>()
 
   const crossedAt = (moment: number) => {
     let leftTop = -Infinity
@@ -153,7 +154,7 @@ export function repairPiano(
   }
 
   crossLong = crossRuns()
-  for (let moment = 0; moment < count; moment++) if (excess(moment, reach) > 0) summary.flagged++
+  for (let moment = 0; moment < count; moment++) if (excess(moment, reach) > 0) flaggedMoments.add(moment)
 
   const apply = (changes: [number, number][]) => { for (const [note, side] of changes) hand[note] = side }
   const touched = (changes: [number, number][]) => {
@@ -244,8 +245,105 @@ export function repairPiano(
     if (hand.join('') === snapshot) break
   }
 
+  // A note-count or overall span check cannot catch a chord whose fingers leave no reachable finger for the next
+  // melody note. Reassign an intact, sustained onset/voicing group only when the shared fingering model confirms that
+  // doing so makes more of the passage playable without worsening any existing count/span allocation.
+  const fingeringFailures = new Set<number>()
   crossLong = crossRuns()
-  const failed = new Set<number>()
+  const passages: number[][] = []
+  let passageEnd = -Infinity
+  for (const local of order) {
+    if (!passages.length || start[local] >= passageEnd - EPS) {
+      passages.push([])
+      passageEnd = -Infinity
+    }
+    passages[passages.length - 1].push(local)
+    passageEnd = Math.max(passageEnd, end[local])
+  }
+  for (const passage of passages) {
+    if (!passage.some((local) => momentsOf[local].some((moment) => starts[moment].some((other) =>
+      start[other] > start[local] + EPS && hand[other] === hand[local])))) continue
+    type FingeringCandidate = { notes: number[]; triggers: Set<number> }
+    const makeSuggestions = () => {
+      const placed = passage.map((local) => ({
+        ...input[ids[local]], hand: hand[local] === 0 ? 'left' as const : 'right' as const,
+      }))
+      const suggestions = suggestFingers(placed, options.pedals, {
+        bpm: options.bpm, inferBassPedalGap: !written,
+      })
+      const missing: number[] = []
+      for (let index = 0; index < placed.length; index++) if (!suggestions.has(placed[index])) missing.push(passage[index])
+      return missing
+    }
+
+    const unresolved = new Set<number>()
+    for (let pass = 0; pass < passage.length; pass++) {
+      const current = makeSuggestions()
+      if (!current.length) break
+      for (const local of current) flaggedMoments.add(momentsOf[local][0])
+      const first = current.find((local) => !unresolved.has(local))
+      if (first === undefined) break
+      const candidates = new Map<string, FingeringCandidate>()
+      for (const local of current.filter((note) => Math.abs(start[note] - start[first]) <= EPS)) {
+        const moment = momentsOf[local][0]
+        const activeByVoice = new Map<string, number[]>()
+        const lowerHeld: number[] = []
+        for (const other of moments[moment]) {
+          if (hand[other] !== hand[local] || end[other] <= start[local] + EPS) continue
+          const key = `${start[other]}`
+          const group = activeByVoice.get(key) ?? []
+          group.push(other)
+          activeByVoice.set(key, group)
+          if (start[other] < start[local] - EPS && keys[other] < keys[local]) lowerHeld.push(other)
+        }
+        for (const notes of [...activeByVoice.values(), lowerHeld]) {
+          if (!notes.length) continue
+          const ordered = [...notes].sort((a, b) => a - b)
+          const key = ordered.join(',')
+          const candidate = candidates.get(key) ?? { notes: ordered, triggers: new Set<number>() }
+          candidate.triggers.add(local)
+          candidates.set(key, candidate)
+        }
+      }
+
+      let best: { candidate: FingeringCandidate; missing: number; targetMoved: number; above: number } | null = null
+      for (const candidate of candidates.values()) {
+        const affected = new Set(candidate.notes.flatMap((note) => momentsOf[note]))
+        const previousExcess = new Map([...affected].map((moment) => [moment, excess(moment, tier[moment])]))
+        const previousCross = crossLong
+        for (const note of candidate.notes) hand[note] = hand[note] === 0 ? 1 : 0
+        crossLong = crossRuns()
+        const fitsAllocation = !crossLong.some((crossed, moment) => crossed && !previousCross[moment]) &&
+          [...affected].every((moment) => excess(moment, tier[moment]) <= (previousExcess.get(moment) ?? 0))
+        const next = fitsAllocation ? makeSuggestions() : null
+        for (const note of candidate.notes) hand[note] = hand[note] === 0 ? 1 : 0
+        crossLong = previousCross
+        const missing = new Set(current)
+        if (!next || next.length >= current.length || next.some((note) => !missing.has(note))) continue
+        const targetMoved = candidate.notes.some((note) => missing.has(note)) ? 1 : 0
+        const targetKeys = [...candidate.triggers].map((note) => keys[note])
+        const candidateCenter = candidate.notes.reduce((sum, note) => sum + keys[note], 0) / candidate.notes.length
+        const targetCenter = targetKeys.reduce((sum, key) => sum + key, 0) / targetKeys.length
+        const above = candidateCenter > targetCenter ? 1 : 0
+        const score = { candidate, missing: next.length, targetMoved, above }
+        if (!best || score.missing < best.missing ||
+          score.missing === best.missing && (score.targetMoved < best.targetMoved ||
+            score.targetMoved === best.targetMoved && (score.above < best.above ||
+              score.above === best.above && score.candidate.notes.length > best.candidate.notes.length))) best = score
+      }
+      if (!best) {
+        unresolved.add(first)
+        continue
+      }
+      for (const note of best.candidate.notes) hand[note] = hand[note] === 0 ? 1 : 0
+      crossLong = crossRuns()
+    }
+    for (const local of makeSuggestions()) fingeringFailures.add(momentsOf[local][0])
+  }
+
+  summary.flagged = flaggedMoments.size
+  crossLong = crossRuns()
+  const failed = new Set<number>(fingeringFailures)
   for (let moment = 0; moment < count; moment++) if (excess(moment, tier[moment]) > 0) failed.add(moment)
   summary.unplayable = failed.size
 

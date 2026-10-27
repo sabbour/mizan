@@ -5,7 +5,7 @@ import { createServer } from 'vite'
 globalThis.matchMedia = () => ({ matches: false })
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
 try {
-  const { repairPiano, repairFretted, preparePlayableSong, applyPlayability, playabilityNotice, shapeFits } = await vite.ssrLoadModule('/src/workspace/playability.ts')
+  const { repairPiano, repairFretted, preparePlayableSong, applyPlayability, playabilityNotice, shapeFits, PLAYABILITY_VERSION } = await vite.ssrLoadModule('/src/workspace/playability.ts')
   const { GUITAR, BASS, planFrettedTab } = await vite.ssrLoadModule('/src/workspace/fretboard.ts')
   const { buildSong } = await vite.ssrLoadModule('/src/workspace/song.ts')
   const { pianoXml, instrumentXml, frettedTabXml } = await vite.ssrLoadModule('/src/workspace/musicxml.ts')
@@ -15,6 +15,8 @@ try {
   const piano = (midi, hand, startBeat = 0, beats = 4, extra = {}) => ({ midi, hand, startBeat, beats, ...extra })
   const keysOf = (notes, hand) => [...new Set(notes.filter((n) => n.hand === hand).map((n) => keyOf(n.midi)))]
   const span = (keys) => keys.length ? Math.max(...keys) - Math.min(...keys) : 0
+
+  assert.equal(PLAYABILITY_VERSION, 'constrained-path-v5', 'the derived playability cache is invalidated for the fingering-aware repair')
 
   // ---- Piano: one hand with seven notes
   {
@@ -29,6 +31,77 @@ try {
     assert.equal(fixed.find((n) => n.midi === 71).hand, 'right', 'top voice stays in the right hand')
     assert.equal(notes[1].hand, 'right', 'the input is never changed')
     assert.deepEqual(repairPiano(notes, { bpm: 100 }).notes, fixed, 'deterministic')
+  }
+
+  // ---- Piano: move a sustained accompaniment chord away from an independently moving upper line.
+  {
+    const notes = [
+      piano(48, 'left', -1, 0.5),
+      ...[60, 64, 67].map((midi) => piano(midi, 'right', 0, 4)),
+      piano(72, 'right', 0, 0.5),
+      ...[[74, 0.5], [76, 1], [71, 1.5]].map(([midi, at]) => piano(midi, 'right', at, 0.5)),
+    ]
+    const before = structuredClone(notes)
+    const result = repairPiano(notes, { bpm: 120 })
+    const handAt = (midi) => result.notes.find((note) => note.midi === midi).hand
+    assert.deepEqual([60, 64, 67].map(handAt), ['left', 'left', 'left'], 'the intact sustained chord moves to the other hand')
+    assert.deepEqual([72, 74, 76, 71].map(handAt), ['right', 'right', 'right', 'right'], 'the upper moving line stays in the right hand')
+    assert.equal(result.summary.unplayable, 0, 'the reassigned accompaniment and melody are playable')
+    assert.equal(result.summary.moved, 3, 'all and only the sustained chord notes move')
+    assert.ok(result.summary.flagged > 0, 'the finger-occupancy conflict is reported as a repaired moment')
+    assert.deepEqual(notes, before, 'the source transcription, including pitches and timing, is unchanged')
+    assert.deepEqual(repairPiano(notes, { bpm: 120 }).notes, result.notes, 'the voicing repair is deterministic')
+    const staggered = notes.map((note) => note.midi >= 60 && note.midi <= 67
+      ? { ...note, startBeat: (note.midi - 60) * 0.01, beats: note.beats - (note.midi - 60) * 0.03 }
+      : note)
+    const staggeredResult = repairPiano(staggered, { bpm: 120 })
+    assert.ok(staggeredResult.notes.filter((note) => note.midi >= 60 && note.midi <= 67).every((note) => note.hand === 'left'),
+      'small differences in chord attacks and release times do not fragment the accompaniment between hands')
+    assert.equal(staggeredResult.summary.unplayable, 0)
+    const repeated = Array.from({ length: 100 }, (_, bar) => notes.slice(1).map((note) => ({
+      ...note, startBeat: note.startBeat + bar * 5,
+    }))).flat()
+    const started = performance.now()
+    const repeatedResult = repairPiano(repeated, { bpm: 120 })
+    assert.ok(performance.now() - started < 1500, 'independent overlapping passages do not repeatedly solve the entire song')
+    assert.equal(repeatedResult.summary.moved, 300)
+    assert.equal(repeatedResult.summary.unplayable, 0)
+  }
+
+  // A feasible right-hand chord with a moving line remains in the right hand.
+  {
+    const notes = [
+      piano(60, 'right', 0, 2), piano(64, 'right', 0, 2),
+      piano(67, 'right', 0.5, 0.5), piano(69, 'right', 1, 0.5), piano(71, 'right', 1.5, 0.5),
+    ]
+    const result = repairPiano(notes, { bpm: 120 })
+    assert.equal(result.notes, notes, 'a feasible held chord and moving line are not split')
+    assert.equal(result.summary.moved, 0)
+    assert.equal(result.summary.unplayable, 0)
+  }
+
+  // Four keys within an octave can still need more reach between the available fingers than a hand permits.
+  {
+    const notes = [
+      ...[60, 61, 62].map((midi) => piano(midi, 'right', 0, 3)),
+      ...[70, 71, 72].map((midi, index) => piano(midi, 'right', index * 0.5, 0.5)),
+    ]
+    const result = repairPiano(notes)
+    assert.equal(result.summary.moved, 3, 'finger-pair reach, not only total span or number of keys, moves the held cluster')
+    assert.equal(result.summary.unplayable, 0)
+    assert.ok(result.notes.slice(0, 3).every((note) => note.hand === 'left'))
+    assert.ok(result.notes.slice(3).every((note) => note.hand === 'right'))
+    for (const controller of [64, 66]) {
+      const pedalled = repairPiano(notes, { pedals: [{ controller, startBeat: 0.25, beats: 3 }] })
+      assert.equal(pedalled.notes, notes, `written pedal ${controller} carries the held cluster so no hand change is necessary`)
+    }
+    assert.equal(repairPiano(notes, { pedals: [{ controller: 67, startBeat: 0.25, beats: 3 }] }).summary.moved, 3,
+      'the soft pedal never frees fingers')
+    const valid = notes.map((note) => ({ ...note, midi: ({ 60: 60, 61: 64, 62: 67, 70: 69, 71: 71, 72: 72 })[note.midi] }))
+    assert.equal(repairPiano(valid).notes, valid, 'a playable right-hand triad with ring/little-finger melody is not banned')
+    const blocked = [...notes, ...[48, 52, 55].map((midi) => piano(midi, 'left', 0, 3))]
+    assert.ok(repairPiano(blocked, { pedals: [{ controller: 67, startBeat: 0, beats: 4 }] }).summary.unplayable > 0,
+      'a remaining finger-occupancy conflict is reported when the other hand cannot take it')
   }
 
   // ---- Piano: a left hand spanning two octaves
@@ -410,7 +483,7 @@ try {
     const stale = { ...prepared.song, playability: { ...prepared.song.playability, version: 'constrained-path-v3' } }
     const refreshed = preparePlayableSong(stale)
     assert.ok(refreshed.request, 'stored repairs from the prior algorithm version are regenerated')
-    assert.equal(refreshed.request.version, 'constrained-path-v4')
+    assert.equal(refreshed.request.version, 'constrained-path-v5')
   }
   {
     const pianoTrack = { id: 'piano', instrument: 'other', gmProgram: 0, name: 'Keyboard', detail: '' }
