@@ -394,13 +394,19 @@ def test_ordinary_metadata_inspection_keeps_reading_video_message(monkeypatch, t
     monkeypatch.setattr(pipeline, "app_dir", lambda name: tmp_path / name)
     (tmp_path / "tmp").mkdir()
     (tmp_path / "cache").mkdir()
-    monkeypatch.setattr("mizan.engine.muscriptor.prepare_model", lambda *args: None)
     monkeypatch.setattr(pipeline, "_reuse_recording", lambda *args: (None, [], None))
     monkeypatch.setattr(pipeline, "ffmpeg_path", lambda: "test-ffmpeg")
     reports = []
 
     def report(stage, progress, **kwargs):
         reports.append((stage, progress, kwargs.get("message")))
+
+    def prepare(model, cancelled, progress):
+        assert reports[-1] == ("inspect", 0, "Preparing transcription model")
+        progress(0.5)
+        assert reports[-1] == ("inspect", 0.4, "Downloading transcription model")
+
+    monkeypatch.setattr("mizan.engine.muscriptor.prepare_model", prepare)
 
     def inspect(*args):
         assert reports[-1] == ("inspect", 0.8, "Reading video details")

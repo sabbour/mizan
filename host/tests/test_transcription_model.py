@@ -23,7 +23,7 @@ from mizan.engine import pipeline
 from mizan.engine.audio import Audio, write_audio
 from mizan.engine.muscriptor import (MODELS, _cpu_inference_timeout_message, require_ready,
                                      _transcribe_inprocess, transcribe_official)
-from mizan.errors import Cancelled, InvalidTranscriptionModel, ModelFailed
+from mizan.errors import Cancelled, DownloadFailed, InvalidTranscriptionModel, ModelFailed
 from mizan.jobs import JobRunner, JobStore
 from mizan.library import LibraryStore
 from mizan.paths import app_dir, home
@@ -287,6 +287,87 @@ def test_job_prepares_pinned_external_checkpoint_without_returning_token(monkeyp
     assert observed == ["config.json", "model.safetensors"]
     assert progress == [0.5, 1]
     assert (home() / "models" / model / "model.safetensors").read_bytes() == b"mock"
+    assert official.model_download_status()[model]["downloaded"]
+    assert not official.model_download_status()[model]["active"]
+
+
+@pytest.mark.parametrize("outcome", ("success", "failed", "completed", "cancelled", "corrupt"))
+def test_pipeline_waits_for_selected_background_model_before_video_details(monkeypatch, outcome):
+    import mizan.engine.muscriptor as official
+
+    model, payload = "muscriptor-small", b"fixture-model"
+    monkeypatch.setitem(MODELS, model, {
+        **MODELS[model], "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    })
+    monkeypatch.setattr(official.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(official, "check_model_resources", lambda _: None)
+    monkeypatch.setattr("mizan.hf_credentials.get_hf_token", lambda: "hf_fixture")
+    entered, release, inspected = Event(), Event(), Event()
+    directory = app_dir("models") / model
+
+    def download(chosen, _token, cancelled=None, progress=None):
+        assert chosen == model
+        entered.set()
+        assert release.wait(5)
+        if outcome == "failed":
+            raise ModelFailed("Fixture checkpoint download failed.")
+        directory.mkdir(exist_ok=True)
+        (directory / "model.safetensors").write_bytes(
+            b"x" * len(payload) if outcome == "corrupt" else payload)
+        dim, heads, layers, card = MODELS[model]["config"]
+        (directory / "config.json").write_text(json.dumps({
+            "dim": dim, "num_heads": heads, "num_layers": layers, "card": card,
+        }))
+
+    def inspect(*_args):
+        assert official.model_download_status()[model]["downloaded"]
+        assert not official.model_download_status()[model]["active"]
+        inspected.set()
+        raise DownloadFailed("Fixture stops before any media download.")
+
+    monkeypatch.setattr(official, "_download_assets", download)
+    monkeypatch.setattr(pipeline, "ffmpeg_path", lambda: "fixture-ffmpeg")
+    monkeypatch.setattr(pipeline, "inspect_video", inspect)
+    monkeypatch.setattr(pipeline, "download_video",
+                        lambda *_args: pytest.fail("download started without video details"))
+    official.start_model_download(model)
+    assert entered.wait(5)
+    runner = JobRunner(JobStore())
+    try:
+        if outcome == "completed":
+            release.set()
+            deadline = time.monotonic() + 5
+            while official.model_download_status()[model]["active"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert official.model_download_status()[model]["downloaded"]
+        job = runner.start(URL, "piano")
+        if outcome != "completed":
+            running = wait_for(runner.store, job["id"], "running")
+            deadline = time.monotonic() + 5
+            while not running["details"].get("stageMessage") and time.monotonic() < deadline:
+                time.sleep(0.01)
+                running = runner.store.get(job["id"])
+            assert running["stage"] == "inspect"
+            assert running["details"]["stageMessage"] == "Preparing transcription model"
+            assert official.model_download_status()[model]["active"]
+            assert not inspected.is_set()
+        if outcome == "cancelled":
+            runner.cancel(job["id"])
+            wait_for(runner.store, job["id"], "cancelled")
+            assert official.model_download_status()[model]["active"]
+            assert not inspected.is_set()
+        else:
+            release.set()
+            failed = wait_for(runner.store, job["id"], "failed")
+            model_failed = outcome in ("failed", "corrupt")
+            assert inspected.is_set() == (not model_failed)
+            assert failed["error_code"] == ("model_failed" if model_failed else "download_failed")
+    finally:
+        release.set()
+        runner.close()
+        assert official._download_gate.acquire(timeout=5)
+        official._download_gate.release()
 
 
 def test_official_download_pins_revision_checks_digest_and_cleans_partial(monkeypatch, tmp_path):

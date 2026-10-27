@@ -341,6 +341,7 @@ def prepare_model(model: str, cancelled=None, progress=None) -> None:
         try:
             if not model_download_status()[model]["downloaded"]:
                 _download_assets(model, token, cancelled, progress)
+                require_ready(model, cancelled, verify_dependencies=False)
         except MizanError as exc:
             error = str(exc)
             raise

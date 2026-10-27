@@ -17,7 +17,8 @@ import warnings
 from scipy.io.wavfile import WavFileWarning
 
 from ..errors import (DownloadFailed, FFmpegProbeTimedOut, FFmpegUnavailable, InsufficientDisk,
-                      UnsupportedMedia, VideoUnavailable, YoutubeExtractionFailed, YoutubeSignInRequired)
+                      UnsupportedMedia, VideoUnavailable, YoutubeExtractionFailed,
+                      YoutubeInspectionTimedOut, YoutubeSignInRequired)
 from ..paths import home
 from ..youtube_auth import youtube_auth_status, youtube_cookies_for_operation
 from .audio import read_audio
@@ -26,6 +27,7 @@ from .providers import check_cancel
 logger = logging.getLogger(__name__)
 FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/"
 FFMPEG_VERSION_TIMEOUT_SECONDS = 30
+VIDEO_INSPECTION_TIMEOUT_SECONDS = 120
 _FFMPEG_VALIDATION_LOCK = Lock()
 _FFMPEG_VALIDATION_CACHE: dict[str, tuple[int, int, int, int, int]] = {}
 _FFMPEG_VALIDATION_IN_FLIGHT: dict[
@@ -208,7 +210,10 @@ def ffmpeg_status() -> dict[str, str | bool | None]:
                 "available": False, "issue": str(exc)}
 
 
-def run_command(command: list[str], directory: Path, cancelled: Event, error_type, progress=None) -> str:
+def run_command(command: list[str], directory: Path, cancelled: Event, error_type, progress=None,
+                *, timeout: float | None = None) -> str:
+    check_cancel(cancelled)
+    deadline = None if timeout is None else time.monotonic() + timeout
     with (directory / "command.out").open("w+", encoding="utf-8") as output, \
             (directory / "command.err").open("w+", encoding="utf-8") as errors:
         try:
@@ -222,6 +227,9 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
         try:
             while process.poll() is None:
                 check_cancel(cancelled)
+                if deadline is not None and time.monotonic() >= deadline:
+                    logger.warning("YouTube video details timed out timeout_seconds=%s", timeout)
+                    raise YoutubeInspectionTimedOut()
                 if progress:
                     # Output is file-backed, so neither pipe can deadlock on a long download.
                     with (directory / "command.out").open(encoding="utf-8", errors="replace") as updates:
@@ -285,7 +293,21 @@ def run_command(command: list[str], directory: Path, cancelled: Event, error_typ
             return text
         finally:
             if process.poll() is None:
-                process.kill()
+                if os.name == "nt" and error_type is DownloadFailed:
+                    # yt-dlp can be waiting on its Node challenge solver.
+                    try:
+                        stopped = subprocess.run(
+                            [str(Path(os.environ["SystemRoot"]) / "System32" / "taskkill.exe"),
+                             "/PID", str(process.pid), "/T", "/F"],
+                            capture_output=True, timeout=5, check=False,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                        if stopped.returncode:
+                            logger.warning("Could not stop yt-dlp process tree exit_code=%d",
+                                           stopped.returncode)
+                    except (OSError, subprocess.TimeoutExpired):
+                        logger.warning("Could not stop yt-dlp process tree; stopping its main process.")
+                if process.poll() is None:
+                    process.kill()
                 process.wait()
 
 
@@ -319,8 +341,10 @@ def inspect_video(url: str, directory: Path, cancelled: Event) -> dict:
     with youtube_cookies_for_operation() as cookies:
         if cookies:
             command.extend(["--cookies", str(cookies)])
-        command.extend(["--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", url])
-        text = run_command(command, directory, cancelled, DownloadFailed)
+        command.extend(["--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings",
+                        "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1", url])
+        text = run_command(command, directory, cancelled, DownloadFailed,
+                           timeout=VIDEO_INSPECTION_TIMEOUT_SECONDS)
     try:
         info = json.loads(text)
     except json.JSONDecodeError as exc:

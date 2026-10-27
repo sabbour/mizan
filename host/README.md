@@ -41,6 +41,13 @@ locally in Mizan's data directory; **Sign out** deletes it and clears the
 in-app YouTube profile. The sign-in window closes automatically after an
 active YouTube session is saved.
 
+The yt-dlp video-details lookup has a two-minute deadline, including extraction
+and its network retries. A timeout fails that job with a retryable error instead
+of leaving the queue waiting indefinitely; it does not change your saved sign-in.
+Local jobs prepare and verify their selected transcription model before reading
+video details or starting inference. While a checkpoint is downloading, the job
+reports **Downloading transcription model**, not **Reading video details**.
+
 The FFmpeg project provides source code.
 The listed providers supply the Windows executables.
 
