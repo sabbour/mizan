@@ -573,9 +573,10 @@ def run_pipeline(job: dict, report, cancelled: Event) -> dict:
         cloud = job["details"].get("processingMode") == "cloud"
         started = time.perf_counter()
         if not cloud:
-            report("inspect", 0)
+            report("inspect", 0, message="Preparing transcription model")
             from .muscriptor import prepare_model
-            prepare_model(model, cancelled, lambda value: report("inspect", value * 0.8))
+            prepare_model(model, cancelled, lambda value: report(
+                "inspect", value * 0.8, message="Downloading transcription model"))
         decoded = work / "original.wav"
         if job.get("song_id"):
             report("inspect", 0, message="Validating saved audio")

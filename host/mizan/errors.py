@@ -51,6 +51,11 @@ class YoutubeExtractionFailed(DownloadFailed):
     message = "YouTube could not provide a downloadable audio format. Update Mizan and try again."
 
 
+class YoutubeInspectionTimedOut(DownloadFailed):
+    code = "youtube_inspection_timeout"
+    message = "Reading YouTube video details timed out. Check your connection and retry the analysis."
+
+
 class YoutubeSignInRequired(DownloadFailed):
     code = "youtube_sign_in_required"
     message = "YouTube requires sign-in to continue."
