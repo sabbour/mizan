@@ -690,7 +690,7 @@
   },
   {
     "name": "azure-identity",
-    "version": "1.26.0",
+    "version": "1.27.0",
     "license": "MIT",
     "author": "Copyright (c) Microsoft Corporation.",
     "url": "https://github.com/Azure/azure-sdk-for-python",
