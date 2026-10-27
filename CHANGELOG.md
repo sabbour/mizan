@@ -1,5 +1,11 @@
 # mizan
 
+## 0.3.2
+
+### Patch Changes
+
+- Bound video-details inspection with a retryable timeout and process cleanup, and clarify model preparation and download status before publishing verified readiness.
+
 ## 0.3.1
 
 ### Patch Changes

@@ -101,7 +101,7 @@ Development and probe-only packages installed in the venv are excluded.
 | anyio | 4.15.1 | [MIT](licenses/host-anyio.txt) | Copyright (c) 2018 Alex Grönholm | https://anyio.readthedocs.io/en/stable/versionhistory.html |
 | azure-containerregistry | 1.2.0 | [MIT](licenses/host-azure-containerregistry.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
 | azure-core | 1.41.0 | [MIT](licenses/host-azure-core.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/core/azure-core |
-| azure-identity | 1.26.0 | [MIT](licenses/host-azure-identity.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
+| azure-identity | 1.27.0 | [MIT](licenses/host-azure-identity.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
 | boto3 | 1.40.27 | [Apache-2.0](licenses/host-boto3.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/boto3 |
 | botocore | 1.40.76 | [Apache-2.0](licenses/host-botocore.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/botocore |
 | bottle | 0.13.4 | [MIT](licenses/host-bottle.txt) | Copyright (c) 2009-2024, Marcel Hellkamp. | http://bottlepy.org/ |
