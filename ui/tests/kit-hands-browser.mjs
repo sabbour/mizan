@@ -4,7 +4,7 @@
 // kit and keyboard keep working when the hand models cannot be loaded.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -171,6 +171,30 @@ try {
   await at(0, { playing: false })
   assert.ok((await evaluate('window.__hands')).right.fingers.every((finger) => finger.pressing === null), 'piano: paused, no finger presses a key')
   assert.equal(await dataset('depressed'), '', 'piano: and the keys rest up')
+  // Original synthetic accompaniment and melody: later attacks must remain playable around held notes.
+  await open('view=piano&example=overlap')
+  const overlapNotes = await evaluate('window.__song.piano')
+  assert.ok(overlapNotes.filter((note) => note.midi >= 71).every((note) => note.hand === 'right'),
+    'piano: the independent upper line stays in the right hand')
+  assert.ok(overlapNotes.some((note) => note.midi >= 60 && note.midi <= 67 && note.hand === 'left'),
+    'piano: held accompaniment is reassigned instead of crowding the moving line')
+  for (const beat of [0.25, 0.75, 1.25, 1.75]) {
+    const state = await at(beat)
+    for (const side of ['left', 'right']) {
+      const down = state[side].fingers.filter((finger) => finger.pressing !== null)
+      const expected = overlapNotes.filter((note) => note.hand === side && note.startBeat <= beat && note.startBeat + note.beats > beat)
+        .map((note) => note.midi).sort((a, b) => a - b)
+      assert.deepEqual(down.map((finger) => finger.pressing).sort((a, b) => a - b), expected,
+        `piano overlap at ${beat}: every ${side}-hand key has a distinct constrained finger`)
+      assert.ok(down.every((finger) => finger.error < 0.004),
+        `piano overlap at ${beat}: the ${side} fingertips reach their keys`)
+    }
+  }
+  if (process.env.MIZAN_PIANO_CAPTURE) {
+    await at(1.25)
+    const capture = await call('Page.captureScreenshot', { format: 'png' })
+    await writeFile(process.env.MIZAN_PIANO_CAPTURE, Buffer.from(capture.data, 'base64'))
+  }
   // No hands written: placed by pitch, and said so.
   await open('view=piano&example=nohands')
   assert.ok((await evaluate('document.querySelector(".kit-legend .practice-note").textContent')).includes('placed by pitch: left below middle C, right from middle C up'), 'piano: hands placed by pitch are said so')

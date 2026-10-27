@@ -119,7 +119,7 @@ def test_playability_is_saved_separately_and_rejects_stale_source():
             "issues": [{"beat": source_drums[hat]["startBeat"], "kind": "moved", "count": 1}],
         }
         result = {
-            "version": "constrained-path-v4",
+            "version": "constrained-path-v5",
             "parts": {"piano": {
                 "sourceNotes": source_piano, "sourceSignature": "test-piano",
                 "notes": optimized_piano,
@@ -136,7 +136,7 @@ def test_playability_is_saved_separately_and_rejects_stale_source():
             },
         }
         stale_version = json.loads(json.dumps(result))
-        stale_version["version"] = "constrained-path-v3"
+        stale_version["version"] = "constrained-path-v4"
         assert api.save_playability(song_id, stale_version)["error"]["code"] == "invalid_playability"
         assert api.save_playability(song_id, result) == {"ok": True}
         saved = api.open_song(song_id)["song"]
@@ -177,7 +177,7 @@ def test_playability_track_key_disambiguates_a_piano_named_track():
 
         optimized = [dict(note, hand="left") for note in source_notes]
         result = {
-            "version": "constrained-path-v4",
+            "version": "constrained-path-v5",
             "parts": {"track:piano": {
                 "sourceNotes": source_notes, "sourceSignature": "test-gm-piano",
                 "notes": optimized,
@@ -230,7 +230,7 @@ def test_playability_save_and_recording_update_serialize_analysis_writes(monkeyp
         analysis_path = entry["song_path"]
         source_piano = source_song["piano"]
         result = {
-            "version": "constrained-path-v4",
+            "version": "constrained-path-v5",
             "parts": {"piano": {
                 "sourceNotes": source_piano, "sourceSignature": "serialized-write",
                 "notes": source_piano,

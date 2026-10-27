@@ -72,7 +72,13 @@ node tests\playback.mjs --job-preview
 
 ## Playable transcription parts
 
-Piano practice splits over-wide parts between two hands. Guitar and bass practice choose
+Piano practice splits over-wide parts between two hands and checks whether held chords
+leave usable fingers for notes that arrive later. A valid right-hand chord stays in the
+right hand; repairs change hand assignments, not piano pitches or note lengths.
+Written sustain and sostenuto can free held fingers; the soft pedal cannot.
+The animated hands use the constrained fingering suggestions rather than inventing
+finger positions for notes that cannot be reached. Those notes still sound and their
+keys still light. Guitar and bass practice choose
 positions that fit the strings, frets, and hand reach. When a fretted chord is still too
 wide, Mizan can shift a recognized chord tone by one octave before leaving a note out;
 the chord's pitch classes are preserved, and non-chord notes are reduced before chord
@@ -80,10 +86,17 @@ tones when the instrument still lacks strings. The original register remains ava
 with **As transcribed**. The selected synth part follows the repaired pitches while
 **Playable** is active; recording stems and the saved analysis are unchanged.
 
+The hand animation does not glide away from a key that a finger still has to hold.
+If written fingering forces a non-thumb hand reposition with no gap, the hand changes
+position at the note boundary rather than crossing through a held finger.
+Normal thumb-under scale transitions remain supported.
+
 Run the focused repair tests and compare the same local analyses before and after changes:
 
 ```powershell
 node tests\playability.mjs
+node tests\piano-fingers.mjs
+node tests\kit-hands.mjs
 node tests\playability-songs.mjs "C:\path\to\song-cache"
 ```
 

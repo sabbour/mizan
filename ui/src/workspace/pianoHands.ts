@@ -1,6 +1,6 @@
 import type { Overlay } from './kitRenderer'
 import type { MaterialView } from './kitAsset'
-import { keyOf, pedalCarries, suggestFingers } from './fingers'
+import { keyOf, pianoKeyReleases, pianoFingerPairFits, suggestFingers } from './fingers'
 import type { PreparedPiano } from './pianoAsset'
 import type { Pedal, PianoNote } from './song'
 import {
@@ -35,35 +35,14 @@ export function buildPianoHandPlan(
   const handed = playable.map((note) => ({ note, hand: note.hand ?? (note.midi < MIDDLE_C ? 'left' : 'right') as HandSide }))
   const asPlaced = handed.map(({ note, hand }) => note.hand === hand ? note : { ...note, hand })
   const fingersSuggested = !playable.some((note) => note.finger)
-  const suggestions = fingersSuggested ? suggestFingers(asPlaced, pedals, { bpm }) : new Map()
+  const options = { bpm, inferBassPedalGap: !pedals?.length }
+  const suggestions = suggestFingers(asPlaced, pedals, options)
+  const releases = pianoKeyReleases(asPlaced, pedals, options)
   const plan: PianoHandPlan = { left: [], right: [], placedByPitch, fingersSuggested }
   for (const side of ['left', 'right'] as const) {
     const mine = asPlaced.map((note, index) => ({ note, written: playable[index].finger })).filter(({ note }) => note.hand === side)
       .sort((a, b) => a.note.startBeat - b.note.startBeat || a.note.midi - b.note.midi)
     const active: PianoEvent[] = []
-    const up = side === 'right' ? 1 : -1
-    // When a pedal carries a note, its key is let go as soon as a later note in this hand needs the finger; the sound is unchanged.
-    const releases = new Map<PianoNote, number>()
-    const release = (note: PianoNote) => {
-      const known = releases.get(note)
-      if (known !== undefined) return known
-      const end = note.startBeat + note.beats
-      let at = end
-      for (const { note: other } of mine) {
-        if (other.startBeat <= note.startBeat + 1e-6 || other.startBeat >= end - 1e-6) continue
-        if (pedalCarries(pedals, note.startBeat, end, other.startBeat)) { at = other.startBeat; break }
-      }
-      releases.set(note, at)
-      return at
-    }
-    // A finger leaves room, in white keys, for notes that start while this one is held (the left thumb stays right of the other fingers).
-    const viable = (note: PianoNote, finger: number) => mine.every(({ note: other }) => {
-      if (other === note || other.startBeat <= note.startBeat + 1e-6 || other.startBeat >= release(note) - 1e-6) return true
-      const apart = keyOf(other.midi) - keyOf(note.midi)
-      const steps = Math.min(4, Math.max(1, Math.round(Math.abs(apart) * 7 / 12)))
-      const reach = finger + up * Math.sign(apart) * steps
-      return reach >= 1 && reach <= 5
-    })
     for (let first = 0; first < mine.length;) {
       let last = first
       while (last + 1 < mine.length && Math.abs(mine[last + 1].note.startBeat - mine[first].note.startBeat) < 1e-6) last++
@@ -71,29 +50,19 @@ export function buildPianoHandPlan(
       const start = group[0].note.startBeat
       const sounding = new Set(active.filter((event) => event.start < start - 1e-6 && event.end > start + 1e-6).map((event) => event.finger))
       const taken = new Set<number>(sounding)
+      const ordered = active.filter((event) => event.end > start + 1e-6).map((event) => ({ key: event.key, finger: event.finger as number }))
       const chosen = group.map(({ note, written }) => {
         const wanted = written ?? suggestions.get(note)?.finger
-        if (wanted && !taken.has(wanted) && (written !== undefined || viable(note, wanted))) { taken.add(wanted); return wanted as Finger }
-        return undefined
+        const key = keyOf(note.midi)
+        if (wanted === undefined || taken.has(wanted) ||
+          ordered.some((other) => !pianoFingerPairFits(key, wanted, other.key, other.finger, side))) return undefined
+        taken.add(wanted)
+        ordered.push({ key, finger: wanted })
+        return wanted as Finger
       })
-      // Notes with no finger take a free finger that keeps the fingers in order across the hand (the left thumb is the
-      // right-most finger), nearest to where the notes already placed put it, or the middle finger on its own.
-      const placed = [...active.filter((event) => sounding.has(event.finger) && event.start < start - 1e-6 && event.end > start + 1e-6)]
-        .map((event) => ({ key: event.key, finger: event.finger as number }))
-      group.forEach(({ note }, index) => { if (chosen[index] !== undefined) placed.push({ key: keyOf(note.midi), finger: chosen[index] as number }) })
-      const free = ([1, 2, 3, 4, 5] as Finger[]).filter((finger) => !taken.has(finger))
-      for (const index of chosen.map((finger, i) => finger === undefined ? i : -1).filter((i) => i >= 0)) {
-        const key = keyOf(group[index].note.midi)
-        const ordered = free.filter((finger) => placed.every((other) => up * (key - other.key) * (finger - other.finger) > 0))
-        const roomy = (ordered.length ? ordered : free).filter((finger) => viable(group[index].note, finger))
-        const options = roomy.length ? roomy : ordered.length ? ordered : free
-        const near = placed.length ? placed.reduce((a, b) => Math.abs(a.key - key) <= Math.abs(b.key - key) ? a : b) : null
-        const ideal = near ? near.finger + up * Math.sign(key - near.key) * Math.max(1, Math.round(Math.abs(key - near.key) / 2)) : 3
-        const pick = options.slice().sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal) || a - b)[0] ?? 3
-        chosen[index] = pick; free.splice(free.indexOf(pick), 1); placed.push({ key, finger: pick }); taken.add(pick)
-      }
       group.forEach(({ note }, index) => {
-        const event = { key: keyOf(note.midi), start: note.startBeat, end: release(note), finger: chosen[index] as Finger }
+        if (chosen[index] === undefined) return
+        const event = { key: keyOf(note.midi), start: note.startBeat, end: releases.get(note) ?? note.startBeat + note.beats, finger: chosen[index] as Finger }
         plan[side].push(event); active.push(event)
       })
       first = last + 1
@@ -205,6 +174,14 @@ const NATURAL: [number, number, number] = [0.55, 0, 0.75]
 const NATURAL_THUMB: [number, number, number] = [0.25, 0, 0.3]
 const anchorModel = [0, 0, 0], at = [0, 0, 0], forward = [0, 0, 0], palm = [0, 0, 0], target = [0, 0, 0]
 
+const centerRange = (key: KeyInfo, finger: number, dir: number, keyWidth: number): [number, number] => {
+  if (finger === 1) return dir > 0
+    ? [key.x - THUMB_INWARD, key.x + THUMB_OUTWARD]
+    : [key.x - THUMB_OUTWARD, key.x + THUMB_INWARD]
+  const base = key.x - dir * (finger - 3) * keyWidth
+  return [base - REACH, base + REACH]
+}
+
 type Part = { mesh: HandMesh; overlay: Overlay; arm: Arm; foreOverlay: Overlay }
 
 export class PianoHands {
@@ -248,13 +225,8 @@ export class PianoHands {
           const key = geometry.keys.get(event.key)
           if (!key) continue
           sum += key.x - dir * (event.finger - 3) * geometry.keyWidth; count++
-          if (event.finger === 1) {
-            low = Math.max(low, dir > 0 ? key.x - THUMB_INWARD : key.x - THUMB_OUTWARD)
-            high = Math.min(high, dir > 0 ? key.x + THUMB_OUTWARD : key.x + THUMB_INWARD)
-          } else {
-            const base = key.x - dir * (event.finger - 3) * geometry.keyWidth
-            low = Math.max(low, base - REACH); high = Math.min(high, base + REACH)
-          }
+          const range = centerRange(key, event.finger, dir, geometry.keyWidth)
+          low = Math.max(low, range[0]); high = Math.min(high, range[1])
         }
         // The hand moves only as far as the new notes need: it stays where it was when every finger can still reach.
         const wanted = before ?? (count ? sum / count : (geometry.minX + geometry.maxX) / 2)
@@ -339,7 +311,28 @@ export class PianoHands {
       }
       this.keyOf[finger] = key; this.weightOf[finger] = weight; this.heightOf[finger] = height; this.pressOf[finger] = press; this.downOf[finger] = down
     }
-    const center = this.centerAt(line, clock)
+    // An approaching or releasing finger must not pass through a different finger that is still pressing a key.
+    // The thumb is excluded: passing under another finger is a normal scale transition.
+    for (let finger = 2 as Finger; finger <= 5; finger++) {
+      if (this.downOf[finger] || this.keyOf[finger] < 0) continue
+      for (let held = 2 as Finger; held <= 5; held++) {
+        if (!this.downOf[held] || held === finger) continue
+        if (dir * (this.keyOf[finger] - this.keyOf[held]) * (finger - held) <= 0) {
+          this.keyOf[finger] = -1; this.weightOf[finger] = 0
+          break
+        }
+      }
+    }
+    let low = -Infinity, high = Infinity
+    for (let finger = 1 as Finger; finger <= 5; finger++) {
+      if (this.weightOf[finger] < 1) continue
+      const key = geometry.keys.get(this.keyOf[finger])
+      if (!key) continue
+      const range = centerRange(key, finger, dir, geometry.keyWidth)
+      low = Math.max(low, range[0]); high = Math.min(high, range[1])
+    }
+    const wanted = this.centerAt(line, clock)
+    const center = low <= high ? Math.max(low, Math.min(high, wanted)) : (low + high) / 2
     state.center = center
     // Place the hand: palm down, fingers away from the player, tilted a little so the fingertips sit lower than the wrist.
     forward[0] = 0; forward[1] = -Math.sin(PITCH); forward[2] = -Math.cos(PITCH)

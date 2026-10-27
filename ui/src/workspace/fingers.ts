@@ -53,6 +53,13 @@ function sounding(low: number, high: number, span: number): number {
   return 2 * Math.max(0, minComf - span) + 2 * Math.max(0, span - maxComf) + Math.max(0, minRel - span) + Math.max(0, span - maxRel)
 }
 
+/** Whether two simultaneous key contacts keep the fingers in order and within their practical reach. */
+export function pianoFingerPairFits(a: number, af: number, b: number, bf: number, hand: 'left' | 'right'): boolean {
+  const direction = hand === 'right' ? 1 : -1
+  const [low, high] = (b - a) * direction > 0 ? [af, bf] : [bf, af]
+  return low < high && Number.isFinite(sounding(low, high, Math.abs(b - a)))
+}
+
 /** Cost of moving from one finger on one key to the next finger on the next key (`d` semitones, positive away from the thumb). */
 function step(from: number, to: number, d: number, fast: boolean, legatoBlocked: boolean): number {
   if (d === 0) return from === to ? (fast ? 2 : 0) : fast ? 0.5 : 1
@@ -89,6 +96,43 @@ type State = { fingers: number[]; cost: number; back: State | null; group: Group
 export type SuggestOptions = {
   /** Quarter notes per minute: quick repeated notes are better played with alternating fingers. */
   bpm?: number
+  /** Apply the playability layer's unwritten pedal-gap heuristic to a single low bass note. */
+  inferBassPedalGap?: boolean
+}
+
+/** Physical key releases for the hand display; sounding durations and source notes are not changed. */
+export function pianoKeyReleases(
+  notes: readonly PianoNote[], pedals?: readonly Pedal[], options: SuggestOptions = {},
+): Map<PianoNote, number> {
+  const releases = new Map<PianoNote, number>()
+  for (const hand of ['left', 'right'] as const) {
+    const mine = notes.filter((note) => note.hand === hand).sort((a, b) => a.startBeat - b.startBeat)
+    const onsetCounts = new Map<number, number>()
+    for (const note of mine) onsetCounts.set(note.startBeat, (onsetCounts.get(note.startBeat) ?? 0) + 1)
+    let active: PianoNote[] = []
+    for (let first = 0; first < mine.length;) {
+      let last = first + 1
+      while (last < mine.length && mine[last].startBeat - mine[first].startBeat < EPS) last++
+      const arriving = mine.slice(first, last)
+      const at = mine[first].startBeat
+      const keys = new Set(arriving.map((note) => keyOf(note.midi)))
+      const low = Math.min(...keys)
+      active = active.filter((note) => {
+        const end = note.startBeat + note.beats
+        if (end <= at + EPS) return false
+        const inferred = options.inferBassPedalGap && hand === 'left' && !pedals?.length &&
+          onsetCounts.get(note.startBeat) === 1 && keyOf(note.midi) <= low - 9
+        if (keys.has(keyOf(note.midi)) || pedalCarries(pedals, note.startBeat, end, at) || inferred) {
+          releases.set(note, at)
+          return false
+        }
+        return true
+      })
+      active.push(...arriving)
+      first = last
+    }
+  }
+  return releases
 }
 
 /**
@@ -130,8 +174,9 @@ export function suggestFingers(
 
     let frontier: State[] = []
     const unknown: PianoNote[] = []
+    const releases = pianoKeyReleases(mine, pedals, options)
     const blocking = (entry: { note: PianoNote; end: number }, at: number) =>
-      entry.end > at + EPS && !pedalCarries(pedals, entry.note.startBeat, entry.end, at)
+      (releases.get(entry.note) ?? entry.end) > at + EPS
 
     groups.forEach((group, index) => {
       const at = group.start
