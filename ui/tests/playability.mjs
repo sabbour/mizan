@@ -66,6 +66,15 @@ try {
     assert.ok(performance.now() - started < 1500, 'independent overlapping passages do not repeatedly solve the entire song')
     assert.equal(repeatedResult.summary.moved, 300)
     assert.equal(repeatedResult.summary.unplayable, 0)
+    const touching = Array.from({ length: 100 }, (_, bar) => notes.slice(1).map((note) => ({
+      ...note, startBeat: note.startBeat + bar * 3.99,
+    }))).flat()
+    const touchingStarted = performance.now()
+    const touchingResult = repairPiano(touching, { bpm: 120 })
+    assert.ok(performance.now() - touchingStarted < 1500,
+      'rearticulated keys partition tiny sounding-duration overlaps instead of solving the entire song repeatedly')
+    assert.equal(touchingResult.summary.moved, 300)
+    assert.equal(touchingResult.summary.unplayable, 0)
   }
 
   // A feasible right-hand chord with a moving line remains in the right hand.

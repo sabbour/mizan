@@ -1,4 +1,4 @@
-import { keyOf, pedalCarries, suggestFingers } from './fingers'
+import { keyOf, pedalCarries, pianoKeyReleases, suggestFingers } from './fingers'
 import {
   BASS, GUITAR, identifiesInstrument, planFrettedTab, positionsForMidi,
   type FrettedInstrumentConfig, type FrettedPosition,
@@ -251,6 +251,7 @@ export function repairPiano(
   const fingeringFailures = new Set<number>()
   crossLong = crossRuns()
   const passages: number[][] = []
+  const releases = pianoKeyReleases(input, options.pedals, { inferBassPedalGap: !written })
   let passageEnd = -Infinity
   for (const local of order) {
     if (!passages.length || start[local] >= passageEnd - EPS) {
@@ -258,7 +259,7 @@ export function repairPiano(
       passageEnd = -Infinity
     }
     passages[passages.length - 1].push(local)
-    passageEnd = Math.max(passageEnd, end[local])
+    passageEnd = Math.max(passageEnd, releases.get(input[ids[local]]) ?? end[local])
   }
   for (const passage of passages) {
     if (!passage.some((local) => momentsOf[local].some((moment) => starts[moment].some((other) =>
