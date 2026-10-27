@@ -54,10 +54,12 @@ function sounding(low: number, high: number, span: number): number {
 }
 
 /** Whether two simultaneous key contacts keep the fingers in order and within their practical reach. */
-export function pianoFingerPairFits(a: number, af: number, b: number, bf: number, hand: 'left' | 'right'): boolean {
+export function pianoFingerPairFits(a: number, af: number, b: number, bf: number, hand: 'left' | 'right', thumbTransition = false): boolean {
   const direction = hand === 'right' ? 1 : -1
   const [low, high] = (b - a) * direction > 0 ? [af, bf] : [bf, af]
-  return low < high && Number.isFinite(sounding(low, high, Math.abs(b - a)))
+  if (low < high) return Number.isFinite(sounding(low, high, Math.abs(b - a)))
+  return thumbTransition && high === 1 && low > 1 && Math.abs(b - a) > 0 &&
+    -Math.abs(b - a) >= SPANS[`1-${low}`][0]
 }
 
 /** Cost of moving from one finger on one key to the next finger on the next key (`d` semitones, positive away from the thumb). */
@@ -98,6 +100,8 @@ export type SuggestOptions = {
   bpm?: number
   /** Apply the playability layer's unwritten pedal-gap heuristic to a single low bass note. */
   inferBassPedalGap?: boolean
+  /** Keep authored contacts fixed when filling in missing fingers. */
+  respectWritten?: boolean
 }
 
 /** Physical key releases for the hand display; sounding durations and source notes are not changed. */
@@ -191,6 +195,7 @@ export function suggestFingers(
       const own = COMBOS[size].map((fingers) => {
         let cost = 0
         fingers.forEach((finger, i) => {
+          if (options.respectWritten && group.notes[i].finger && group.notes[i].finger !== finger) cost = Infinity
           const key = group.keys[i]
           cost += WEAK[finger - 1] ?? 0
           const previousWhite = whiteNear(before, key)
@@ -214,7 +219,12 @@ export function suggestFingers(
             for (let i = 0; i < size && fits; i++) {
               const [low, high] = entry.m < group.m[i] ? [entry.finger, option.fingers[i]] : [option.fingers[i], entry.finger]
               const span = Math.abs(group.m[i] - entry.m)
-              if (low >= high) { fits = false; break }
+              if (low >= high) {
+                const transition = entry.end - at <= 0.1 + EPS
+                if (!pianoFingerPairFits(entry.note.midi, entry.finger, group.notes[i].midi, option.fingers[i], hand, transition)) fits = false
+                else cost += 4
+                continue
+              }
               const pair = sounding(low, high, span)
               if (!Number.isFinite(pair)) fits = false
               else cost += pair

@@ -35,7 +35,7 @@ export function buildPianoHandPlan(
   const handed = playable.map((note) => ({ note, hand: note.hand ?? (note.midi < MIDDLE_C ? 'left' : 'right') as HandSide }))
   const asPlaced = handed.map(({ note, hand }) => note.hand === hand ? note : { ...note, hand })
   const fingersSuggested = !playable.some((note) => note.finger)
-  const options = { bpm, inferBassPedalGap: !pedals?.length }
+  const options = { bpm, inferBassPedalGap: !pedals?.length, respectWritten: true }
   const suggestions = suggestFingers(asPlaced, pedals, options)
   const releases = pianoKeyReleases(asPlaced, pedals, options)
   const plan: PianoHandPlan = { left: [], right: [], placedByPitch, fingersSuggested }
@@ -50,14 +50,14 @@ export function buildPianoHandPlan(
       const start = group[0].note.startBeat
       const sounding = new Set(active.filter((event) => event.start < start - 1e-6 && event.end > start + 1e-6).map((event) => event.finger))
       const taken = new Set<number>(sounding)
-      const ordered = active.filter((event) => event.end > start + 1e-6).map((event) => ({ key: event.key, finger: event.finger as number }))
+      const ordered = active.filter((event) => event.end > start + 1e-6).map((event) => ({ key: event.key, finger: event.finger as number, end: event.end }))
       const chosen = group.map(({ note, written }) => {
         const wanted = written ?? suggestions.get(note)?.finger
         const key = keyOf(note.midi)
         if (wanted === undefined || taken.has(wanted) ||
-          ordered.some((other) => !pianoFingerPairFits(key, wanted, other.key, other.finger, side))) return undefined
+          ordered.some((other) => !pianoFingerPairFits(key, wanted, other.key, other.finger, side, other.end - start <= 0.1 + EPS))) return undefined
         taken.add(wanted)
-        ordered.push({ key, finger: wanted })
+        ordered.push({ key, finger: wanted, end: note.startBeat + note.beats })
         return wanted as Finger
       })
       group.forEach(({ note }, index) => {
@@ -321,6 +321,11 @@ export class PianoHands {
           this.keyOf[finger] = -1; this.weightOf[finger] = 0
           break
         }
+      }
+      for (let a = 2 as Finger; a < 5; a++) for (let b = (a + 1) as Finger; b <= 5; b++) {
+        if (this.keyOf[a] < 0 || this.keyOf[b] < 0 || dir * (this.keyOf[b] - this.keyOf[a]) > 0) continue
+        if (!this.downOf[a]) { this.keyOf[a] = -1; this.weightOf[a] = 0 }
+        if (!this.downOf[b]) { this.keyOf[b] = -1; this.weightOf[b] = 0 }
       }
     }
     let low = -Infinity, high = Infinity

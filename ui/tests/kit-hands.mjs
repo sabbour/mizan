@@ -232,16 +232,18 @@ try {
   }
 
   // This written 3-to-2 upward transition needs a hand reposition, not an index finger passing through a held middle finger.
-  const reposition = rig.compile(buildPianoHandPlan([
-    note(63, 0, 1, 'right', 3), note(66, 1, 1, 'right', 2),
-  ], has), geometry)
-  for (let beat = 0.01; beat < 2; beat += 0.02) {
-    rig.update(reposition, geometry, clock(beat), true)
-    const fingers = rig.state.right.fingers
-    for (let index = 1; index < 4; index++) assert.ok(fingers[index + 1].pad[0] > fingers[index].pad[0],
-      `a reposition never crosses non-thumb fingertips at beat ${beat}`)
-    for (const finger of fingers.filter((item) => item.pressing !== null)) assert.ok(finger.error < 0.004,
-      `anticipating the next hand position does not pull a held fingertip away from its key at beat ${beat}`)
+  for (const duration of [0.9, 0.95, 1]) {
+    const reposition = rig.compile(buildPianoHandPlan([
+      note(63, 0, duration, 'right', 3), note(66, 1, 1, 'right', 2),
+    ], has), geometry)
+    for (let beat = 0.01; beat < 2; beat += 0.02) {
+      rig.update(reposition, geometry, clock(beat), true)
+      const fingers = rig.state.right.fingers
+      for (let index = 1; index < 4; index++) assert.ok(fingers[index + 1].pad[0] > fingers[index].pad[0],
+        `a reposition never crosses non-thumb fingertips at beat ${beat}`)
+      for (const finger of fingers.filter((item) => item.pressing !== null)) assert.ok(finger.error < 0.004,
+        `anticipating the next hand position does not pull a held fingertip away from its key at beat ${beat}`)
+    }
   }
 
   // Hands placed by pitch, and fingers suggested, when the music names neither.

@@ -203,6 +203,22 @@ try {
   const stretchedWritten = crossedWritten.map((note, index) => ({ ...note, midi: index ? 72 : 60, finger: index ? 5 : 4 }))
   assert.equal(buildPianoHandPlan(stretchedWritten, () => true).right.length, 1,
     'written ring and little fingers cannot be stretched an octave apart')
+  for (const hand of ['right', 'left']) {
+    const thumbCrossing = [
+      { midi: hand === 'right' ? 64 : 60, hand, finger: 3, startBeat: 0, beats: 1.05 },
+      { midi: hand === 'right' ? 65 : 59, hand, finger: 1, startBeat: 1, beats: 1 },
+    ]
+    assert.equal(buildPianoHandPlan(thumbCrossing, () => true)[hand].length, 2,
+      'brief legato thumb-under contact overlap is a legitimate transition')
+  }
+  const partial = [
+    { midi: 60, hand: 'right', finger: 2, startBeat: 0, beats: 2 },
+    { midi: 64, hand: 'right', startBeat: 1, beats: 1 },
+  ]
+  const partialPlan = buildPianoHandPlan(partial, () => true)
+  assert.equal(partialPlan.right.length, 2, 'missing fingers are solved around retained authored contacts')
+  assert.equal(partialPlan.right[0].finger, 2)
+  assert.ok(partialPlan.right[1].finger > 2)
 
   const unplaced = buildPianoHandPlan(notesAt([[48, 0, 1], [60, 0, 1]]).map(({ hand: _hand, ...note }) => note), () => true)
   assert.equal(unplaced.placedByPitch, true, 'pitch placement still fills in missing hand labels')

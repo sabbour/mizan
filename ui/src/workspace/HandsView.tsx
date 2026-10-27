@@ -40,9 +40,11 @@ export function HandsView({ song, engine, fingering = true, letters = false }: P
   // Written fingering when the music has it (lessons); otherwise suggestions from note spacing, labelled as such.
   const handAssignments = notes.length > 0 && notes.every((note) => note.hand != null)
   const written = useMemo(() => notes.some((note) => note.finger), [notes])
-  const fingers = useMemo(() => written
-    ? new Map(notes.filter((note) => note.finger && note.hand).map((note) => [note, { hand: note.hand!, finger: note.finger! } as Finger]))
-    : suggestFingers(notes, song.pedals, { bpm: song.bpm, inferBassPedalGap: !song.pedals?.length }), [notes, written, song.pedals, song.bpm])
+  const fingers = useMemo(() => {
+    const result = suggestFingers(notes, song.pedals, { bpm: song.bpm, inferBassPedalGap: !song.pedals?.length, respectWritten: true })
+    for (const note of notes) if (note.finger && note.hand) result.set(note, { hand: note.hand, finger: note.finger } as Finger)
+    return result
+  }, [notes, song.pedals, song.bpm])
   const ordered = useMemo(() => [...notes].sort((a, b) => a.startBeat - b.startBeat), [notes])
   // Each key's strikes for the shared feedback: the same approach glow and hit pulse as the 3D piano and kit.
   const strikes = useMemo(() => {
