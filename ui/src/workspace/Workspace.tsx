@@ -21,6 +21,7 @@ import { BassTabView } from './BassTabView'
 import { isGuitarTrack } from './guitar'
 import { isBassTrack } from './bass'
 import { applyPlayability } from './playability'
+import { firstPlayableBeat } from './firstNote'
 import { PlayabilityNote } from './PlayabilityNote'
 import { DEFAULT_KIT_STYLE, loadPrefs, savePref, type KitStyle } from './prefs'
 import { stickingFor } from './sticking'
@@ -76,8 +77,10 @@ export function Workspace({
   song = DEMO, songId = 'demo', stems = EMPTY_STEMS, start: saved = null, note = 'Draft transcription · synthetic demo', onPosition, onBack, onDeleteTrack, onSaveInstrument, analysisNotice, defaults, onGuides,
 }: Props) {
   const visibleStems = stems
-  const engine = useMemo(() => new Engine(song, visibleStems), [song, visibleStems])
-  const instrumentChangeBeat = useRef<number | null>(null)
+  const recordingKey = JSON.stringify(visibleStems.map(({ id, url }) => [id, url]))
+  // An instrument correction replaces score data, not the transport or its recording clock.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const engine = useMemo(() => new Engine(song, visibleStems), [songId, recordingKey])
   // A position saved before re-analysis can name bars this song no longer has (a 158-bar 4/4
   // reading re-analysed as 89 bars of 6/4); resume within this song's bars instead.
   const start = useMemo(() => saved && {
@@ -152,6 +155,8 @@ export function Workspace({
   const playableTarget = instrument === 'chords' || chart || track?.group === 'creative' ? null : practiceInstrument === 'drums' ? null : practiceInstrument
   const playable = useMemo(() => applyPlayability(chosen, { instrument: playableTarget, track }), [chosen, playableTarget, track])
   const viewed = asTranscribed ? chosen : playable.song
+  const firstNote = useMemo(() => firstPlayableBeat(viewed,
+    pianoGmTrack && track ? { ...track, instrument: 'piano' } : track), [viewed, track, pianoGmTrack])
   // Lesson sticking as written, or a suggestion for transcribed drums; computed once per drum part, not per frame.
   const pianoHandAssignments = viewed.piano.length > 0 && viewed.piano.every((note) => note.hand != null)
   const pianoPracticeView = practiceInstrument === 'piano' && practice.piano === 'hands' && !pianoHandAssignments
@@ -262,8 +267,13 @@ export function Workspace({
     // Chords whose voicing differs from the detected one (smooth voicing) play as shown.
     const swaps = new Map<number, number[]>()
     voiced.chords.forEach((c, i) => c.tones !== song.chords[i].tones && swaps.set(i, c.tones))
+    const timingChanged = engine.rate !== rate || engine.loop !== loop || engine.click !== click
+    const harmonyChanged = swaps.size !== engine.swaps.size || [...swaps].some(([index, tones]) => {
+      const previous = engine.swaps.get(index)
+      return !previous || previous.length !== tones.length || tones.some((tone, i) => tone !== previous[i])
+    })
     Object.assign(engine, { rate, loop, click, swaps })
-    engine.refresh()
+    if (timingChanged || harmonyChanged) engine.refresh()
   }, [engine, rate, loop, click, voiced, song])
   useEffect(() => {
     Object.assign(engine, { muted: silent, trackGains: new Map(Object.entries(volumes)) })
@@ -292,10 +302,7 @@ export function Workspace({
       setAudioLoading(loading)
       if (loading) setAudioError(null)
     }
-    const changedAt = instrumentChangeBeat.current
-    instrumentChangeBeat.current = null
-    if (changedAt != null) engine.seek(changedAt)
-    else if (start) engine.seek(barStart(song, start.bar - 1))
+    if (start) engine.seek(barStart(song, start.bar - 1))
     return () => {
       engine.onLoading = null
       engine.onError = null
@@ -304,6 +311,8 @@ export function Workspace({
     // Resume once per opened song; later position changes come from the transport.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine])
+
+  useEffect(() => { void engine.updateSong(song) }, [engine, song])
 
   useEffect(() => {
     try {
@@ -549,17 +558,7 @@ export function Workspace({
             engine.pause()
             await onDeleteTrack(id)
           } : undefined}
-          onSaveInstrument={onSaveInstrument ? async (id, gmProgram) => {
-            const beat = engine.read().beat
-            if (engine.playing) engine.pause()
-            instrumentChangeBeat.current = beat
-            try {
-              await onSaveInstrument(id, gmProgram)
-            } catch (error) {
-              instrumentChangeBeat.current = null
-              throw error
-            }
-          } : undefined}
+          onSaveInstrument={onSaveInstrument}
           muted={muted}
           onMute={toggleMute}
           solo={solo}
@@ -614,6 +613,7 @@ export function Workspace({
           fingering={viewInstrument === 'piano' ? fingering : null}
           onFingering={() => setFingering((v) => !v)}
           onPlay={togglePlay}
+          onFirstNote={firstNote == null ? undefined : () => seek(firstNote)}
           onStep={(d) => jump(pos.bar + d)}
           onRate={setSpeed}
           onLoop={toggleLoop}

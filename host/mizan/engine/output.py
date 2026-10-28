@@ -10,10 +10,14 @@ from .drums import GM_DRUMS, gm_pitch
 from .gm import GM_PROGRAM_NAMES
 
 
-DETECTED_GM_PROGRAMS = {"clean_electric_guitar": 27}
+DETECTED_GM_PROGRAMS = {name: program for program, name in enumerate(GM_PROGRAM_NAMES)}
+DETECTED_GM_PROGRAMS.update({"clean_electric_guitar": 27})
 
 
 def detected_gm_program(instrument: str) -> int | None:
+    if instrument.startswith("program_") and instrument[8:].isdigit():
+        program = int(instrument[8:])
+        return program if 0 <= program <= 127 else None
     return DETECTED_GM_PROGRAMS.get(instrument)
 
 

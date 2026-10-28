@@ -61,6 +61,17 @@ generic lane hits. Half-open hats come only from explicit articulation data.
 Actual tom events depend on the model's detected notes.
 MuScriptor's other instrument labels become individual pitched-note tracks
 through `instrumentNotes` and `tracks`.
+Exact GM names (and zero-based `program_N` identities) resolve to the matching
+sample-bank program; ambiguous names keep the explicitly labelled piano preview.
+MIDI programs stay zero-based in saved songs, including program 0; MusicXML
+program numbers are converted at the import/export boundary. Piano-family
+programs other than grand piano keep their individual timbres.
+Changing an instrument prepares its samples while playback continues, then
+replaces synth voices at the current beat without resetting the recording,
+mixer, loop or speed. Missing or undecodable assets appear in the player's audio
+error notice rather than substituting piano. The transport's **Go to first note**
+button seeks to the first playable event in the viewed part, skipping leading
+rests and annotations; paused playback remains paused.
 
 Model weights are not bundled. HT-Demucs 6s is downloaded on first use with a
 pinned checksum. The mix and all six float WAV stems preserve the decoded

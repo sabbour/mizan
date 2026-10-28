@@ -103,7 +103,7 @@ def test_changing_detected_instrument_keeps_notes_recording_position_and_exports
         "instrument-violin", "other", name, program)
     assert track["sourceInstrument"] == "violin"
     assert track["instrumentCorrection"] == {
-        "detectedName": "Violin", "detectedGmProgram": None,
+        "detectedName": "Violin", "detectedGmProgram": 40,
         "detectedInstrument": "other", "sourceInstrument": "violin", "gmProgram": program,
     }
     assert reply["song"]["instrumentNotes"]["instrument-violin"] == notes
@@ -299,7 +299,7 @@ def test_repeated_correction_keeps_original_identity_not_stale_display_name(tmp_
     assert track["sourceInstrument"] == "violin"
     assert track["instrumentCorrection"] == {
         "detectedName": "Violin", "detectedInstrument": "other",
-        "detectedGmProgram": None, "sourceInstrument": "violin", "gmProgram": 73,
+        "detectedGmProgram": 40, "sourceInstrument": "violin", "gmProgram": 73,
     }
     assert second["song"]["instrumentNotes"]["instrument-violin"] == notes
     midi = mido.MidiFile(store.get(song_id)["artifacts"]["midi"])

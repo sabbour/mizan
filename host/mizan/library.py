@@ -619,10 +619,9 @@ class LibraryStore:
         if not isinstance(correction, dict):
             original_program = updated_track.get("gmProgram")
             if type(original_program) is not int or not 0 <= original_program <= 127:
+                from .engine.output import detected_gm_program
                 source_instrument = updated_track.get("sourceInstrument")
-                original_program = None
-                if source_instrument == "clean_electric_guitar":
-                    original_program = 27
+                original_program = detected_gm_program(source_instrument) if type(source_instrument) is str else None
             correction = {
                 "detectedName": updated_track.get("name", ""),
                 "detectedInstrument": instrument,

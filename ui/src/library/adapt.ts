@@ -1,5 +1,6 @@
 import { type Confidence, type Song, type Track } from '../workspace/song'
 import { measures } from '../workspace/meter'
+import { detectedGmProgram } from '../workspace/gmInstruments'
 
 type HostTrack = Track & { sourceInstrument?: string }
 
@@ -10,9 +11,9 @@ export function fromHost(raw: Omit<Song, 'tracks'> & { accompaniment?: unknown; 
   const barMap = measures({ ...raw, beatsPerBar: bpb })
   const tracks: Track[] = raw.tracks
     .filter((t) => t.id !== 'accompaniment' && t.instrument !== 'chords' && t.group !== 'creative')
-    .map((track) => track.gmProgram != null || track.sourceInstrument !== 'clean_electric_guitar'
+    .map((track) => track.gmProgram != null || track.instrument !== 'other'
       ? track
-      : { ...track, gmProgram: 27 })
+      : { ...track, gmProgram: detectedGmProgram(track.sourceInstrument) })
   const filled = (list: Confidence[] | undefined): Confidence[] => Array.from({ length: bars }, (_, i) => list?.[i] ?? 'high')
   const chordConfidence = Array.from({ length: bars }, (_, i): Confidence => {
     const span = barMap[i]
