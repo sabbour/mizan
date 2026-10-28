@@ -101,6 +101,7 @@ export class Engine {
   private rhythmInputs: unknown[] = []
   private rhythm: number[] = []
   private playablePart: PlayablePart | null = null
+  private songRevision = 0
 
   rate = 1
   loop: { startBar: number; endBar: number } | null = null
@@ -210,12 +211,15 @@ export class Engine {
     return this.sampleLoad
   }
 
-  private async loadGmSamples(ctx: AudioContext): Promise<void> {
+  private async loadGmSamples(ctx: AudioContext, song = this.song): Promise<void> {
     const needed = new Map<number, MelodyNote[]>()
-    for (const track of this.song.tracks) {
-      if (track.instrument !== 'other' || track.gmProgram == null ||
-          track.gmProgram < 0 || track.gmProgram > 127) continue
-      const notes = this.song.instrumentNotes?.[track.id] ?? []
+    for (const track of song.tracks) {
+      if (track.instrument === 'drums' || track.gmProgram == null) continue
+      if (!Number.isInteger(track.gmProgram) || track.gmProgram < 0 || track.gmProgram > 127)
+        throw new Error(`The instrument program for ${track.name} is invalid. Choose an instrument again.`)
+      const notes = track.instrument === 'piano'
+        ? song.piano.filter((note) => !note.trackId || note.trackId === track.id)
+        : track.instrument === 'vocals' ? song.vocals ?? [] : song.instrumentNotes?.[track.id] ?? []
       if (notes.length) needed.set(track.gmProgram, [...(needed.get(track.gmProgram) ?? []), ...notes])
     }
     if (!needed.size) return
@@ -239,7 +243,10 @@ export class Engine {
           Math.abs(item.midi - midi) < Math.abs(best.midi - midi) ? item : best)
         neededRoots.set(root.midi, root)
       }
+      const cached = this.gmSamples.get(program) ?? []
       const samples = await Promise.all([...neededRoots.values()].map(async (sample) => {
+        const existing = cached.find((item) => item.midi === sample.midi)
+        if (existing) return existing
         const response = await fetch(sample.url)
         if (!response.ok) throw new Error(`Could not load GM program ${program + 1} sample (${response.status}).`)
         const buffer = await ctx.decodeAudioData(await response.arrayBuffer())
@@ -248,7 +255,54 @@ export class Engine {
       return [program, samples] as const
     }))
     if (ctx !== this.ctx) return
-    this.gmSamples = new Map(loaded)
+    for (const [program, samples] of loaded) {
+      const merged = new Map((this.gmSamples.get(program) ?? []).map((sample) => [sample.midi, sample]))
+      for (const sample of samples) merged.set(sample.midi, sample)
+      this.gmSamples.set(program, [...merged.values()])
+    }
+  }
+
+  /** Prepare the new timbre while the old score keeps playing, then replace only synth voices. */
+  async updateSong(song: Song): Promise<void> {
+    const revision = ++this.songRevision
+    if (song === this.song) return
+    try {
+      if (this.ctx) await this.loadGmSamples(this.ctx, song)
+      if (revision !== this.songRevision) return
+      this.song = song
+      this.rescheduleSynth()
+    } catch (error) {
+      if (revision === this.songRevision)
+        this.onError?.(error instanceof Error ? error.message : 'Instrument samples could not be loaded.')
+    }
+  }
+
+  private rescheduleSynth(): void {
+    if (!this.ctx || !this.timer) return
+    const transport = this.read()
+    // The last count-in pulse may already have queued old-timbre notes in the lookahead.
+    const entrance = transport.countingIn
+      ? this.anchors.find((anchor) => !anchor.count && anchor.time > this.ctx!.currentTime) : undefined
+    if (transport.countingIn && !entrance) return
+    const beat = entrance?.beat ?? transport.beat
+    for (const node of this.nodes) {
+      try { node.stop() } catch { /* Already stopped. */ }
+    }
+    this.nodes.clear()
+    this.openHats.clear()
+    clearTimeout(this.endTimer)
+    clearTimeout(this.mediaPauseTimer)
+    this.endTimer = 0
+    this.mediaPauseTimer = 0
+    this.cursorBeat = beat
+    this.cursorTime = entrance?.time ?? this.ctx.currentTime
+    this.counting = 0
+    const previous = entrance ? this.anchors.filter((anchor) => anchor.time < entrance.time) : []
+    this.anchors.splice(0, this.anchors.length, ...previous,
+      { time: this.cursorTime, beat, spb: this.spbAt(beat), count: 0 })
+    this.resumeNotes = true
+    if (this.timer === -1) this.timer = window.setInterval(() => this.schedule(), 25)
+    this.schedule()
   }
 
   read(): Transport {
@@ -299,6 +353,7 @@ export class Engine {
   }
 
   dispose(): void {
+    this.songRevision++
     this.pause()
     this.recording?.dispose()
     this.recording = null
@@ -347,7 +402,7 @@ export class Engine {
   setPlayablePart(part: PlayablePart | null): void {
     if (this.playablePart?.trackId === part?.trackId && this.playablePart?.notes === part?.notes) return
     this.playablePart = part
-    this.refresh()
+    this.rescheduleSynth()
   }
 
   refreshMix(): void {
@@ -514,7 +569,12 @@ export class Engine {
       if (!inRange(n.startBeat) && !(resume && n.startBeat < from && end > from)) return
       const start = Math.max(n.startBeat, from)
       const duration = this.seconds(start, end)
-      if (id === 'piano') this.piano(at(start), n, duration, n.trackId ?? song.tracks.find((track) => track.instrument === 'piano')?.id ?? 'piano', start)
+      if (id === 'piano') {
+        const part = song.tracks.find((track) => track.id === (n.trackId ?? defaultPianoTrackId))
+        if (part?.gmProgram != null && part.gmProgram !== 0) {
+          this.gmNote(at(start), n, duration, (n.velocity ?? 0.7) * 0.6, part.id, part.gmProgram, start)
+        } else this.piano(at(start), n, duration, n.trackId ?? defaultPianoTrackId, start)
+      }
       else this.lead(at(start), n, duration, id, start)
     }
     const playableTrack = this.playablePart && song.tracks.find((track) => track.id === this.playablePart!.trackId)
@@ -530,7 +590,12 @@ export class Engine {
     for (const n of song.vocals ?? []) {
       if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
       const start = Math.max(n.startBeat, from)
-      this.vocal(at(start), n, this.seconds(start, n.startBeat + n.beats), n.trackId ?? 'vocals', start)
+      const id = n.trackId ?? song.tracks.find((track) => track.instrument === 'vocals')?.id ?? 'vocals'
+      const part = song.tracks.find((track) => track.id === id)
+      const duration = this.seconds(start, n.startBeat + n.beats)
+      if (part?.gmProgram != null)
+        this.gmNote(at(start), n, duration, (n.velocity ?? 0.7) * 0.6, part.id, part.gmProgram, start)
+      else this.vocal(at(start), n, duration, id, start)
     }
     for (const part of song.tracks) {
       if (part.instrument !== 'other') continue
@@ -540,10 +605,10 @@ export class Engine {
         if (!inRange(n.startBeat) && !(resume && n.startBeat < from && n.startBeat + n.beats > from)) continue
         const start = Math.max(n.startBeat, from)
         const duration = this.seconds(start, n.startBeat + n.beats)
-        if (part.id === 'instrument-organ') this.organ(at(start), n, duration, (n.velocity ?? 0.7) * 0.28, part.id, start)
-        else if (part.gmProgram != null && part.gmProgram >= 0 && part.gmProgram <= 127) {
+        if (part.gmProgram != null && part.gmProgram >= 0 && part.gmProgram <= 127) {
           this.gmNote(at(start), n, duration, (n.velocity ?? 0.7) * 0.6, part.id, part.gmProgram, start)
-        } else this.sampleNote(at(start), n.midi, duration,
+        } else if (part.id === 'instrument-organ') this.organ(at(start), n, duration, (n.velocity ?? 0.7) * 0.28, part.id, start)
+        else this.sampleNote(at(start), n.midi, duration,
           (n.velocity ?? 0.7) * 0.6, this.bus(part.id), 0.018, 0.7, true, n, start)
       }
     }

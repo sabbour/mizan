@@ -2,7 +2,7 @@ import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 're
 import { AudioLines, Check, ChevronDown, Drum, Guitar, Headphones, KeyboardMusic, Mic, Music2, Pencil, Piano, Trash2, Volume2, VolumeX } from 'lucide-react'
 import type { Stem } from '../library/bridge'
 import type { Instrument, Track } from './song'
-import { GM_INSTRUMENTS, gmInstrumentName } from './gmInstruments'
+import { GM_CHOICES, GM_INSTRUMENTS } from './gmInstruments'
 
 const ICON: Record<Instrument, typeof Piano> = { piano: Piano, drums: Drum, chords: KeyboardMusic, vocals: Mic, other: Music2 }
 const stemId = (id: Stem['id']) => `stem:${id}`
@@ -232,9 +232,8 @@ export function TrackPicker({
                     <span className="track-text">
                       <span className="track-name">{track.name}</span>
                       <span className="track-detail">{track.detail}{track.instrument === 'other'
-                        ? track.id === 'instrument-organ' ? ' · organ synth'
-                          : track.gmProgram != null && track.gmProgram >= 0 && track.gmProgram <= 127
-                            ? ' · GM sample' : ' · piano preview'
+                        ? track.gmProgram != null && track.gmProgram >= 0 && track.gmProgram <= 127
+                          ? ' · GM sample' : track.id === 'instrument-organ' ? ' · organ synth' : ' · piano preview'
                         : track.instrument === 'vocals' ? ' · vowel synth, no lyrics' : ''}</span>
                     </span>
                     {selected && <Check aria-hidden="true" className="track-check" />}
@@ -340,8 +339,8 @@ export function TrackPicker({
               <select ref={instrumentSelect} value={instrumentDraft ?? ''} disabled={savingInstrument}
                 onChange={(event) => setInstrumentDraft(event.target.value === '' ? null : Number(event.target.value))}>
                 <option value="">Choose an instrument</option>
-                {GM_INSTRUMENTS.map((_, program) => (
-                  <option value={program} key={program}>{gmInstrumentName(program)}</option>
+                {GM_CHOICES.map(({ program, name }) => (
+                  <option value={program} key={program}>{name}</option>
                 ))}
               </select>
             </label>

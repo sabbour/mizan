@@ -29,8 +29,8 @@ try {
   assert.match(workspaceSource, /pianoGmTrack/, 'GM piano tracks use the keyboard practice route')
   assert.match(workspaceSource, /\.\.\.song,\s*piano: song\.instrumentNotes\?\.\[track\.id\]/,
     'the piano view gets only the selected part without changing the source song')
-  assert.match(workspaceSource, /const beat = engine\.read\(\)\.beat[\s\S]*instrumentChangeBeat\.current = beat/,
-    'instrument changes capture the exact playhead before engine refresh')
+  assert.match(workspaceSource, /engine\.updateSong\(song\)/,
+    'instrument changes update the existing transport rather than pausing or replacing it')
   assert.match(picker, /Note pitches, times, lengths, velocities, and the original recording stay unchanged/)
 
   const staleGuitarLabel = {

@@ -26,3 +26,19 @@ export function gmInstrumentName(program: number): string | null {
   const name = Number.isInteger(program) ? GM_INSTRUMENTS[program] : undefined
   return name ? name.split('_').filter(Boolean).map((word) => word[0].toUpperCase() + word.slice(1)).join(' ') : null
 }
+
+/** Exact source identities only; ambiguous labels such as "electric_guitar" remain previews. */
+export function detectedGmProgram(source: string | undefined): number | undefined {
+  if (!source) return undefined
+  if (/^program_\d+$/.test(source)) {
+    const program = Number(source.slice(8))
+    return program <= 127 ? program : undefined
+  }
+  if (source === 'clean_electric_guitar') return 27
+  const program = GM_INSTRUMENTS.findIndex((name) => name === source)
+  return program < 0 ? undefined : program
+}
+
+export const GM_CHOICES = GM_INSTRUMENTS.map((_, program) => ({
+  program, name: gmInstrumentName(program)!,
+})).sort((a, b) => a.name.localeCompare(b.name, 'en'))

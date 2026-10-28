@@ -4,6 +4,7 @@ export async function instrumentChecks() {
   const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js')
   const { Workspace } = await import('/src/workspace/Workspace.tsx')
   const { Engine } = await import('/src/workspace/engine.ts')
+  const { GM_CHOICES } = await import('/src/workspace/gmInstruments.ts')
   const { drumXml, instrumentXml } = await import('/src/workspace/musicxml.ts')
   const { buildSong } = await import('/src/workspace/song.ts')
   const { fromHost } = await import('/src/library/adapt.ts')
@@ -193,6 +194,12 @@ export async function instrumentChecks() {
     throw new Error(`${message}: ${container.textContent.slice(0, 600)}`)
   }
   const find = (label) => container.querySelector(`[aria-label="${label}"]`)
+  const originalUpdateSong = Engine.prototype.updateSong
+  let liveEngine
+  Engine.prototype.updateSong = function (next) {
+    if (next.title === 'Instrument correction regression') liveEngine = this
+    return originalUpdateSong.call(this, next)
+  }
   try {
     root.render(React.createElement(Workspace, {
       song, songId: 'generic-instrument-browser-check',
@@ -244,12 +251,94 @@ export async function instrumentChecks() {
     await until(() => container.querySelector('.track-menu'), 'Drum-only track menu opened')
     check([...container.querySelectorAll('.track-menu .track-name')].every((item) =>
       !/Chords|comping|Harmony|Vocals/.test(item.textContent)), 'No unsupported tonal or vocal parts in the drum-only menu')
-    return 'Generic instrument and drum-only score, creative-track gating and mixer checks passed'
+    let correctedSong = {
+      ...song, title: 'Instrument correction regression', bars: 16,
+      tracks: [{ id: 'flute', instrument: 'other', name: 'Flute', gmProgram: 73, detail: 'Draft notes' },
+        { id: 'violin', instrument: 'other', name: 'Violin', gmProgram: 40, detail: 'Draft notes' },
+        { id: 'kit', instrument: 'drums', name: 'Drum kit', detail: 'Draft hits' },
+        { id: 'empty', instrument: 'other', name: 'Empty part', gmProgram: 73, detail: 'No notes' }],
+      drums: [{ trackId: 'kit', lane: 'kick', startBeat: 3.5, velocity: 0.8 }],
+      instrumentNotes: { flute: [{ midi: 60, startBeat: 4.25, beats: 20, velocity: 0.7 }],
+        violin: [{ midi: 64, startBeat: 9.5, beats: 20, velocity: 0.7 }] },
+    }
+    const renderCorrection = () => root.render(React.createElement(Workspace, {
+      key: 'correction', song: correctedSong, songId: 'instrument-correction-browser-check',
+      onSaveInstrument: async (id, program) => {
+        correctedSong = { ...correctedSong, tracks: correctedSong.tracks.map((part) =>
+          part.id === id ? { ...part, gmProgram: program, name: GM_CHOICES.find((item) => item.program === program).name } : part) }
+        renderCorrection()
+      },
+    }))
+    renderCorrection()
+    await until(() => liveEngine && find('Go to first note'), 'First-note action mounted')
+    find('Go to first note').click()
+    check(liveEngine.read().beat === 4.25 && !liveEngine.playing, 'First-note action skips leading rests without autoplay')
+    container.querySelector('.track-button').click()
+    await until(() => find('Change Flute instrument'), 'Instrument editor available')
+    find('Change Flute instrument').click()
+    await until(() => container.querySelector('.track-instrument-field select'), 'Native instrument select appears')
+    const select = container.querySelector('.track-instrument-field select')
+    check(document.activeElement === select, 'Instrument select receives native keyboard focus')
+    const labels = [...select.options].slice(1).map((option) => option.textContent)
+    check(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b, 'en'))),
+      'Displayed instrument names are alphabetized')
+    select.value = '40'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(50)
+    container.querySelector('.track-instrument-actions button[type="submit"]').click()
+    await until(() => liveEngine.song.tracks[0].gmProgram === 40, 'Paused correction applied')
+    check(!liveEngine.playing && liveEngine.read().beat === 4.25, 'Paused correction retains its precise beat')
+    liveEngine.countIn = false
+    find('Play').click()
+    await until(() => liveEngine.read().playing && liveEngine.nodes.size > 0, 'Corrected instrument is sounding')
+    const incumbent = liveEngine
+    const beforeBeat = liveEngine.read().beat
+    const beforeRate = liveEngine.rate
+    container.querySelector('.track-button').click()
+    await until(() => find('Change Violin instrument'), 'Live editor available')
+    // Both parts are now named Violin: the first editor belongs to the viewed flute-ID part.
+    find('Change Violin instrument').click()
+    await until(() => container.querySelector('.track-instrument-field select'), 'Live select appears')
+    const liveSelect = container.querySelector('.track-instrument-field select')
+    liveSelect.value = '73'
+    liveSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(50)
+    container.querySelector('.track-instrument-actions button[type="submit"]').click()
+    await until(() => liveEngine.song.tracks[0].gmProgram === 73, 'Live correction applied')
+    check(liveEngine === incumbent && liveEngine.playing && liveEngine.read().beat >= beforeBeat &&
+      liveEngine.rate === beforeRate, 'Live correction keeps the same running clock and speed')
+    find('Go to first note').click()
+    check(liveEngine.playing && Math.abs(liveEngine.read().beat - 4.25) < 0.1, 'First-note seek preserves active playback')
+    liveEngine.pause()
+    container.querySelector('.track-button').click()
+    await until(() => container.querySelector('.track-menu'), 'Part picker reopened')
+    const violinChoice = [...container.querySelectorAll('[role="menuitemradio"]')].find((item) =>
+      item.querySelector('.track-name')?.textContent === 'Violin')
+    violinChoice.click()
+    await wait(100)
+    find('Go to first note').click()
+    check(liveEngine.read().beat === 9.5 && !liveEngine.playing, 'First note follows the currently viewed part')
+    container.querySelector('.track-button').click()
+    await until(() => container.querySelector('.track-menu'), 'Drum part picker opens')
+    ;[...container.querySelectorAll('[role="menuitemradio"]')].find((item) =>
+      item.querySelector('.track-name')?.textContent === 'Drum kit').click()
+    await wait(100)
+    find('Go to first note').click()
+    check(liveEngine.read().beat === 3.5 && !liveEngine.playing, 'Drum first-note seek uses the hit beat without autoplay')
+    container.querySelector('.track-button').click()
+    await until(() => container.querySelector('.track-menu'), 'Empty part picker opens')
+    ;[...container.querySelectorAll('[role="menuitemradio"]')].find((item) =>
+      item.querySelector('.track-name')?.textContent === 'Empty part').click()
+    await wait(100)
+    check(find('Go to first note').disabled, 'An empty part disables the first-note action')
+    return 'Instrument scores, alphabetical editor, continuous corrections and first-playable-note controls passed'
   } finally {
+    Engine.prototype.updateSong = originalUpdateSong
     root.unmount()
     container.remove()
     engine.dispose()
     localStorage.removeItem('mizan:mixer:generic-instrument-browser-check')
     localStorage.removeItem('mizan:mixer:drum-only-browser-check')
+    localStorage.removeItem('mizan:mixer:instrument-correction-browser-check')
   }
 }

@@ -357,6 +357,26 @@ def test_guitar_program_survives_midi_and_musicxml_import_export(tmp_path):
     assert root.findtext(".//midi-program") == "26"
 
 
+@pytest.mark.parametrize("source,program", [
+    ("violin", 40), ("flute", 73), ("electric_piano_1", 4), ("program_0", 0), ("program_127", 127),
+])
+def test_known_transcribed_identity_keeps_gm_program_in_exports(tmp_path, source, program):
+    assert detected_gm_program(source) == program
+    track = {"id": "detected-part", "instrument": "other", "name": source,
+             "group": "detected", "sourceInstrument": source}
+    song = {"bpm": 120, "beatsPerBar": 4, "bars": 1, "tracks": [track],
+            "instrumentNotes": {track["id"]: [
+                {"midi": 60, "startBeat": 0.5, "beats": 1, "velocity": 0.7},
+            ]}}
+    midi_path = tmp_path / "detected.mid"
+    export_midi(song, midi_path)
+    assert next(message.program for part in mido.MidiFile(midi_path).tracks
+                for message in part if message.type == "program_change") == program
+    xml_path = tmp_path / "detected.musicxml"
+    export_musicxml(song, xml_path)
+    assert ET.parse(xml_path).findtext(".//midi-program") == str(program + 1)
+
+
 @pytest.mark.parametrize("legacy_program", ["missing", None, 27])
 def test_known_detected_guitar_program_exports_without_unknown_detected_parts(tmp_path, legacy_program):
     assert detected_gm_program("clean_electric_guitar") == 27
@@ -370,7 +390,7 @@ def test_known_detected_guitar_program_exports_without_unknown_detected_parts(tm
     original_track = guitar.copy()
     unknown = {
         "id": "instrument-violin", "instrument": "other", "name": "Violin",
-        "detail": "Draft notes", "group": "detected", "sourceInstrument": "violin",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "unidentified_strings",
     }
     song = {
         "bpm": 120, "beatsPerBar": 4, "bars": 1, "tracks": [guitar, unknown],
@@ -417,7 +437,7 @@ def test_deleting_scores_keeps_legacy_guitar_exports_and_recording_in_temporary_
     original_track = guitar.copy()
     unknown = {
         "id": "instrument-violin", "instrument": "other", "name": "Violin",
-        "detail": "Draft notes", "group": "detected", "sourceInstrument": "violin",
+        "detail": "Draft notes", "group": "detected", "sourceInstrument": "unidentified_strings",
     }
     drums = {"id": "drums", "instrument": "drums", "name": "Drum kit", "detail": "Draft hits"}
     song = {

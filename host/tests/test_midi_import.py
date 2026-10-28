@@ -8,7 +8,7 @@ import pytest
 from mizan.api import Api
 from mizan.engine.output import export_midi, tempo_changes
 from mizan.errors import InvalidFile
-from mizan.imports import notes_to_song, parse_midi
+from mizan.imports import notes_to_song, parse_midi, parse_musicxml
 from mizan.jobs import JobRunner, JobStore
 from mizan.library import LibraryStore
 from mizan.meter import time_at_beat
@@ -50,7 +50,7 @@ def test_mixed_channels_keep_percussion_and_instrument_programs(format, tmp_path
     assert song["drums"][0]["sourceMidi"] == 53
     assert song["drums"][0]["velocity"] == pytest.approx(110 / 127, abs=0.0001)
     programs = {track["gmProgram"]: track for track in song["tracks"] if "gmProgram" in track}
-    assert set(programs) == {21, 24}
+    assert set(programs) == {0, 21, 24}
     assert [song["instrumentNotes"][programs[p]["id"]][0]["midi"] for p in (21, 24)] == [64, 67]
     assert len({track["id"] for track in song["tracks"]}) == 4
     exported = tmp_path / "mixed.mid"
@@ -58,7 +58,7 @@ def test_mixed_channels_keep_percussion_and_instrument_programs(format, tmp_path
     reopened = song_from_midi(exported.read_bytes())
     assert len(reopened["piano"]) == 1 and len(reopened["drums"]) == 1
     assert reopened["drums"][0]["sourceMidi"] == 53
-    assert {track.get("gmProgram") for track in reopened["tracks"]} == {None, 21, 24}
+    assert {track.get("gmProgram") for track in reopened["tracks"]} == {None, 0, 21, 24}
 
 
 @pytest.mark.parametrize("program", range(16, 24))
@@ -72,6 +72,35 @@ def test_organ_and_accordion_programs_are_not_piano(program):
     assert song["tracks"][0]["instrument"] == "other"
     assert song["tracks"][0]["gmProgram"] == program
     assert len(song["instrumentNotes"][song["tracks"][0]["id"]]) == 1
+
+
+@pytest.mark.parametrize("program", [0, 1, 4, 6, 7, 40, 73, 127])
+def test_pitched_program_identity_survives_import_and_export(program, tmp_path):
+    song = song_from_midi(midi_bytes([
+        mido.Message("program_change", program=program),
+        mido.Message("note_on", note=60, velocity=90),
+        mido.Message("note_off", note=60, time=480),
+    ]))
+    assert song["tracks"][0]["gmProgram"] == program
+    assert song["tracks"][0]["instrument"] == ("piano" if program == 0 else "other")
+    target = tmp_path / "program.mid"
+    export_midi(song, target)
+    reopened = song_from_midi(target.read_bytes())
+    assert reopened["tracks"][0]["gmProgram"] == program
+
+
+@pytest.mark.parametrize("program", [0, 4, 7, 40, 73, 127])
+def test_musicxml_program_boundary_keeps_each_timbre(program):
+    xml = f"""<score-partwise version="4.0"><part-list><score-part id="P1">
+      <part-name>Imported part</part-name><midi-instrument id="I1">
+      <midi-channel>1</midi-channel><midi-program>{program + 1}</midi-program>
+      </midi-instrument></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration></note>
+      </measure></part></score-partwise>"""
+    _, bpm, bpb, unit, parts = parse_musicxml(xml.encode(), ".musicxml")
+    song = notes_to_song("Program", "musicxml", bpm, bpb, unit, parts)
+    assert song["tracks"][0]["gmProgram"] == program
 
 
 def changing_tempo_midi():

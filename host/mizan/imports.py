@@ -22,7 +22,7 @@ from .meter import build_bar_map, signature_beats, time_at_beat, validate_bar_ma
 from .paths import app_dir
 
 PIANO_PROGRAMS = set(range(0, 8))
-SOUNDFONT_PROGRAMS = set(range(128)) - PIANO_PROGRAMS
+SOUNDFONT_PROGRAMS = set(range(1, 128))
 GUITAR_NAMES = ("Acoustic Nylon", "Acoustic Steel", "Electric Jazz",
                 "Electric Clean", "Electric Muted", "Overdriven", "Distortion", "Guitar Harmonics")
 
@@ -242,7 +242,7 @@ def parse_musicxml(data: bytes, suffix: str) -> tuple[str | None, float, float, 
                     program = int(_text(score_part, ["midi-instrument", "midi-program"], "0")) - 1
                 except (TypeError, ValueError) as exc:
                     raise InvalidFile("The MusicXML instrument program is invalid.") from exc
-                if program in SOUNDFONT_PROGRAMS:
+                if 0 <= program <= 127:
                     programs[score_part.attrib.get("id")] = program
     bpm, beats_per_bar, beat_unit, parts = 120.0, 4.0, 4, []
     score_bars = None
@@ -377,7 +377,8 @@ def notes_to_song(title: str, source: str, bpm: float, beats_per_bar: float,
             tracks.append({"id": track_id, "instrument": "other" if soundfont else "piano",
                            "name": part["name"], "detail": "Imported MIDI instrument" if soundfont
                            else "Imported pitched part",
-                           **({"gmProgram": part["gmProgram"]} if soundfont else {})})
+                           **({"gmProgram": part["gmProgram"]} if "gmProgram" in part
+                              else {"gmProgram": 0})})
             for note in part["notes"]:
                 event = {"trackId": track_id, "midi": note["midi"], "startBeat": round(note["startBeat"], 6),
                          "beats": round(note["beats"], 6),

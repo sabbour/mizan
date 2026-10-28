@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CaseUpper, Hand, Hash, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, Timer } from 'lucide-react'
+import { CaseUpper, Hand, Hash, Metronome, Minus, Pause, Play, Plus, Repeat, SkipBack, SkipForward, StepForward, Timer } from 'lucide-react'
 
 type Props = {
   playing: boolean
@@ -15,6 +15,7 @@ type Props = {
   /** Sticking letters and hand colours; null when the current track is not drums. */
   sticking: boolean | null
   onPlay: () => void
+  onFirstNote?: () => void
   onStep: (delta: number) => void
   onRate: (rate: number) => void
   onLoop: () => void
@@ -98,6 +99,10 @@ export function Transport(p: Props) {
       </form>
 
       <div className="transport-main">
+        <button type="button" className="icon-button" onClick={p.onFirstNote} disabled={!p.onFirstNote}
+          aria-label="Go to first note" title="Go to first note">
+          <StepForward aria-hidden="true" />
+        </button>
         <button type="button" className="icon-button" onClick={() => p.onStep(-1)} aria-label="Previous bar" title="Previous bar (←)">
           <SkipBack aria-hidden="true" />
         </button>
