@@ -3,49 +3,51 @@
 # Mizan
 
 Mizan (ميزان, pronounced **mee-ZAHN**) means *balance* or *scale* in Arabic.
-It is a Windows desktop app for turning music recordings and scores into
-material musicians can study and practise.
+It is a Windows desktop app for music transcription and practice, with tools
+for piano, guitar, bass, and drums.
 
-Mizan can analyze a recording into draft notes and separated audio parts, or
-open MIDI and MusicXML scores. Musicians can review parts in score and
-instrument workspaces, slow down and loop playback, and export MIDI or
-MusicXML. The app also includes original guitar and bass studies.
+Start with a YouTube link, import a MIDI or MusicXML file, or work through
+the built-in lessons without transcribing anything.
 
-Audio processing runs locally by default. An optional cloud worker can run in Azure, Google Cloud, and Amazon Web Services.
+- **Transcription and audio separation.** Turn a recording into draft
+  instrument parts and separate audio tracks.
+- **Local or cloud processing.** Run transcription on your machine, or use a
+  GPU worker in your own Azure, Google Cloud, or Amazon Web Services account.
+  Local processing is the default.
+- **Interactive notation.** Follow synchronized sheet music, guitar and bass
+  tablature, and chord charts during playback.
+- **Instrument views.** See animated piano, guitar, bass, and drums with hand
+  and fingering guides. The 3D piano has perspective and remembered overhead
+  views, with independently toggleable animated hands.
+- **Practice controls.** Slow down playback, loop sections, jump between bars,
+  and use a metronome and count-in. Toggle note names, fingering, and drum
+  sticking.
+- **A mixer for practising parts.** Solo or mute individual tracks, adjust
+  their volume, and switch between the original recording, separated audio
+  tracks, and synthesized notes.
+- **Built-in lessons for drums, piano, guitar, and bass.** Work through
+  progressive exercises, genre-based studies, and original artist-inspired
+  exercises. Practise drum rudiments, coordination, grooves, fills, scales,
+  piano chord progressions, and instrument-specific techniques. Lessons include
+  practice guidance and starting and target tempos, with backing accompaniment
+  where provided.
+- **Music discovery.** Search YouTube and public MIDI sources from the app,
+  or browse popular music.
+- **Library organization.** Keep songs and scores in folders, revisit saved
+  analyses, and rerun transcription with a different model.
+- **MIDI and MusicXML import and export.** Bring in existing scores or take
+  your results into another music tool.
 
-## Screenshots
+Transcription is a starting point, not a finished arrangement. It can miss
+notes or identify parts incorrectly. You can also practise existing scores or
+the included lessons without running transcription.
 
-![Library with original demo studies](docs/media/mizan-library.png)
+## See Mizan in action
 
-![Progress while analyzing generated demo audio](docs/media/mizan-analysis.png)
+A 2-minute, 42-second tour of the library, instruments, practice tools, and
+lessons.
 
-![Score workspace for an original generated study](docs/media/mizan-score.png)
-
-![Drum-kit practice workspace with hands](docs/media/mizan-drums-practice.png)
-
-![Piano practice workspace with hand assignment](docs/media/mizan-piano-practice.png)
-
-![Guitar tab and 3D hand view](docs/media/mizan-guitar-practice.png)
-
-## Hands in practice
-
-These short demos pair the app's practice views with original, computer-
-generated exercises.
-
-**Drums — generated eight-bar groove with score, variations, and fills (17 seconds)**
-
-https://github.com/user-attachments/assets/8ce4c738-b1eb-49d3-9959-74391cbbd8fe
-
-**Piano — generated melody with changing left-hand accompaniment (18 seconds)**
-
-https://github.com/user-attachments/assets/24523ebb-e5d3-4a17-a8a1-3079b9195c37
-
-The 3D piano includes a remembered overhead view with independently toggleable
-animated hands, alongside the existing perspective and synchronized score.
-
-**Guitar — generated study moving across frets 2 to 12 (12 seconds)**
-
-https://github.com/user-attachments/assets/51b33939-686d-4c37-9be4-a1e8f5fe1145
+https://github.com/user-attachments/assets/6b7432c8-faf3-448d-bed5-09ea26636bf3
 
 ## Architecture
 
@@ -54,13 +56,10 @@ Python host manages the library, processing jobs, and artifact server. Local
 processing is the default; cloud jobs use a GPU worker in an account you
 control.
 
-![Mizan desktop architecture](docs/architecture.png)
-
-The [engine flow](docs/engine-pipeline.png) and
-[model readiness](docs/engine-model-readiness.png) diagrams describe local
-processing and model checks.
-
-![Cloud job flow](docs/cloud-architecture.png)
+See the [desktop architecture](docs/architecture.png),
+[engine flow](docs/engine-pipeline.png),
+[model readiness](docs/engine-model-readiness.png), and
+[cloud job flow](docs/cloud-architecture.png) diagrams for details.
 
 See [cloud processing notes](docs/cloud-setup.md) for details about providers,
 privacy, and costs.
