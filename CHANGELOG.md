@@ -4,6 +4,7 @@
 
 ### Patch Changes
 
+- Preserve General MIDI instrument sounds instead of defaulting supported tracks to piano, alphabetize instrument options, keep playback position and state during instrument changes, and jump to the first playable note.
 - Improve piano hand allocation for held accompaniment chords while preserving upper melody notes. Constrain finger assignments and hand movement to avoid unsupported non-thumb crossings and held-contact reach violations, while retaining legitimate thumb-under transitions.
 
 ## 0.3.2
