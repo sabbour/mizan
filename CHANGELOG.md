@@ -1,5 +1,11 @@
 # mizan
 
+## 0.3.3
+
+### Patch Changes
+
+- Improve piano hand allocation for held accompaniment chords while preserving upper melody notes. Constrain finger assignments and hand movement to avoid unsupported non-thumb crossings and held-contact reach violations, while retaining legitimate thumb-under transitions.
+
 ## 0.3.2
 
 ### Patch Changes
