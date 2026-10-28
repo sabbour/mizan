@@ -44,7 +44,7 @@ the included lessons without running transcription.
 
 ## See Mizan in action
 
-A 2-minute, 42-second tour of the library, instruments, practice tools, and
+A tour of the library, instruments, practice tools, and
 lessons.
 
 https://github.com/user-attachments/assets/6b7432c8-faf3-448d-bed5-09ea26636bf3
