@@ -208,15 +208,119 @@ def test_credential_accepts_default_chain_but_excludes_interactive_providers(mon
 
 
 def test_credential_failure_does_not_claim_user_is_signed_out(monkeypatch):
-    class SlowCredential:
+    class FailedCredential:
         def get_token(self, scope, **kwargs):
             raise TimeoutError("Private Azure provider details")
 
-    monkeypatch.setattr(cloud_auth, "_credential", SlowCredential())
+    retry_calls = []
+    def retry_credential():
+        retry_calls.append(True)
+        return FailedCredential()
+
+    monkeypatch.setattr(cloud_auth, "_credential", FailedCredential())
+    monkeypatch.setattr(cloud_auth, "_tokens", {})
+    monkeypatch.setattr(cloud_auth, "_new_credential", retry_credential)
     with pytest.raises(cloud_auth.AzureSignInError, match="Azure token request failed") as failure:
         cloud_auth.token(cloud_auth.ARM_SCOPE)
     assert "Private Azure provider details" not in str(failure.value)
+    assert len(retry_calls) == 1
+
+
+def test_pinned_credential_failure_retries_with_fresh_chain(monkeypatch):
+    from types import SimpleNamespace
+
+    tenant = CONFIG["tenantId"]
+    oid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    payload = {"tid": tenant, "oid": oid, "scp": "user_impersonation",
+               "exp": int(time.time()) + 3600}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    access = f"header.{encoded}.signature"
+
+    class FailedCredential:
+        calls = 0
+
+        def get_token(self, scope, **kwargs):
+            self.calls += 1
+            assert scope == cloud_auth.ARM_SCOPE and kwargs["tenant_id"] == tenant
+            raise TimeoutError("Private Azure provider details")
+
+    class ReplacementCredential:
+        calls = 0
+
+        def get_token(self, scope, **kwargs):
+            self.calls += 1
+            assert scope == cloud_auth.ARM_SCOPE and kwargs["tenant_id"] == tenant
+            return SimpleNamespace(token=access)
+
+    original = FailedCredential()
+    replacement = ReplacementCredential()
+    factory_calls = []
+    monkeypatch.setattr(cloud_auth, "_credential", original)
+    monkeypatch.setattr(cloud_auth, "_tokens", {("stale", tenant): ("stale", float("inf"))})
+    monkeypatch.setattr(cloud_auth, "_new_credential",
+                        lambda: factory_calls.append(True) or replacement)
+
+    assert cloud_auth.token(cloud_auth.ARM_SCOPE, tenant, oid) == access
+    assert original.calls == replacement.calls == 1
+    assert factory_calls == [True]
+    assert cloud_auth._credential is replacement
+    assert ("stale", tenant) not in cloud_auth._tokens
+
+
+def test_new_credential_failure_does_not_retry_again(monkeypatch):
+    class FailedCredential:
+        calls = 0
+
+        def get_token(self, scope, **kwargs):
+            self.calls += 1
+            raise TimeoutError("Private Azure provider details")
+
+    credential = FailedCredential()
+    factory_calls = []
     monkeypatch.setattr(cloud_auth, "_credential", None)
+    monkeypatch.setattr(cloud_auth, "_tokens", {})
+    monkeypatch.setattr(cloud_auth, "_new_credential",
+                        lambda: factory_calls.append(True) or credential)
+
+    with pytest.raises(cloud_auth.AzureSignInError, match="Azure token request failed"):
+        cloud_auth.token(cloud_auth.ARM_SCOPE)
+    assert credential.calls == 1
+    assert factory_calls == [True]
+
+
+@pytest.mark.parametrize(
+    ("token_tenant", "token_oid", "message"),
+    [
+        ("22222222-2222-2222-2222-222222222222",
+         "dddddddd-dddd-dddd-dddd-dddddddddddd", "selected subscription tenant"),
+        (CONFIG["tenantId"],
+         "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", "credentials changed"),
+    ],
+)
+def test_retried_credential_still_checks_identity(monkeypatch, token_tenant, token_oid, message):
+    from types import SimpleNamespace
+
+    payload = {"tid": token_tenant, "oid": token_oid, "scp": "user_impersonation",
+               "exp": int(time.time()) + 3600}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    access = f"header.{encoded}.signature"
+
+    class FailedCredential:
+        def get_token(self, scope, **kwargs):
+            raise TimeoutError("Private Azure provider details")
+
+    class ReplacementCredential:
+        def get_token(self, scope, **kwargs):
+            return SimpleNamespace(token=access)
+
+    tenant = CONFIG["tenantId"]
+    monkeypatch.setattr(cloud_auth, "_credential", FailedCredential())
+    monkeypatch.setattr(cloud_auth, "_tokens", {})
+    monkeypatch.setattr(cloud_auth, "_new_credential", ReplacementCredential)
+
+    with pytest.raises(cloud_auth.AzureSignInError, match=message):
+        cloud_auth.token(cloud_auth.ARM_SCOPE, tenant, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+    assert (cloud_auth.ARM_SCOPE, tenant) not in cloud_auth._tokens
 
 
 def test_azure_cli_token_reused_until_expiry_without_skipping_identity_check(monkeypatch):
