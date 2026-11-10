@@ -666,7 +666,7 @@
   },
   {
     "name": "anyio",
-    "version": "4.15.1",
+    "version": "4.16.0",
     "license": "MIT",
     "author": "Copyright (c) 2018 Alex Gr\u00f6nholm",
     "url": "https://anyio.readthedocs.io/en/stable/versionhistory.html",
@@ -730,7 +730,7 @@
   },
   {
     "name": "certifi",
-    "version": "2026.10.19",
+    "version": "2026.10.23",
     "license": "Mozilla Public License 2.0 (MPL 2.0)",
     "author": "Project contributors",
     "url": "https://github.com/certifi/python-certifi",
@@ -794,10 +794,10 @@
   },
   {
     "name": "filelock",
-    "version": "4.2.4",
+    "version": "4.2.7",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
-    "url": "https://github.com/tox-dev/py-filelock",
+    "url": "https://github.com/tox-dev/filelock",
     "group": "Host/engine libraries"
   },
   {
@@ -834,7 +834,7 @@
   },
   {
     "name": "hf-xet",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "license": "Apache-2.0",
     "author": "copyright notice that is included in or attached to the work",
     "url": "https://github.com/huggingface/xet-core",
@@ -994,7 +994,7 @@
   },
   {
     "name": "pyasn1",
-    "version": "0.6.4",
+    "version": "0.6.5",
     "license": "BSD-2-Clause",
     "author": "Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com>",
     "url": "https://github.com/pyasn1/pyasn1",
@@ -1010,7 +1010,7 @@
   },
   {
     "name": "pycparser",
-    "version": "3.11",
+    "version": "3.12",
     "license": "BSD-3-Clause",
     "author": "Copyright (c) 2008-2027, Eli Bendersky",
     "url": "https://github.com/eliben/pycparser",

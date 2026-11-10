@@ -98,7 +98,7 @@ Development and probe-only packages installed in the venv are excluded.
 
 | Name | Version | License | Copyright holder | Source |
 |---|---|---|---|---|
-| anyio | 4.15.1 | [MIT](licenses/host-anyio.txt) | Copyright (c) 2018 Alex Grönholm | https://anyio.readthedocs.io/en/stable/versionhistory.html |
+| anyio | 4.16.0 | [MIT](licenses/host-anyio.txt) | Copyright (c) 2018 Alex Grönholm | https://anyio.readthedocs.io/en/stable/versionhistory.html |
 | azure-containerregistry | 1.2.0 | [MIT](licenses/host-azure-containerregistry.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
 | azure-core | 1.41.0 | [MIT](licenses/host-azure-core.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/core/azure-core |
 | azure-identity | 1.27.0 | [MIT](licenses/host-azure-identity.txt) | Copyright (c) Microsoft Corporation. | https://github.com/Azure/azure-sdk-for-python |
@@ -106,7 +106,7 @@ Development and probe-only packages installed in the venv are excluded.
 | botocore | 1.40.76 | [Apache-2.0](licenses/host-botocore.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/botocore |
 | bottle | 0.13.4 | [MIT](licenses/host-bottle.txt) | Copyright (c) 2009-2024, Marcel Hellkamp. | http://bottlepy.org/ |
 | cachetools | 6.2.6 | [MIT](licenses/host-cachetools.txt) | Copyright (c) 2014-2026 Thomas Kemmer | https://github.com/tkem/cachetools/ |
-| certifi | 2026.10.19 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
+| certifi | 2026.10.23 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
 | cffi | 2.1.1 | [MIT-0](licenses/host-cffi.txt) | Copyright Armin Rigo and contributors | https://cffi.readthedocs.io/en/latest/whatsnew.html |
 | charset-normalizer | 3.5.2 | [MIT](licenses/host-charset-normalizer.txt) | Copyright (c) 2025 TAHRI Ahmed R. | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
 | click | 8.5.0 | [BSD-3-Clause](licenses/host-click.txt) | Copyright 2014 Pallets | https://github.com/pallets/click/ |
@@ -114,12 +114,12 @@ Development and probe-only packages installed in the venv are excluded.
 | colorama | 0.4.6 | [BSD-3-Clause](licenses/host-colorama.txt) | Copyright (c) 2010 Jonathan Hartley | https://github.com/tartley/colorama |
 | cryptography | 46.0.3 | [Apache-2.0 OR BSD-3-Clause](licenses/host-cryptography.txt) | Project contributors | https://github.com/pyca/cryptography |
 | einops | 0.8.2 | [MIT](licenses/host-einops.txt) | Copyright (c) 2018 Alex Rogozhnikov | https://github.com/arogozhnikov/einops |
-| filelock | 4.2.4 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/py-filelock |
+| filelock | 4.2.7 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/filelock |
 | flatbuffers | 25.12.19 | [Apache-2.0](licenses/host-flatbuffers.txt) | Copyright Google LLC | https://google.github.io/flatbuffers/ |
 | fsspec | 2026.9.0 | [BSD-3-Clause](licenses/host-fsspec.txt) | Copyright (c) 2018, Martin Durant | https://github.com/fsspec/filesystem_spec |
 | google-auth | 2.41.1 | [Apache-2.0](licenses/host-google-auth.txt) | copyright notice that is included in or attached to the work | https://github.com/googleapis/google-auth-library-python |
 | h11 | 0.16.0 | [MIT](licenses/host-h11.txt) | Copyright (c) 2016 Nathaniel J. Smith <njs@pobox.com> and other contributors | https://github.com/python-hyper/h11 |
-| hf-xet | 1.7.0 | [Apache-2.0](licenses/host-hf-xet.txt) | copyright notice that is included in or attached to the work | https://github.com/huggingface/xet-core |
+| hf-xet | 1.8.0 | [Apache-2.0](licenses/host-hf-xet.txt) | copyright notice that is included in or attached to the work | https://github.com/huggingface/xet-core |
 | httpcore | 1.0.9 | [BSD-3-Clause](licenses/host-httpcore.txt) | Copyright © 2020, [Encode OSS Ltd](https://www.encode.io/). | https://www.encode.io/httpcore/ |
 | httpx | 0.28.1 | [BSD-3-Clause](licenses/host-httpx.txt) | Copyright © 2019, [Encode OSS Ltd](https://www.encode.io/). | https://github.com/encode/httpx |
 | huggingface_hub | 1.32.0 | [Apache-2.0](licenses/host-huggingface-hub.txt) | copyright notice that is included in or attached to the work | https://github.com/huggingface/huggingface_hub |
@@ -139,9 +139,9 @@ Development and probe-only packages installed in the venv are excluded.
 | packaging | 26.3 | [Apache-2.0 OR BSD-2-Clause](licenses/host-packaging.txt) | Python Packaging Authority and contributors | https://github.com/pypa/packaging |
 | protobuf | 7.36.2 | [BSD-3-Clause](licenses/host-protobuf.txt) | Copyright 2008 Google Inc.  All rights reserved. | https://developers.google.com/protocol-buffers/ |
 | proxy_tools | 0.1.0 | [BSD-2-Clause](licenses/host-proxy-tools.txt) | Copyright (c) 2013 Armin Ronacher; Copyright (c) 2014 Jonathan Tushman | http://github.com/jtushman/proxy_tools |
-| pyasn1 | 0.6.4 | [BSD-2-Clause](licenses/host-pyasn1.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1 |
+| pyasn1 | 0.6.5 | [BSD-2-Clause](licenses/host-pyasn1.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1 |
 | pyasn1_modules | 0.4.2 | [BSD-3-Clause](licenses/host-pyasn1-modules.txt) | Copyright (c) 2005-2020, Ilya Etingof <etingof@gmail.com> | https://github.com/pyasn1/pyasn1-modules |
-| pycparser | 3.11 | [BSD-3-Clause](licenses/host-pycparser.txt) | Copyright (c) 2008-2027, Eli Bendersky | https://github.com/eliben/pycparser |
+| pycparser | 3.12 | [BSD-3-Clause](licenses/host-pycparser.txt) | Copyright (c) 2008-2027, Eli Bendersky | https://github.com/eliben/pycparser |
 | PyJWT | 2.15.1 | [MIT](licenses/host-pyjwt.txt) | Copyright (c) 2015-2022 José Padilla | https://github.com/jpadilla/pyjwt |
 | python-dateutil | 2.9.0.post0 | [Apache Software License; BSD License](licenses/host-python-dateutil.txt) | Copyright 2017- Paul Ganssle <paul@ganssle.io> | https://github.com/dateutil/dateutil |
 | pythonnet | 3.2.1 | [MIT](licenses/host-pythonnet.txt) | Copyright (c) 2006-2021 the contributors of the Python.NET project | https://pythonnet.github.io/ |
