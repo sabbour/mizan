@@ -1,5 +1,13 @@
 # mizan
 
+## 0.3.4
+
+Mizan now rebuilds a reused Azure credential chain and retries once for the same scope and tenant if the chain cannot get a token. This may recover from a stale credential; it does not fix other Azure sign-in or connectivity failures.
+
+### Patch Changes
+
+- Refresh Azure credentials once when the cached credential chain cannot get the requested token.
+
 ## 0.3.3
 
 ### Patch Changes
