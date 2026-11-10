@@ -29,24 +29,43 @@ def claims(access: str) -> dict:
         raise AzureSignInError("Azure returned no signed-in identity; check Azure credentials.") from exc
 
 
+def _new_credential():
+    from azure.identity import DefaultAzureCredential
+    return DefaultAzureCredential(
+        exclude_interactive_browser_credential=True,
+        exclude_visual_studio_code_credential=True,
+        additionally_allowed_tenants=["*"],
+        process_timeout=30,
+    )
+
+
 def token(scope: str, tenant_id: str | None = None, expected_oid: str | None = None) -> str:
     global _credential
     try:
         with _token_lock:
+            reused_credential = _credential is not None
             if _credential is None:
-                from azure.identity import DefaultAzureCredential
-                _credential = DefaultAzureCredential(
-                    exclude_interactive_browser_credential=True,
-                    exclude_visual_studio_code_credential=True,
-                    additionally_allowed_tenants=["*"],
-                    process_timeout=30,
-                )
+                _credential = _new_credential()
                 _tokens.clear()
             key = (scope, tenant_id)
             cached = _tokens.get(key)
             cached_valid = bool(cached and cached[1] > time.monotonic())
-            access = cached[0] if cached_valid else (
-                _credential.get_token(scope, **({"tenant_id": tenant_id} if tenant_id else {})).token)
+            if cached_valid:
+                access = cached[0]
+            else:
+                try:
+                    access = _credential.get_token(
+                        scope, **({"tenant_id": tenant_id} if tenant_id else {})).token
+                except AzureSignInError:
+                    raise
+                except Exception:
+                    if not reused_credential:
+                        raise
+                    _credential = None
+                    _tokens.clear()
+                    _credential = _new_credential()
+                    access = _credential.get_token(
+                        scope, **({"tenant_id": tenant_id} if tenant_id else {})).token
             identity = claims(access)
             if tenant_id and identity.get("tid", "").lower() != tenant_id.lower():
                 raise AzureSignInError("Azure credentials do not belong to the selected subscription tenant.")
