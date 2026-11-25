@@ -63,6 +63,7 @@ function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = 
     setFfmpegPath: async (path) => ({
       configuredPath: path || null, effectivePath: path || 'ffmpeg', available: true, issue: null,
     }),
+    youtubeAuthStatus: async () => ({ signedIn: false, source: null }),
     hfTokenStatus: async () => true, modelPreflight: async () => ({}),
     modelDownloadStatus: async () => ({}), resourceUsage: async () => null,
     cloudProviders: async () => ({ providers: [
@@ -166,7 +167,7 @@ function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = 
         if (specifier === '../course/curriculum') return { LESSONS: [] }
         if (specifier === '../course/piano') return { PIANO_LESSONS: [] }
         if (specifier === '../course/pianoInspired') return { PIANO_INSPIRED: [] }
-        if (specifier === '../course/fretted') return { FRETTED_LESSONS: [] }
+        if (specifier === '../course/fretted') return { FRETTED_BROWSE_LESSONS: [] }
         if (specifier === './CloudSetup') return loadCloudSetup
           ? load('CloudSetup.tsx') : { CloudSetup: 'cloud-setup' }
         if (specifier.endsWith('.css')) return {}
@@ -211,6 +212,8 @@ function harness(overrides = {}, { loadCloudSetup = false, gettingStartedSeen = 
 const libraryProps = {
   jobs: [], version: 0, onQueueChange() {}, onOpen() {}, onDetails() {}, onCredits() {},
   tab: 'catalog', onTab() {},
+  releaseUpdate: { result: null, checking: false, statusMessage: null, showNotification: false },
+  onCheckReleaseUpdates() {},
 }
 const cloudReady = { mode: 'cloud', configured: true, available: true,
   supportedModels: ['muscriptor-small', 'muscriptor-medium', 'muscriptor-large'] }
@@ -519,8 +522,8 @@ test('FFmpeg settings show the effective path and protect drafts during file bro
   const view = h.render(h.load('Library.tsx').Library, libraryProps)
   openSettings(view, 'Audio support')
   await view.settle()
-  assert.ok(button(view.tree, 'Retry status check'), 'A failed status request offers a retry')
-  button(view.tree, 'Retry status check').props.onClick()
+  assert.ok(button(view.tree, 'Check again'), 'A failed status request offers a retry')
+  button(view.tree, 'Check again').props.onClick()
   await view.settle()
   assert.equal(nodes(view.tree, (node) => node.props?.id === 'ffmpeg-path')[0].props.value,
     current.effectivePath, 'Retry fills the field with the detected executable')
