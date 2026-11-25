@@ -9,90 +9,29 @@ Development and probe-only packages installed in the venv are excluded.
 
 | Name | Version | License | Copyright holder | Source |
 |---|---|---|---|---|
-| @isaacs/fs-minipass | 4.0.1 | [ISC](licenses/ui-isaacs-fs-minipass.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/fs-minipass |
 | @types/vexflow | 1.2.42 | [MIT](licenses/ui-types-vexflow.txt) | Copyright (c) Microsoft Corporation. | https://github.com/DefinitelyTyped/DefinitelyTyped |
-| abbrev | 4.0.0 | [ISC](licenses/ui-abbrev.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/abbrev-js |
-| base64-js | 1.5.1 | [MIT](licenses/ui-base64-js.txt) | Copyright (c) 2014 Jameson Little | https://github.com/beatgammit/base64-js |
-| bindings | 1.5.0 | [MIT](licenses/ui-bindings.txt) | Copyright (c) 2012 Nathan Rajlich &lt;nathan@tootallnate.net&gt; | https://github.com/TooTallNate/node-bindings |
-| bit-twiddle | 1.0.2 | [MIT](licenses/ui-bit-twiddle.txt) | Copyright (c) 2013 Mikola Lysenko | https://github.com/mikolalysenko/bit-twiddle |
-| bl | 4.1.0 | [MIT](licenses/ui-bl.txt) | Copyright (c) 2013-2019 bl contributors | https://github.com/rvagg/bl |
-| buffer | 5.7.1 | [MIT](licenses/ui-buffer.txt) | Copyright (c) Feross Aboukhadijeh, and other contributors. | https://github.com/feross/buffer |
-| chownr | 1.1.4 | [ISC](licenses/ui-chownr.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/isaacs/chownr |
-| chownr | 3.0.0 | [BlueOak-1.0.0](licenses/ui-chownr.txt) | copyright in it. | https://github.com/isaacs/chownr |
 | core-util-is | 1.0.3 | [MIT](licenses/ui-core-util-is.txt) | Copyright Node.js contributors. All rights reserved. | https://github.com/isaacs/core-util-is |
-| decompress-response | 6.0.0 | [MIT](licenses/ui-decompress-response.txt) | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com) | https://github.com/sindresorhus/decompress-response |
-| deep-extend | 0.6.0 | [MIT](licenses/ui-deep-extend.txt) | Copyright (c) 2013-2018, Viacheslav Lotsmanov | https://github.com/unclechu/node-deep-extend |
-| detect-libc | 2.1.2 | [Apache-2.0](licenses/ui-detect-libc.txt) | copyright notice that is included in or attached to the work | https://github.com/lovell/detect-libc |
-| end-of-stream | 1.4.5 | [MIT](licenses/ui-end-of-stream.txt) | Copyright (c) 2014 Mathias Buus | https://github.com/mafintosh/end-of-stream |
-| env-paths | 2.2.1 | [MIT](licenses/ui-env-paths.txt) | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com) | https://github.com/sindresorhus/env-paths |
-| expand-template | 2.0.3 | [MIT OR WTFPL](licenses/ui-expand-template.txt) | Copyright (c) 2018 Lars-Magnus Skog | https://github.com/ralphtheninja/expand-template |
-| exponential-backoff | 3.1.3 | [Apache-2.0](licenses/ui-exponential-backoff.txt) | copyright notice that is included in or attached to the work | https://github.com/coveooss/exponential-backoff |
-| fdir | 6.5.0 | [MIT](licenses/ui-fdir.txt) | Copyright 2023 Abdullah Atta | https://github.com/thecodrr/fdir |
-| file-uri-to-path | 1.0.0 | [MIT](licenses/ui-file-uri-to-path.txt) | Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net> | https://github.com/TooTallNate/file-uri-to-path |
-| fs-constants | 1.0.0 | [MIT](licenses/ui-fs-constants.txt) | Copyright (c) 2018 Mathias Buus | https://github.com/mafintosh/fs-constants |
-| github-from-package | 0.0.0 | [MIT](licenses/ui-github-from-package.txt) | COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER | https://github.com/substack/github-from-package |
-| gl | 9.0.0-rc.10 | [BSD-2-Clause](licenses/ui-gl.txt) | Mikola Lysenko | https://github.com/stackgl/headless-gl |
-| glsl-tokenizer | 2.1.5 | [MIT](licenses/ui-glsl-tokenizer.txt) | Copyright (c) 2014 [Chris Dickinson](http://github.com/chrisdickinson) | https://github.com/gl-modules/glsl-tokenizer |
-| graceful-fs | 4.2.11 | [ISC](licenses/ui-graceful-fs.txt) | Copyright (c) 2011-2022 Isaac Z. Schlueter, Ben Noordhuis, and Contributors | https://github.com/isaacs/node-graceful-fs |
-| ieee754 | 1.2.1 | [BSD-3-Clause](licenses/ui-ieee754.txt) | Copyright 2008 Fair Oaks Labs, Inc. | https://github.com/feross/ieee754 |
 | immediate | 3.0.6 | [MIT](licenses/ui-immediate.txt) | Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier | https://github.com/calvinmetcalf/immediate |
 | inherits | 2.0.4 | [ISC](licenses/ui-inherits.txt) | Copyright (c) Isaac Z. Schlueter | https://github.com/isaacs/inherits |
-| ini | 1.3.8 | [ISC](licenses/ui-ini.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/isaacs/ini |
-| isarray | 0.0.1 | [MIT](licenses/ui-isarray.txt) | Copyright (c) 2013 Julian Gruber &lt;julian@juliangruber.com&gt; | https://github.com/juliangruber/isarray |
 | isarray | 1.0.0 | [MIT](licenses/ui-isarray.txt) | Copyright (c) 2013 Julian Gruber &lt;julian@juliangruber.com&gt; | https://github.com/juliangruber/isarray |
-| isexe | 4.0.0 | [BlueOak-1.0.0](licenses/ui-isexe.txt) | copyright in it. | https://github.com/isaacs/isexe |
 | jszip | 3.10.1 | [MIT](licenses/ui-jszip.txt) | Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso | https://github.com/Stuk/jszip |
 |  |  |  |  | *Upstream offers MIT or GPL-3.0-or-later; Mizan uses the MIT option.* |
 | lie | 3.3.0 | [MIT](licenses/ui-lie.txt) | Copyright Calvin Metcalf and contributors | https://github.com/calvinmetcalf/lie |
 | loglevel | 1.9.2 | [MIT](licenses/ui-loglevel.txt) | Copyright (c) 2013 Tim Perry | https://github.com/pimterry/loglevel |
 | lucide-react | 1.47.0 | [ISC](licenses/ui-lucide-react.txt) | Copyright (c) 2026 Lucide Icons and Contributors | https://github.com/lucide-icons/lucide |
-| mimic-response | 3.1.0 | [MIT](licenses/ui-mimic-response.txt) | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com) | https://github.com/sindresorhus/mimic-response |
-| minimist | 1.2.8 | [MIT](licenses/ui-minimist.txt) | COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER | https://github.com/minimistjs/minimist |
-| minipass | 7.1.3 | [BlueOak-1.0.0](licenses/ui-minipass.txt) | copyright in it. | https://github.com/isaacs/minipass |
-| minizlib | 3.1.0 | [MIT](licenses/ui-minizlib.txt) | Copyright (c) 2017-2023 Isaac Z. Schlueter and Contributors | https://github.com/isaacs/minizlib |
-| mkdirp-classic | 0.5.3 | [MIT](licenses/ui-mkdirp-classic.txt) | Copyright (c) 2020 James Halliday (mail@substack.net) and Mathias Buus | https://github.com/mafintosh/mkdirp-classic |
-| nan | 2.29.0 | [MIT](licenses/ui-nan.txt) | Copyright (c) 2018 [NAN contributors](<https://github.com/nodejs/nan#wg-members--collaborators>) | https://github.com/nodejs/nan |
-| napi-build-utils | 2.0.0 | [MIT](licenses/ui-napi-build-utils.txt) | Copyright (c) 2018 inspiredware | https://github.com/inspiredware/napi-build-utils |
-| node-abi | 3.96.0 | [MIT](licenses/ui-node-abi.txt) | Copyright (c) 2016 Lukas Geiger | https://github.com/electron/node-abi |
-| node-gyp | 12.4.0 | [MIT](licenses/ui-node-gyp.txt) | Copyright (c) 2012 Nathan Rajlich <nathan@tootallnate.net> | https://github.com/nodejs/node-gyp |
-| nopt | 9.0.0 | [ISC](licenses/ui-nopt.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/nopt |
-| once | 1.4.0 | [ISC](licenses/ui-once.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/isaacs/once |
 | opensheetmusicdisplay | 2.1.2 | [BSD-3-Clause](licenses/ui-opensheetmusicdisplay.txt) | Copyright 2019 PhonicScore | https://github.com/opensheetmusicdisplay/opensheetmusicdisplay |
 | pako | 1.0.11 | [MIT AND Zlib](licenses/ui-pako.txt) | Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn | https://github.com/nodeca/pako |
-| picomatch | 4.0.7 | [MIT](licenses/ui-picomatch.txt) | Copyright (c) 2017-present, Jon Schlinkert. | https://github.com/micromatch/picomatch |
-| prebuild-install | 7.1.3 | [MIT](licenses/ui-prebuild-install.txt) | Copyright (c) 2015 Mathias Buus | https://github.com/prebuild/prebuild-install |
-| proc-log | 6.1.0 | [ISC](licenses/ui-proc-log.txt) | Copyright (c) GitHub, Inc. | https://github.com/npm/proc-log |
 | process-nextick-args | 2.0.1 | [MIT](licenses/ui-process-nextick-args.txt) | Copyright Calvin Metcalf and contributors | https://github.com/calvinmetcalf/process-nextick-args |
-| pump | 3.0.4 | [MIT](licenses/ui-pump.txt) | Copyright (c) 2014 Mathias Buus | https://github.com/mafintosh/pump |
-| rc | 1.2.8 | [BSD-2-Clause OR MIT OR Apache-2.0](licenses/ui-rc.txt) | Copyright (c) 2011 Dominic Tarr | https://github.com/dominictarr/rc |
 | react | 19.3.0 | [MIT](licenses/ui-react.txt) | Copyright (c) Meta Platforms, Inc. and affiliates. | https://github.com/react/react |
 | react-dom | 19.3.0 | [MIT](licenses/ui-react-dom.txt) | Copyright (c) Meta Platforms, Inc. and affiliates. | https://github.com/react/react |
-| readable-stream | 1.0.34 | [MIT](licenses/ui-readable-stream.txt) | Copyright Joyent, Inc. and other Node contributors. All rights reserved. | https://github.com/isaacs/readable-stream |
 | readable-stream | 2.3.8 | [MIT](licenses/ui-readable-stream.txt) | Copyright Node.js contributors. All rights reserved. | https://github.com/nodejs/readable-stream |
-| readable-stream | 3.6.2 | [MIT](licenses/ui-readable-stream.txt) | Copyright Node.js contributors. All rights reserved. | https://github.com/nodejs/readable-stream |
 | safe-buffer | 5.1.2 | [MIT](licenses/ui-safe-buffer.txt) | Copyright (c) Feross Aboukhadijeh | https://github.com/feross/safe-buffer |
 | scheduler | 0.28.0 | [MIT](licenses/ui-scheduler.txt) | Copyright (c) Meta Platforms, Inc. and affiliates. | https://github.com/react/react |
-| semver | 7.8.5 | [ISC](licenses/ui-semver.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/node-semver |
 | setimmediate | 1.0.5 | [MIT](licenses/ui-setimmediate.txt) | Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola | https://github.com/YuzuJS/setImmediate |
-| simple-concat | 1.0.1 | [MIT](licenses/ui-simple-concat.txt) | Copyright (c) Feross Aboukhadijeh | https://github.com/feross/simple-concat |
-| simple-get | 4.0.1 | [MIT](licenses/ui-simple-get.txt) | Copyright (c) Feross Aboukhadijeh | https://github.com/feross/simple-get |
-| string_decoder | 0.10.31 | [MIT](licenses/ui-string-decoder.txt) | Copyright Joyent, Inc. and other Node contributors. | https://github.com/rvagg/string_decoder |
 | string_decoder | 1.1.1 | [MIT](licenses/ui-string-decoder.txt) | Copyright Node.js contributors. All rights reserved. | https://github.com/nodejs/string_decoder |
-| strip-json-comments | 2.0.1 | [MIT](licenses/ui-strip-json-comments.txt) | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com) | https://github.com/sindresorhus/strip-json-comments |
-| tar | 7.5.22 | [BlueOak-1.0.0](licenses/ui-tar.txt) | copyright in it. | https://github.com/isaacs/node-tar |
-| tar-fs | 2.1.5 | [MIT](licenses/ui-tar-fs.txt) | Copyright (c) 2014 Mathias Buus | https://github.com/mafintosh/tar-fs |
-| tar-stream | 2.2.0 | [MIT](licenses/ui-tar-stream.txt) | Copyright (c) 2014 Mathias Buus | https://github.com/mafintosh/tar-stream |
-| through2 | 0.6.5 | [MIT](licenses/ui-through2.txt) | Copyright 2013, Rod Vagg (the "Original Author") | https://github.com/rvagg/through2 |
-| tinyglobby | 0.2.17 | [MIT](licenses/ui-tinyglobby.txt) | Copyright (c) 2024 Madeline Gurriarán | https://github.com/SuperchupuDev/tinyglobby |
-| tunnel-agent | 0.6.0 | [Apache-2.0](licenses/ui-tunnel-agent.txt) | Mikeal Rogers | https://github.com/mikeal/tunnel-agent |
 | typescript-collections | 1.3.3 | [MIT](licenses/ui-typescript-collections.txt) | Copyright (c) 2010-2017 Tomasz Ciborski | https://github.com/basarat/typescript-collections |
-| undici | 6.28.1 | [MIT](licenses/ui-undici.txt) | Copyright (c) Matteo Collina and Undici contributors | https://github.com/nodejs/undici |
 | util-deprecate | 1.0.2 | [MIT](licenses/ui-util-deprecate.txt) | Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net> | https://github.com/TooTallNate/util-deprecate |
 | vexflow | 1.2.93 | [MIT](licenses/ui-vexflow.txt) | Copyright (c) 2010 Mohit Muthanna Cheppudira | https://github.com/0xfe/vexflow |
-| which | 6.0.1 | [ISC](licenses/ui-which.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/node-which |
-| wrappy | 1.0.2 | [ISC](licenses/ui-wrappy.txt) | Copyright (c) Isaac Z. Schlueter and Contributors | https://github.com/npm/wrappy |
-| xtend | 4.0.2 | [MIT](licenses/ui-xtend.txt) | Copyright (c) 2012-2014 Raynos. | https://github.com/Raynos/xtend |
-| yallist | 5.0.0 | [BlueOak-1.0.0](licenses/ui-yallist.txt) | copyright in it. | https://github.com/isaacs/yallist |
 
 ## Host/engine libraries
 

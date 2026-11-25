@@ -1,5 +1,11 @@
 # mizan
 
+## 0.3.5
+
+### Patch Changes
+
+- 9d5c4a6: Update the YouTube downloader for signed-in video details. Show cloud provider names only for cloud processing errors.
+
 ## 0.3.4
 
 Mizan now rebuilds a reused Azure credential chain and retries once for the same scope and tenant if the chain cannot get a token. This may recover from a stale credential; it does not fix other Azure sign-in or connectivity failures.
