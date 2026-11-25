@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,6 +7,21 @@ import pytest
 from scripts import credits
 
 ROOT = Path(__file__).resolve().parents[2]
+VENDOR_SHA256 = {
+    "dotnet-runtime-10.0.15-LICENSE.TXT": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+    "dotnet-runtime-10.0.15-THIRD-PARTY-NOTICES.TXT": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+    "webview2-sdk-1.0.3179.45-LICENSE.txt": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55",
+    "webview2-sdk-1.0.3179.45-NOTICE.txt": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90",
+    "windows-app-sdk-1.8.260921001-license.txt": "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501",
+    "windows-app-sdk-1.8.260921001-NOTICE.txt": "e25393c0d340a1821827b093fa4dbbfcccd8feb7bf769e7fa773e3955cd5314b",
+    "windows-app-sdk-dwrite-1.8.25122902-license.txt": "f9ed00147604bdc48c7e62d127d73245781ce53903cef9c3863f8a7ef8120cc2",
+    "windows-app-sdk-foundation-1.8.260803002-license.txt": "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501",
+    "windows-app-sdk-ml-1.8.2223-license.txt": "656aab74c15aa9f9964bcdcc993eb2755cbdb4822d5e0e3bc61d2e281897f758",
+    "windows-app-sdk-ml-1.8.2223-ThirdPartyNotices.txt": "e00f828e0a33de591a355ae6606d2625f5758da7d2c844db7821c9dd3e3647b6",
+    "windows-app-sdk-widgets-1.8.251231004-license.txt": "f9ed00147604bdc48c7e62d127d73245781ce53903cef9c3863f8a7ef8120cc2",
+    "windows-app-sdk-winui-1.8.260803003-license.txt": "5b11e6347756e40fe0274bc08c97f89201b94f0d50181a09a00f1f4740840501",
+    "windows-app-sdk-winui-1.8.260803003-NOTICE.txt": "e25393c0d340a1821827b093fa4dbbfcccd8feb7bf769e7fa773e3955cd5314b",
+}
 
 
 def _package(name, version, license_name, license_text, author="Upstream author"):
@@ -161,3 +177,77 @@ def test_checked_in_release_credits_use_correct_licenses_and_attribution():
         "http://github.com/jtushman/proxy_tools |" in (
             ROOT / "THIRD_PARTY_NOTICES.md"
         ).read_text(encoding="utf-8")
+
+
+def test_checked_in_vendor_credits_have_exact_versions_and_labels():
+    release_credits = json.loads(
+        (ROOT / "ui" / "src" / "credits.json").read_text(encoding="utf-8")
+    )
+    expected = {
+        ".NET Runtime": ("10.0.15", "MIT"),
+        "Windows App SDK Runtime": ("1.8.260921001", "Microsoft Software License Terms"),
+        "Windows App SDK Foundation": (
+            "1.8.260803002",
+            "Microsoft Software License Terms",
+        ),
+        "Windows App SDK WinUI": ("1.8.260803003", "Microsoft Software License Terms"),
+        "Windows App SDK DWrite": ("1.8.25122902", "Microsoft Software License Terms"),
+        "Windows App SDK Widgets": (
+            "1.8.251231004",
+            "Microsoft Software License Terms",
+        ),
+        "Windows ML Runtime": ("1.8.2223", "Microsoft Software License Terms"),
+        "Bundled WebView2 SDK": ("1.0.3179.45", "BSD-3-Clause"),
+        "Microsoft Edge WebView2 Runtime": (
+            "System installed",
+            "LicenseRef-Microsoft-WebView2-Runtime",
+        ),
+    }
+
+    by_name = {item["name"]: item for item in release_credits}
+    assert {
+        name: (by_name[name]["version"], by_name[name]["license"]) for name in expected
+    } == expected
+
+    python_wheel = by_name["onnxruntime-windowsml"]
+    assert python_wheel["version"] == "1.27.1.202607110137"
+    assert python_wheel["license"] == "MIT"
+    assert by_name["wasdk-Microsoft.Windows.AI.MachineLearning"]["version"] == (
+        "1.8.260209005"
+    )
+
+
+def test_checked_in_vendor_materials_are_copied_byte_for_byte_and_linked():
+    vendor = ROOT / "scripts" / "licenses" / "vendor"
+    notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    expected_names = set(VENDOR_SHA256)
+
+    assert {path.name for path in vendor.iterdir()} == expected_names
+    for name in expected_names:
+        data = (vendor / name).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == VENDOR_SHA256[name]
+        assert (ROOT / "licenses" / name).read_bytes() == data
+        assert f"](licenses/{name})" in notices
+
+
+def test_checked_in_credits_keep_all_production_python_packages():
+    release_credits = json.loads(
+        (ROOT / "ui" / "src" / "credits.json").read_text(encoding="utf-8")
+    )
+    python_credits = [
+        item
+        for item in release_credits
+        if item["group"] == "Host/engine libraries" or item["name"] == "yt-dlp"
+    ]
+
+    assert len(python_credits) == 144
+    assert len({item["name"] for item in python_credits}) == 144
+
+
+def test_msix_recursively_stages_generated_license_directory():
+    build_script = (ROOT / "scripts" / "Build-Msix.ps1").read_text(encoding="utf-8")
+
+    assert (
+        'Copy-Item (Join-Path $root "licenses") (Join-Path $staging "licenses") -Recurse'
+        in build_script
+    )

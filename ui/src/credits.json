@@ -1349,12 +1349,21 @@
   },
   {
     "name": ".NET Runtime",
-    "version": "10",
-    "license": "LicenseRef-Microsoft-.NET-Library",
-    "author": "Microsoft Corporation",
+    "version": "10.0.15",
+    "license": "MIT",
+    "author": ".NET Foundation and Contributors",
     "url": "https://github.com/dotnet/runtime",
     "group": "Tools",
-    "note": "The runtime matching the package architecture is bundled in the MSIX."
+    "note": "The self-contained runtime is bundled in the MSIX, including coreclr.dll."
+  },
+  {
+    "name": "Bundled WebView2 SDK",
+    "version": "1.0.3179.45",
+    "license": "BSD-3-Clause",
+    "author": "Microsoft Corporation",
+    "url": "https://developer.microsoft.com/microsoft-edge/webview2/",
+    "group": "Tools",
+    "note": "The bundled WebView2Loader.dll and Microsoft.Web.WebView2.Core.dll come from this SDK."
   },
   {
     "name": "Microsoft Edge WebView2 Runtime",
@@ -1393,22 +1402,58 @@
     "note": "Optional proprietary provider downloaded by Windows ML on supported devices; review its displayed terms before redistribution."
   },
   {
+    "name": "Windows App SDK DWrite",
+    "version": "1.8.25122902",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/",
+    "group": "Tools",
+    "note": "DWriteCore.dll is bundled with the self-contained Windows App SDK runtime."
+  },
+  {
+    "name": "Windows App SDK Foundation",
+    "version": "1.8.260803002",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
+    "group": "Tools",
+    "note": "WindowsAppRuntime.dll is bundled with the self-contained Windows App SDK runtime."
+  },
+  {
     "name": "Windows App SDK Runtime",
     "version": "1.8.260921001",
-    "license": "MIT",
-    "author": "Copyright (c) Microsoft Corporation",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
     "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
     "group": "Tools",
     "note": "The self-contained runtime matching the package architecture is bundled in the MSIX."
   },
   {
-    "name": "Windows ML Runtime and execution provider catalog",
-    "version": "1.8.260209005",
-    "license": "MIT",
-    "author": "Copyright (c) Microsoft Corporation",
+    "name": "Windows App SDK Widgets",
+    "version": "1.8.251231004",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/",
+    "group": "Tools",
+    "note": "Microsoft.Windows.Widgets.dll is bundled with the self-contained Windows App SDK runtime."
+  },
+  {
+    "name": "Windows App SDK WinUI",
+    "version": "1.8.260803003",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
+    "url": "https://learn.microsoft.com/windows/apps/winui/",
+    "group": "Tools",
+    "note": "Microsoft.ui.xaml.dll is bundled with the self-contained Windows App SDK runtime."
+  },
+  {
+    "name": "Windows ML Runtime",
+    "version": "1.8.2223",
+    "license": "Microsoft Software License Terms",
+    "author": "Microsoft Corporation",
     "url": "https://learn.microsoft.com/windows/ai/new-windows-ml/",
     "group": "Tools",
-    "note": "CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms."
+    "note": "The Microsoft.WindowsAppSDK.ML libraries are bundled with the application."
   },
   {
     "name": "yt-dlp",
