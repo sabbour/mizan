@@ -266,7 +266,7 @@
   },
   {
     "name": "click",
-    "version": "8.5.0",
+    "version": "8.5.1",
     "license": "BSD-3-Clause",
     "author": "Copyright 2014 Pallets",
     "url": "https://github.com/pallets/click/",
@@ -306,7 +306,7 @@
   },
   {
     "name": "filelock",
-    "version": "4.2.7",
+    "version": "4.2.12",
     "license": "MIT",
     "author": "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors",
     "url": "https://github.com/tox-dev/filelock",
@@ -606,6 +606,14 @@
     "license": "BSD-3-Clause",
     "author": "Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.",
     "url": "https://scipy.org/",
+    "group": "Host/engine libraries"
+  },
+  {
+    "name": "setuptools",
+    "version": "84.2.1",
+    "license": "MIT",
+    "author": "Project contributors",
+    "url": "https://github.com/pypa/setuptools",
     "group": "Host/engine libraries"
   },
   {

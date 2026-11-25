@@ -48,12 +48,12 @@ Development and probe-only packages installed in the venv are excluded.
 | certifi | 2026.10.23 | [Mozilla Public License 2.0 (MPL 2.0)](licenses/host-certifi.txt) | Project contributors | https://github.com/certifi/python-certifi |
 | cffi | 2.1.1 | [MIT-0](licenses/host-cffi.txt) | Copyright Armin Rigo and contributors | https://cffi.readthedocs.io/en/latest/whatsnew.html |
 | charset-normalizer | 3.5.2 | [MIT](licenses/host-charset-normalizer.txt) | Copyright (c) 2025 TAHRI Ahmed R. | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
-| click | 8.5.0 | [BSD-3-Clause](licenses/host-click.txt) | Copyright 2014 Pallets | https://github.com/pallets/click/ |
+| click | 8.5.1 | [BSD-3-Clause](licenses/host-click.txt) | Copyright 2014 Pallets | https://github.com/pallets/click/ |
 | clr_loader | 0.3.1 | [MIT](licenses/host-clr-loader.txt) | Copyright (c) 2019-2026 Benedikt Reinartz | https://pythonnet.github.io/clr-loader/ |
 | colorama | 0.4.6 | [BSD-3-Clause](licenses/host-colorama.txt) | Copyright (c) 2010 Jonathan Hartley | https://github.com/tartley/colorama |
 | cryptography | 46.0.3 | [Apache-2.0 OR BSD-3-Clause](licenses/host-cryptography.txt) | Project contributors | https://github.com/pyca/cryptography |
 | einops | 0.8.2 | [MIT](licenses/host-einops.txt) | Copyright (c) 2018 Alex Rogozhnikov | https://github.com/arogozhnikov/einops |
-| filelock | 4.2.7 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/filelock |
+| filelock | 4.2.12 | [MIT](licenses/host-filelock.txt) | Copyright (c) 2025 Bernát Gábor and contributors | https://github.com/tox-dev/filelock |
 | flatbuffers | 25.12.19 | [Apache-2.0](licenses/host-flatbuffers.txt) | Copyright Google LLC | https://google.github.io/flatbuffers/ |
 | fsspec | 2026.9.0 | [BSD-3-Clause](licenses/host-fsspec.txt) | Copyright (c) 2018, Martin Durant | https://github.com/fsspec/filesystem_spec |
 | google-auth | 2.41.1 | [Apache-2.0](licenses/host-google-auth.txt) | copyright notice that is included in or attached to the work | https://github.com/googleapis/google-auth-library-python |
@@ -91,6 +91,7 @@ Development and probe-only packages installed in the venv are excluded.
 | s3transfer | 0.14.0 | [Apache-2.0](licenses/host-s3transfer.txt) | copyright notice that is included in or attached to the work | https://github.com/boto/s3transfer |
 | safetensors | 0.8.0 | [Apache-2.0](licenses/host-safetensors.txt) | copyright notice that is included in or attached to the work | https://github.com/huggingface/safetensors |
 | scipy | 1.18.1 | [BSD-3-Clause](licenses/host-scipy.txt) | Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers. | https://scipy.org/ |
+| setuptools | 84.2.1 | [MIT](licenses/host-setuptools.txt) | Project contributors | https://github.com/pypa/setuptools |
 | six | 1.17.0 | [MIT](licenses/host-six.txt) | Copyright (c) 2010-2024 Benjamin Peterson | https://github.com/benjaminp/six |
 | sympy | 1.14.0 | [BSD-3-Clause](licenses/host-sympy.txt) | Copyright (c) 2006-2023 SymPy Development Team | https://sympy.org |
 | torch | 2.14.0+cpu | [Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT](licenses/host-torch.txt) | Copyright (c) 2016-     Facebook, Inc            (Adam Paszke) | https://pytorch.org |

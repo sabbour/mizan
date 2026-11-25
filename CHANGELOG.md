@@ -1,5 +1,11 @@
 # mizan
 
+## 0.3.6
+
+### Patch Changes
+
+- Select x64 dependencies for x64 Python on ARM64 Windows. Restore the Library test fixtures. Include all production Python packages in third-party credits.
+
 ## 0.3.5
 
 ### Patch Changes
