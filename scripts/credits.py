@@ -157,7 +157,7 @@ def npm_credits() -> list[dict[str, str]]:
 def python_credits() -> list[dict[str, str]]:
     try:
         raw = json.loads(run(str(Path(os.sys.executable)), "-m", "piplicenses", "--format=json",
-                             "--with-urls", "--with-license-file"))
+                             "--with-urls", "--with-license-file", "--with-system"))
     except (subprocess.CalledProcessError, json.JSONDecodeError) as error:
         raise RuntimeError("Install pip-licenses in host\\.venv, then rerun this script.") from error
     wanted = production_python_names()

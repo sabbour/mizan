@@ -42,6 +42,33 @@ def _release_packages(proxy_name="proxy_tools", flatbuffers_text="UNKNOWN", prox
     ]
 
 
+def test_python_credits_include_system_packages_in_production_graph(monkeypatch, tmp_path):
+    packages = [
+        _package("setuptools", "80.9.0", "MIT License", "Setuptools MIT license"),
+        _package("onnxruntime-windowsml", "1.0", "MIT", "Windows ML MIT license"),
+        _package("pip", "25.1", "MIT", "Pip MIT license"),
+        _package("pytest", "8.4.0", "MIT", "Pytest MIT license"),
+    ]
+    wanted = {"setuptools", "onnxruntime-windowsml"}
+
+    def piplicenses(*args, **_kwargs):
+        included = packages if "--with-system" in args else packages[1:]
+        return json.dumps(included)
+
+    monkeypatch.setattr(credits, "OUTPUT_LICENSES", tmp_path)
+    monkeypatch.setattr(credits, "run", piplicenses)
+    monkeypatch.setattr(credits, "production_python_names", lambda: wanted)
+
+    generated = credits.python_credits()
+
+    assert {credits.canonicalize_name(item["name"]) for item in generated} == wanted
+    assert (tmp_path / "host-setuptools.txt").read_text(encoding="utf-8") == "Setuptools MIT license\n"
+    assert {path.name for path in tmp_path.iterdir()} == {
+        "host-setuptools.txt",
+        "host-onnxruntime-windowsml.txt",
+    }
+
+
 @pytest.mark.parametrize("proxy_name", ["proxy_tools", "proxy-tools"])
 @pytest.mark.parametrize("missing_text", ["", "UNKNOWN", " \nunknown \n", None])
 def test_python_credits_use_verified_text_and_proxy_attribution(
