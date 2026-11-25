@@ -217,12 +217,10 @@ See [ENGINE.md](ENGINE.md) for the exact contract, measured hardware results,
 licenses, historical comparisons, and limitations.
 
 ```powershell
-Push-Location host
-.\.venv\Scripts\python.exe -m pytest tests -q
+host\.venv\Scripts\python.exe -m pytest host\tests -q
 # Include the real-model integration test without network access:
 $env:MIZAN_TEST_MODEL = "$env:LOCALAPPDATA\Mizan\models\basic-pitch-icassp-2022.onnx"
-.\.venv\Scripts\python.exe -m pytest tests -q
-Pop-Location
+host\.venv\Scripts\python.exe -m pytest host\tests -q
 
 host\.venv\Scripts\python -m mizan.engine.providers --output host\provider-benchmark.json
 host\.venv\Scripts\python -m mizan.engine.benchmark --seconds 60 --probe-model-providers --output host\engine-benchmark.json
