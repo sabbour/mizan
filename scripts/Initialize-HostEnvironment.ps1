@@ -6,10 +6,9 @@
 .DESCRIPTION
     Finds an installed Python 3.12 that matches the architecture, creates the
     virtual environment, and installs host[dev] plus the pinned MuScriptor
-    source with pip. pip uses this machine's pip configuration (index, proxy,
-    credentials); this script never passes an index URL. It does not install
-    Python, change PATH, or edit global Git or pip settings. An inherited
-    GIT_EXEC_PATH that belongs to a different Git is ignored for this process only.
+    source. Pass -Probe to include the provider probe dependencies. Native
+    Python uses pip and its configured index. On ARM64 Windows, x64 Python
+    uses uv with an explicit x64 target to resolve dependencies.
 
 .EXAMPLE
     pwsh -NoProfile -File .\scripts\Initialize-HostEnvironment.ps1
@@ -23,15 +22,22 @@
 param(
     [string]$Architecture = "",
     [string]$Python = "",
-    [string]$VenvPath = ""
+    [string]$VenvPath = "",
+    [switch]$Probe
 )
 
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $PSScriptRoot "MizanBuildTools.psm1") -Force
 $root = Split-Path -Parent $PSScriptRoot
-if (-not $Architecture) { $Architecture = Get-HostArchitecture }
+$hostArchitecture = Get-HostArchitecture
+if (-not $Architecture) { $Architecture = $hostArchitecture }
 $Architecture = $Architecture.ToLowerInvariant()
 if ($Architecture -notin @("arm64", "x64")) { throw "Architecture must be arm64 or x64." }
+$emulatedX64 = $hostArchitecture -eq "arm64" -and $Architecture -eq "x64"
+if ($emulatedX64) {
+    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $uv) { throw "Install uv and add it to PATH to install x64 dependencies on ARM64 Windows." }
+}
 if (-not $VenvPath) { $VenvPath = Join-Path $root "host\.venv" }
 $expected = "3.12|$(Get-PythonPlatform $Architecture)"
 $venvPython = Join-Path $VenvPath "Scripts\python.exe"
@@ -59,10 +65,17 @@ if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
 
 $pipFailure = "pip install failed. pip uses your configured package index (see 'pip config list'); check that it is reachable and that you are signed in. " +
     "The pinned GitHub and download-r2.pytorch.org dependencies are direct URLs outside that index, so this machine also needs access to those hosts."
+$extras = if ($Probe) { "dev,probe" } else { "dev" }
+$hostRequirement = "$(Join-Path $root 'host')[$extras]"
 $git = Initialize-GitEnvironment
 try {
-    & $venvPython -m pip install -e "$(Join-Path $root 'host')[dev]"
-    if ($LASTEXITCODE -ne 0) { throw $pipFailure }
+    if ($emulatedX64) {
+        & $uv.Source pip install --python $venvPython --python-platform x86_64-pc-windows-msvc --system-certs -e $hostRequirement
+        if ($LASTEXITCODE -ne 0) { throw "uv install failed. If you use a private package index, configure it for uv with UV_DEFAULT_INDEX." }
+    } else {
+        & $venvPython -m pip install -e $hostRequirement
+        if ($LASTEXITCODE -ne 0) { throw $pipFailure }
+    }
     $muscriptor = & $venvPython -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['tool']['mizan']['muscriptor-inference-source'])" (Join-Path $root "host\pyproject.toml")
     if ($LASTEXITCODE -ne 0 -or -not $muscriptor) { throw "Could not read [tool.mizan].muscriptor-inference-source from host\pyproject.toml." }
     $muscriptor = "$muscriptor".Trim()

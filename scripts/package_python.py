@@ -33,6 +33,11 @@ def pinned_source(requirement: Requirement, distribution: metadata.Distribution)
 
 def production_distributions() -> list[metadata.Distribution]:
     project = project_config()["project"]
+    environment = default_environment()
+    # Windows can report the host CPU instead of the Python wheel architecture.
+    machine = {"win-arm64": "ARM64", "win-amd64": "AMD64"}.get(sysconfig_platform())
+    if machine:
+        environment["platform_machine"] = machine
     installed = {
         canonicalize_name(dist.metadata["Name"]): dist
         for dist in metadata.distributions()
@@ -41,7 +46,7 @@ def production_distributions() -> list[metadata.Distribution]:
     todo = [
         requirement
         for requirement in map(Requirement, project["dependencies"])
-        if not requirement.marker or requirement.marker.evaluate()
+        if not requirement.marker or requirement.marker.evaluate(environment)
     ]
     selected: dict[str, metadata.Distribution] = {}
     extras: dict[str, set[str]] = {}
@@ -70,7 +75,7 @@ def production_distributions() -> list[metadata.Distribution]:
         for raw in distribution.requires or []:
             child = Requirement(raw)
             if child.marker and not any(
-                child.marker.evaluate(default_environment() | {"extra": extra})
+                child.marker.evaluate(environment | {"extra": extra})
                 for extra in active_extras
             ):
                 continue

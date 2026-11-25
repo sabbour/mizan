@@ -13,13 +13,14 @@ import os
 import re
 import shutil
 import subprocess
-import tomllib
-from importlib import metadata
 from pathlib import Path
 
-from packaging.markers import default_environment
-from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+if __package__:
+    from .package_python import production_distributions
+else:
+    from package_python import production_distributions
 
 ROOT = Path(__file__).resolve().parents[1]
 LICENSES = ROOT / "licenses"
@@ -90,33 +91,10 @@ def save_license(name: str, text: str) -> str:
 
 
 def production_python_names() -> set[str]:
-    project = tomllib.loads((ROOT / "host" / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    installed = {
-        canonicalize_name(dist.metadata["Name"]): dist
-        for dist in metadata.distributions()
-        if dist.metadata.get("Name")
-    }
-    todo = [Requirement(raw) for raw in project["dependencies"]]
-    extras: dict[str, set[str]] = {}
-    while todo:
-        requirement = todo.pop()
-        name = canonicalize_name(requirement.name)
-        requested = set(requirement.extras)
-        if name in extras and requested <= extras[name]:
-            continue
-        extras.setdefault(name, set()).update(requested)
-        dist = installed.get(name)
-        if not dist:
-            raise RuntimeError(f"Production dependency is not installed: {requirement.name}")
-        active_extras = extras[name] or {""}
-        for raw in dist.requires or []:
-            child = Requirement(raw)
-            if child.marker and not any(
-                child.marker.evaluate(default_environment() | {"extra": extra}) for extra in active_extras
-            ):
-                continue
-            todo.append(child)
-    return set(extras) | {"muscriptor"}
+    return {
+        canonicalize_name(dist.metadata["Name"])
+        for dist in production_distributions()
+    } | {"muscriptor"}
 
 
 def npm_credits() -> list[dict[str, str]]:

@@ -1,14 +1,11 @@
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
+from scripts import credits
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("credits", ROOT / "scripts" / "credits.py")
-credits = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(credits)
 
 
 def _package(name, version, license_name, license_text, author="Upstream author"):
