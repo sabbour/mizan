@@ -2404,33 +2404,111 @@ test('queue and panel agree on waiting, truthful Cloud scope, and unmeasured pro
   queue.unmount(); panel.unmount(); live.unmount()
 })
 
-test('cloud job details name the provider in processing and failure text', () => {
+test('cloud job details name only known cloud processing failures', () => {
   const h = harness()
-  const current = job({
-    status: 'failed', cloudProvider: 'gcp', errorMessage: 'GPU quota is too low.',
-    fix: 'Choose a region with available quota.',
+  const providers = [
+    ['azure', 'Azure'],
+    ['gcp', 'Google Cloud'],
+    ['aws', 'AWS'],
+  ]
+  for (const [cloudProvider, providerName] of providers) {
+    const cloudFailed = job({
+      status: 'failed', cloudProvider, cloudProviderName: providerName,
+      errorCode: 'cloud_failed', errorMessage: 'GPU quota is too low.',
+      fix: 'Choose a region with available quota.',
+    })
+    const view = h.render(h.load('JobPanel.tsx').JobPanel, {
+      job: cloudFailed, jobs: [cloudFailed], onChange() {}, onClose() {}, onDetails() {}, onOpen() {},
+    })
+    assert.match(text(view.tree), new RegExp(`${providerName} GPU processing`))
+    assert.equal(text(nodes(view.tree, (node) => node.props.role === 'alert')[0]),
+      `${providerName}: GPU quota is too low. Choose a region with available quota.`)
+    view.unmount()
+
+    const localYoutubeError = job({
+      status: 'failed', cloudProvider, cloudProviderName: providerName,
+      errorCode: 'youtube_extraction_failed', errorMessage: 'YouTube did not provide audio.',
+    })
+    const localView = h.render(h.load('JobPanel.tsx').JobPanel, {
+      job: localYoutubeError, jobs: [localYoutubeError], onChange() {}, onClose() {},
+      onDetails() {}, onOpen() {},
+    })
+    assert.equal(text(nodes(localView.tree, (node) => node.props.role === 'alert')[0]),
+      'YouTube did not provide audio.')
+    localView.unmount()
+  }
+
+  for (const errorCode of ['download_failed', 'ffmpeg_unavailable', 'model_failed', null, undefined]) {
+    const current = job({
+      status: 'failed', cloudProvider: 'gcp', errorCode, errorMessage: 'Local processing failed.',
+    })
+    const view = h.render(h.load('JobPanel.tsx').JobPanel, {
+      job: current, jobs: [current], onChange() {}, onClose() {}, onDetails() {}, onOpen() {},
+    })
+    assert.equal(text(nodes(view.tree, (node) => node.props.role === 'alert')[0]),
+      'Local processing failed.')
+    view.unmount()
+  }
+
+  for (const [cloudProvider, cloudProviderName] of [
+    [undefined, undefined], [undefined, 'Azure'], ['unknown', 'Azure'],
+  ]) {
+    const current = job({
+      status: 'failed', cloudProvider, cloudProviderName,
+      errorCode: 'cloud_failed', errorMessage: 'Legacy cloud job failed.',
+    })
+    const view = h.render(h.load('JobPanel.tsx').JobPanel, {
+      job: current, jobs: [current], onChange() {}, onClose() {}, onDetails() {}, onOpen() {},
+    })
+    assert.equal(text(nodes(view.tree, (node) => node.props.role === 'alert')[0]),
+      'Legacy cloud job failed.')
+    view.unmount()
+  }
+
+  const localCloudError = job({
+    status: 'failed', processingMode: 'local', cloudProvider: 'azure',
+    errorCode: 'cloud_failed', errorMessage: 'Local job failed.',
   })
-  const view = h.render(h.load('JobPanel.tsx').JobPanel, {
-    job: current, jobs: [current], onChange() {}, onClose() {}, onDetails() {}, onOpen() {},
+  const localView = h.render(h.load('JobPanel.tsx').JobPanel, {
+    job: localCloudError, jobs: [localCloudError], onChange() {}, onClose() {},
+    onDetails() {}, onOpen() {},
   })
-  assert.match(text(view.tree), /Google Cloud GPU processing/)
-  assert.match(text(view.tree), /Google Cloud: GPU quota is too low/)
-  view.unmount()
+  assert.equal(text(nodes(localView.tree, (node) => node.props.role === 'alert')[0]),
+    'Local job failed.')
+  localView.unmount()
 })
 
 test('queue and panel display action failures and prevent duplicate cancellation clicks', async () => {
   for (const component of ['Queue', 'JobPanel']) {
     let calls = 0
     const h = harness({ cancel: async () => { calls++; throw new h.HostError('Synthetic cancel failure') } })
-    const current = job()
+    const current = job({ cloudProvider: 'gcp' })
     const Component = component === 'Queue' ? h.load('Library.tsx').Queue : h.load('JobPanel.tsx').JobPanel
     const view = h.render(Component, { job: current, jobs: [current], onChange() {}, onClose() {}, onDetails() {}, onOpen() {} })
     const cancel = button(view.tree, component === 'Queue' ? 'Cancel Synthetic song' : 'Cancel')
     cancel.props.onClick(); cancel.props.onClick()
     await view.settle()
     assert.equal(calls, 1)
-    assert.ok(nodes(view.tree, (node) => node.props.role === 'alert').some((node) =>
-      text(node).includes('Synthetic cancel failure')))
+    const alert = nodes(view.tree, (node) => node.props.role === 'alert')[0]
+    assert.equal(text(alert), 'Synthetic cancel failure')
     view.unmount()
   }
+})
+
+test('cloud job panel keeps retry action errors unprefixed', async () => {
+  const h = harness({
+    retry: async () => { throw new h.HostError('Synthetic retry failure') },
+  })
+  const current = job({
+    status: 'failed', cloudProvider: 'aws', errorCode: 'cloud_failed',
+    errorMessage: 'The cloud job failed.',
+  })
+  const view = h.render(h.load('JobPanel.tsx').JobPanel, {
+    job: current, jobs: [current], onChange() {}, onClose() {}, onDetails() {}, onOpen() {},
+  })
+  button(view.tree, 'Retry').props.onClick()
+  await view.settle()
+  assert.equal(text(nodes(view.tree, (node) => node.type === 'p' && node.props.role === 'alert')[0]),
+    'Synthetic retry failure')
+  view.unmount()
 })

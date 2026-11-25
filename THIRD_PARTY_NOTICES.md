@@ -270,7 +270,7 @@ Development and probe-only packages installed in the venv are excluded.
 |  |  |  |  | *The self-contained runtime matching the package architecture is bundled in the MSIX.* |
 | Windows ML Runtime and execution provider catalog | 1.8.260209005 | [MIT](licenses/tool-windows-app-sdk.txt) | Copyright (c) Microsoft Corporation | https://learn.microsoft.com/windows/ai/new-windows-ml/ |
 |  |  |  |  | *CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms.* |
-| yt-dlp | 2026.8.19 | [Unlicense](licenses/host-yt-dlp.txt) | Public-domain dedication by yt-dlp contributors | https://github.com/yt-dlp/yt-dlp |
+| yt-dlp | 2026.11.23 | [Unlicense](licenses/host-yt-dlp.txt) | Public-domain dedication by yt-dlp contributors | https://github.com/yt-dlp/yt-dlp |
 |  |  |  |  | *Invoked as an external process for permitted media access.* |
 
 ## Fonts & assets

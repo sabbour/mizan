@@ -15,6 +15,7 @@ def test_production_stage_includes_cpu_inference_without_gated_weights(tmp_path)
                      for dist in package_python.production_distributions()}
     assert distributions["torch"].version == "2.14.0+cpu"
     assert {"safetensors", "einops", "huggingface-hub", "packaging", "mido"} <= distributions.keys()
+    assert distributions["yt-dlp"].version == "2026.11.23"
     assert distributions["yt-dlp-ejs"].version == "0.8.0"
     assert "muscriptor" not in distributions
 

@@ -439,7 +439,7 @@ ORT profiles referenced by them remain in the machine's app-data logs.
 | Windows ML QNN EP | Catalog-installed `MicrosoftCorporationII.WinML.Qualcomm.QNN.EP.2`; Qualcomm binary license | Optional runtime acquisition for Snapdragon NPU |
 | ONNX | 1.23.0; Apache-2.0 | Optional probe dependency only |
 | mido | 1.3.3; MIT | MIDI export |
-| yt-dlp | 2026.8.19; Unlicense for this Python distribution; bundled/executable components have their own notices | YouTube ingestion |
+| yt-dlp | 2026.11.23; Unlicense for this Python distribution; bundled/executable components have their own notices | YouTube ingestion |
 | FFmpeg | User-installed; license depends on the selected build | Selected in Song analysis settings or found automatically |
 
 Basic Pitch SHA-256:
