@@ -4,19 +4,28 @@ The Python host manages jobs, the local library, and artifact downloads.
 The WinUI 3 shell communicates with the host through JSON standard input and
 output. The host also serves local audio and score files to WebView2.
 
-Development requires Windows ARM64 or x64, Python 3.12 for the same
-architecture, the .NET 10 SDK, Node.js,
-and the WebView2 Runtime. See the [repository prerequisites](../README.md#run-from-source)
-for the other tools. From the repository root, create the host environment
-(on x64, point `--python` at your x64 Python 3.12):
+Development requires Windows ARM64 or x64, Python 3.12, PowerShell 7,
+the .NET 10 SDK, Node.js, Git for Windows, and the WebView2 Runtime.
+From the repository root, create the host environment:
 
 ```powershell
-uv venv --seed --python "$env:LOCALAPPDATA\Programs\Python\Python312-arm64\python.exe" host\.venv
-uv pip install --python host\.venv\Scripts\python.exe -e "host[dev]"
-host\.venv\Scripts\python.exe -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
+.\scripts\Initialize-HostEnvironment.ps1
 $env:MIZAN_DEV_URL = "http://localhost:5173"
 host\.venv\Scripts\python -m mizan
 ```
+
+On ARM64 Windows, install uv and add it to `PATH` to use x64 Python.
+If you use a private package index, set `UV_DEFAULT_INDEX` to its URL.
+Create a separate x64 environment:
+
+```powershell
+.\scripts\Initialize-HostEnvironment.ps1 -Architecture x64 -VenvPath host\.venv-x64
+```
+
+The initializer selects the Python wheel architecture from `sysconfig.get_platform()`.
+On ARM64 Windows, `platform.machine()` can report `ARM64` for x64 Python.
+For this case, the initializer tells uv to resolve dependencies for x64 Windows.
+For native Python, the initializer uses pip and its configured package index.
 
 Install FFmpeg separately for YouTube audio. The easiest way is WinGet:
 
@@ -72,17 +81,6 @@ audio, or transcript content. Review the log before sharing it.
 For an isolated development library that uses already-downloaded model weights,
 set `MIZAN_MODELS_DIR="$env:LOCALAPPDATA\Mizan\models"` alongside `MIZAN_HOME`.
 Only model files are shared; the song library and cached recordings stay isolated.
-
-Check `sysconfig.get_platform()` for `win-arm64` (or `win-amd64` on x64);
-`platform.machine()` can report
-ARM64 even for an emulated x64 interpreter. If `uv` downloads fail with a TLS
-handshake error, use the environment's configured pip feed:
-
-```powershell
-host\.venv\Scripts\python -m ensurepip
-host\.venv\Scripts\python -m pip install -e "host[dev]"
-host\.venv\Scripts\python -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
-```
 
 The JS bridge exposes `start_job`, `get_job`, `cancel_job`, `list_jobs`, and
 `open_result`. Responses contain `ok` and either job data or a structured error.
@@ -182,7 +180,7 @@ QNN on first use.
 
 ```powershell
 winget install Microsoft.WindowsAppRuntime.2.3
-host\.venv\Scripts\python -m pip install -e "host[probe]"
+.\scripts\Initialize-HostEnvironment.ps1 -Probe
 ```
 
 `MIZAN_PROVIDER=auto|qnn|dml|cpu` controls model provider preference; unavailable
@@ -476,14 +474,10 @@ declares a server and Python `beat-this` dependency, whose `torchaudio` wheel
 is unavailable on Windows ARM64; neither is needed by MuScriptor inference
 or Mizan's existing Beat This! **ONNX** path. The MSIX packager checks the
 source commit and stages the inference code and MIT license, not those unused
-dependencies or gated weights. From `host`:
+dependencies or gated weights.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pip install --no-deps "git+https://github.com/muscriptor/muscriptor.git@7f213afecf23bd6a1b8672aa223690ee9807cefb"
-```
-
-The opt-in command (also from `host`); the copied fixture report and verified
+Install the host with the initializer at the start of this guide.
+Run the opt-in command from `host`. The copied fixture report and verified
 checkpoint directory must already exist outside Git:
 
 ```powershell

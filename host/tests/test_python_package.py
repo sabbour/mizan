@@ -4,10 +4,58 @@ import shutil
 import subprocess
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from packaging.requirements import Requirement
 
-from scripts import package_python
+from scripts import credits, package_python
+
+
+@pytest.mark.parametrize(("platform", "machine", "wheel"), [
+    ("win32", "x86_64", "win_amd64.whl"),
+    ("win32", "AMD64", "win_amd64.whl"),
+    ("win32", "ARM64", "win_arm64.whl"),
+    ("linux", "x86_64", None),
+])
+def test_torch_pin_matches_the_windows_resolver_target(platform, machine, wheel):
+    environment = {"sys_platform": platform, "platform_machine": machine}
+    requirements = map(Requirement, package_python.project_config()["project"]["dependencies"])
+    urls = [
+        req.url.split("#")[0] for req in requirements
+        if req.name == "torch" and req.marker.evaluate(environment)
+    ]
+    assert len(urls) == (0 if wheel is None else 1)
+    if wheel:
+        assert urls[0].endswith(wheel)
+
+
+@pytest.mark.parametrize(("platform", "reported_machine", "arch"), [
+    ("win-amd64", "ARM64", "x64"),
+    ("win-amd64", "AMD64", "x64"),
+    ("win-arm64", "ARM64", "arm64"),
+])
+def test_production_markers_use_python_architecture(monkeypatch, platform, reported_machine, arch):
+    dependencies = [
+        "torch-arm64; platform_machine == 'ARM64'",
+        "torch-x64; platform_machine == 'AMD64'",
+    ]
+    root = f"torch-{arch}"
+    distributions = [
+        SimpleNamespace(metadata={"Name": root}, requires=[
+            "native-arm64; platform_machine == 'ARM64'",
+            "native-x64; platform_machine == 'AMD64'",
+        ]),
+        SimpleNamespace(metadata={"Name": f"native-{arch}"}, requires=[]),
+    ]
+    monkeypatch.setattr(package_python, "project_config", lambda: {"project": {"dependencies": dependencies}})
+    monkeypatch.setattr(package_python, "sysconfig_platform", lambda: platform)
+    monkeypatch.setattr(package_python, "default_environment", lambda: {"platform_machine": reported_machine})
+    monkeypatch.setattr(metadata, "distributions", lambda: distributions)
+
+    expected = {root, f"native-{arch}"}
+    assert {dist.metadata["Name"] for dist in package_python.production_distributions()} == expected
+    assert credits.production_python_names() == expected | {"muscriptor"}
 
 
 def test_production_stage_includes_cpu_inference_without_gated_weights(tmp_path):
