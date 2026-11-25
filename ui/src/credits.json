@@ -1892,7 +1892,7 @@
   },
   {
     "name": "yt-dlp",
-    "version": "2026.8.19",
+    "version": "2026.11.23",
     "license": "Unlicense",
     "author": "Public-domain dedication by yt-dlp contributors",
     "url": "https://github.com/yt-dlp/yt-dlp",

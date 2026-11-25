@@ -79,6 +79,9 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
   const cloudProviderName = j.cloudProviderName
     ?? CLOUD_PROVIDER_NAMES[j.cloudProvider ?? 'azure']
     ?? j.cloudProvider
+  const cloudErrorProviderName = j.cloudProvider && Object.hasOwn(CLOUD_PROVIDER_NAMES, j.cloudProvider)
+    ? CLOUD_PROVIDER_NAMES[j.cloudProvider]
+    : undefined
   const { ahead, place } = jobQueuePosition(j, jobs)
   const wait = ahead.reduce((t, q) => t + (q.eta?.seconds ?? 0), 0)
   const smallerRetryModel = smallerCpuRetryModel(j)
@@ -168,7 +171,7 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
             )}
           </div>
           {actionError?.id === j.id && <p className="jp-error" role="alert">
-            {j.processingMode === 'cloud' ? `${cloudProviderName}: ` : ''}{actionError.message}
+            {actionError.message}
           </p>}
         </section>
 
@@ -182,7 +185,8 @@ export function JobPanel({ job: j, jobs, onClose, onChange, onOpen }: Props) {
         {j.status === 'failed' && (
           <div className="jp-error" role="alert">
             <p>
-              <strong>{j.processingMode === 'cloud' ? `${cloudProviderName}: ` : ''}{j.errorMessage ?? 'This job failed.'}</strong>
+              <strong>{j.processingMode === 'cloud' && j.errorCode === 'cloud_failed' && cloudErrorProviderName
+                ? `${cloudErrorProviderName}: ` : ''}{j.errorMessage ?? 'This job failed.'}</strong>
             </p>
             {j.fix && <p>{j.fix}</p>}
           </div>
