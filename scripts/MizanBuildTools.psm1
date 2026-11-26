@@ -65,6 +65,42 @@ function Get-NuGetGlobalPackagesPath([string]$WorkingDirectory = (Get-Location).
     ConvertFrom-NuGetLocalsOutput -Lines $output
 }
 
+function Get-ResolvedDotNetRuntimeVersion {
+    param(
+        [Parameter(Mandatory)][string]$AssetsPath,
+        [Parameter(Mandatory)][ValidateSet("arm64", "x64")][string]$Architecture
+    )
+    $assets = Get-Content -LiteralPath $AssetsPath -Raw | ConvertFrom-Json -AsHashtable
+    $packageName = "Microsoft.NETCore.App.Runtime.win-$Architecture"
+    $dependencies = @(
+        foreach ($framework in $assets["project"]["frameworks"].Values) {
+            foreach ($dependency in @($framework["downloadDependencies"])) {
+                if ($dependency["name"] -eq $packageName) { $dependency }
+            }
+        }
+    )
+    if ($dependencies.Count -ne 1) {
+        throw "The restore assets did not resolve exactly one $packageName package."
+    }
+    $constraint = "$($dependencies[0]["version"])"
+    if ($constraint -notmatch '^\[([^,\]]+),\s*([^,\]]+)\]$' -or $Matches[1] -ne $Matches[2]) {
+        throw "The restore resolved $packageName with an invalid version constraint '$constraint'."
+    }
+    $Matches[1]
+}
+
+function Assert-DotNetRuntimeVersion {
+    param(
+        [Parameter(Mandatory)][string]$AssetsPath,
+        [Parameter(Mandatory)][ValidateSet("arm64", "x64")][string]$Architecture,
+        [Parameter(Mandatory)][string]$ExpectedVersion
+    )
+    $resolvedVersion = Get-ResolvedDotNetRuntimeVersion -AssetsPath $AssetsPath -Architecture $Architecture
+    if ($resolvedVersion -ne $ExpectedVersion) {
+        throw "The self-contained publish resolved .NET runtime $resolvedVersion for $Architecture; expected $ExpectedVersion."
+    }
+}
+
 function Find-TrustedSigningDlib {
     param(
         [Parameter(Mandatory)][string]$PackagesRoot,

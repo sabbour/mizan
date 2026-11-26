@@ -90,6 +90,13 @@ def save_license(name: str, text: str) -> str:
     return (Path("licenses") / filename).as_posix()
 
 
+def copy_vendor_material(name: str) -> str:
+    source = ROOT / "scripts" / "licenses" / "vendor" / name
+    destination = OUTPUT_LICENSES / name
+    destination.write_bytes(source.read_bytes())
+    return (Path("licenses") / name).as_posix()
+
+
 def production_python_names() -> set[str]:
     return {
         canonicalize_name(dist.metadata["Name"])
@@ -318,7 +325,6 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
         "asset-webxr-generic-hands",
         (ROOT / "scripts" / "licenses" / "webxr-generic-hands.txt").read_text(encoding="utf-8"),
     )
-    windows_mit = (OUTPUT_LICENSES / "host-onnxruntime-windowsml.txt").read_text(encoding="utf-8")
     return [
         {
             "name": "Spotify Basic Pitch ICASSP 2022 weights",
@@ -378,36 +384,98 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
         },
         {
             "name": ".NET Runtime",
-            "version": "10",
-            "license": "LicenseRef-Microsoft-.NET-Library",
-            "author": "Microsoft Corporation",
+            "version": "10.0.15",
+            "license": "MIT",
+            "author": ".NET Foundation and Contributors",
             "url": "https://github.com/dotnet/runtime",
             "group": "Tools",
-            "note": "The runtime matching the package architecture is bundled in the MSIX.",
-            "_license": save_license(
-                "tool-dotnet-runtime",
-                (Path(os.environ["ProgramFiles"]) / "dotnet" / "LICENSE.txt").read_text(encoding="utf-8"),
+            "note": "The self-contained runtime is bundled in the MSIX, including coreclr.dll.",
+            "_license": copy_vendor_material("dotnet-runtime-10.0.15-LICENSE.TXT"),
+            "_notice": copy_vendor_material(
+                "dotnet-runtime-10.0.15-THIRD-PARTY-NOTICES.TXT"
             ),
         },
         {
             "name": "Windows App SDK Runtime",
             "version": "1.8.260921001",
-            "license": "MIT",
-            "author": "Copyright (c) Microsoft Corporation",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
             "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
             "group": "Tools",
             "note": "The self-contained runtime matching the package architecture is bundled in the MSIX.",
-            "_license": save_license("tool-windows-app-sdk", windows_mit),
+            "_license": copy_vendor_material("windows-app-sdk-1.8.260921001-license.txt"),
+            "_notice": copy_vendor_material("windows-app-sdk-1.8.260921001-NOTICE.txt"),
         },
         {
-            "name": "Windows ML Runtime and execution provider catalog",
-            "version": "1.8.260209005",
-            "license": "MIT",
-            "author": "Copyright (c) Microsoft Corporation",
+            "name": "Windows App SDK Foundation",
+            "version": "1.8.260803002",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
+            "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads",
+            "group": "Tools",
+            "note": "WindowsAppRuntime.dll is bundled with the self-contained Windows App SDK runtime.",
+            "_license": copy_vendor_material(
+                "windows-app-sdk-foundation-1.8.260803002-license.txt"
+            ),
+        },
+        {
+            "name": "Windows App SDK WinUI",
+            "version": "1.8.260803003",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
+            "url": "https://learn.microsoft.com/windows/apps/winui/",
+            "group": "Tools",
+            "note": "Microsoft.ui.xaml.dll is bundled with the self-contained Windows App SDK runtime.",
+            "_license": copy_vendor_material("windows-app-sdk-winui-1.8.260803003-license.txt"),
+            "_notice": copy_vendor_material("windows-app-sdk-winui-1.8.260803003-NOTICE.txt"),
+        },
+        {
+            "name": "Windows App SDK DWrite",
+            "version": "1.8.25122902",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
+            "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/",
+            "group": "Tools",
+            "note": "DWriteCore.dll is bundled with the self-contained Windows App SDK runtime.",
+            "_license": copy_vendor_material(
+                "windows-app-sdk-dwrite-1.8.25122902-license.txt"
+            ),
+        },
+        {
+            "name": "Windows App SDK Widgets",
+            "version": "1.8.251231004",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
+            "url": "https://learn.microsoft.com/windows/apps/windows-app-sdk/",
+            "group": "Tools",
+            "note": "Microsoft.Windows.Widgets.dll is bundled with the self-contained Windows App SDK runtime.",
+            "_license": copy_vendor_material(
+                "windows-app-sdk-widgets-1.8.251231004-license.txt"
+            ),
+        },
+        {
+            "name": "Windows ML Runtime",
+            "version": "1.8.2223",
+            "license": "Microsoft Software License Terms",
+            "author": "Microsoft Corporation",
             "url": "https://learn.microsoft.com/windows/ai/new-windows-ml/",
             "group": "Tools",
-            "note": "CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms.",
-            "_license": "licenses/tool-windows-app-sdk.txt",
+            "note": "The Microsoft.WindowsAppSDK.ML libraries are bundled with the application.",
+            "_license": copy_vendor_material("windows-app-sdk-ml-1.8.2223-license.txt"),
+            "_notice": copy_vendor_material(
+                "windows-app-sdk-ml-1.8.2223-ThirdPartyNotices.txt"
+            ),
+        },
+        {
+            "name": "Bundled WebView2 SDK",
+            "version": "1.0.3179.45",
+            "license": "BSD-3-Clause",
+            "author": "Microsoft Corporation",
+            "url": "https://developer.microsoft.com/microsoft-edge/webview2/",
+            "group": "Tools",
+            "note": "The bundled WebView2Loader.dll and Microsoft.Web.WebView2.Core.dll come from this SDK.",
+            "_license": copy_vendor_material("webview2-sdk-1.0.3179.45-LICENSE.txt"),
+            "_notice": copy_vendor_material("webview2-sdk-1.0.3179.45-NOTICE.txt"),
         },
         {
             "name": "Qualcomm QNN execution provider",
@@ -496,6 +564,8 @@ def render_notices(credits: list[dict[str, str]]) -> str:
             license_text = item["license"]
             if path := item.get("_license"):
                 license_text = f"[{license_text}]({path})"
+            if path := item.get("_notice"):
+                license_text += f"<br>[Third-party notices]({path})"
             values = [item["name"], item["version"], license_text, item["author"], item["url"]]
             row = " | ".join(value.replace("|", "\\|").replace("\n", " ") for value in values)
             lines.append(f"| {row} |")

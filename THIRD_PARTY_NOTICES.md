@@ -196,8 +196,10 @@ Development and probe-only packages installed in the venv are excluded.
 
 | Name | Version | License | Copyright holder | Source |
 |---|---|---|---|---|
-| .NET Runtime | 10 | [LicenseRef-Microsoft-.NET-Library](licenses/tool-dotnet-runtime.txt) | Microsoft Corporation | https://github.com/dotnet/runtime |
-|  |  |  |  | *The runtime matching the package architecture is bundled in the MSIX.* |
+| .NET Runtime | 10.0.15 | [MIT](licenses/dotnet-runtime-10.0.15-LICENSE.TXT)<br>[Third-party notices](licenses/dotnet-runtime-10.0.15-THIRD-PARTY-NOTICES.TXT) | .NET Foundation and Contributors | https://github.com/dotnet/runtime |
+|  |  |  |  | *The self-contained runtime is bundled in the MSIX, including coreclr.dll.* |
+| Bundled WebView2 SDK | 1.0.3179.45 | [BSD-3-Clause](licenses/webview2-sdk-1.0.3179.45-LICENSE.txt)<br>[Third-party notices](licenses/webview2-sdk-1.0.3179.45-NOTICE.txt) | Microsoft Corporation | https://developer.microsoft.com/microsoft-edge/webview2/ |
+|  |  |  |  | *The bundled WebView2Loader.dll and Microsoft.Web.WebView2.Core.dll come from this SDK.* |
 | Microsoft Edge WebView2 Runtime | System installed | LicenseRef-Microsoft-WebView2-Runtime | Microsoft Corporation | https://developer.microsoft.com/microsoft-edge/webview2/ |
 |  |  |  |  | *Required by the WinUI shell and pywebview development host; supplied by the evergreen system runtime.* |
 | Node.js JavaScript runtime | 24.22.0 | [MIT](licenses/tool-nodejs-runtime.txt) | Copyright Node.js contributors | https://nodejs.org/ |
@@ -206,10 +208,18 @@ Development and probe-only packages installed in the venv are excluded.
 |  |  |  |  | *The runtime matching the package architecture is bundled in the MSIX.* |
 | Qualcomm QNN execution provider | Catalog acquired | LicenseRef-Qualcomm-QNN | Qualcomm Technologies, Inc. | https://learn.microsoft.com/windows/ai/new-windows-ml/supported-execution-providers |
 |  |  |  |  | *Optional proprietary provider downloaded by Windows ML on supported devices; review its displayed terms before redistribution.* |
-| Windows App SDK Runtime | 1.8.260921001 | [MIT](licenses/tool-windows-app-sdk.txt) | Copyright (c) Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads |
+| Windows App SDK DWrite | 1.8.25122902 | [Microsoft Software License Terms](licenses/windows-app-sdk-dwrite-1.8.25122902-license.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/ |
+|  |  |  |  | *DWriteCore.dll is bundled with the self-contained Windows App SDK runtime.* |
+| Windows App SDK Foundation | 1.8.260803002 | [Microsoft Software License Terms](licenses/windows-app-sdk-foundation-1.8.260803002-license.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads |
+|  |  |  |  | *WindowsAppRuntime.dll is bundled with the self-contained Windows App SDK runtime.* |
+| Windows App SDK Runtime | 1.8.260921001 | [Microsoft Software License Terms](licenses/windows-app-sdk-1.8.260921001-license.txt)<br>[Third-party notices](licenses/windows-app-sdk-1.8.260921001-NOTICE.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads |
 |  |  |  |  | *The self-contained runtime matching the package architecture is bundled in the MSIX.* |
-| Windows ML Runtime and execution provider catalog | 1.8.260209005 | [MIT](licenses/tool-windows-app-sdk.txt) | Copyright (c) Microsoft Corporation | https://learn.microsoft.com/windows/ai/new-windows-ml/ |
-|  |  |  |  | *CPU and DirectML are supplied through Windows ML. Optional catalog providers can have separate terms.* |
+| Windows App SDK Widgets | 1.8.251231004 | [Microsoft Software License Terms](licenses/windows-app-sdk-widgets-1.8.251231004-license.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/apps/windows-app-sdk/ |
+|  |  |  |  | *Microsoft.Windows.Widgets.dll is bundled with the self-contained Windows App SDK runtime.* |
+| Windows App SDK WinUI | 1.8.260803003 | [Microsoft Software License Terms](licenses/windows-app-sdk-winui-1.8.260803003-license.txt)<br>[Third-party notices](licenses/windows-app-sdk-winui-1.8.260803003-NOTICE.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/apps/winui/ |
+|  |  |  |  | *Microsoft.ui.xaml.dll is bundled with the self-contained Windows App SDK runtime.* |
+| Windows ML Runtime | 1.8.2223 | [Microsoft Software License Terms](licenses/windows-app-sdk-ml-1.8.2223-license.txt)<br>[Third-party notices](licenses/windows-app-sdk-ml-1.8.2223-ThirdPartyNotices.txt) | Microsoft Corporation | https://learn.microsoft.com/windows/ai/new-windows-ml/ |
+|  |  |  |  | *The Microsoft.WindowsAppSDK.ML libraries are bundled with the application.* |
 | yt-dlp | 2026.11.23 | [Unlicense](licenses/host-yt-dlp.txt) | Public-domain dedication by yt-dlp contributors | https://github.com/yt-dlp/yt-dlp |
 |  |  |  |  | *Invoked as an external process for permitted media access.* |
 
