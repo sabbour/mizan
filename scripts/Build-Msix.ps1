@@ -122,6 +122,10 @@ finally {
 Invoke-Checked {
     dotnet publish $project -c Release -r "win-$Architecture" --self-contained true -p:Version=$Version -o $publish
 } "The WinUI shell publish failed."
+Assert-DotNetRuntimeVersion `
+    -AssetsPath (Join-Path (Split-Path -Parent $project) "obj\project.assets.json") `
+    -Architecture $Architecture `
+    -ExpectedVersion "10.0.15"
 
 Copy-Item (Join-Path $publish "*") $staging -Recurse -Force
 Remove-Item (Join-Path $staging "*.pdb") -Force -ErrorAction SilentlyContinue

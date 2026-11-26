@@ -87,6 +87,47 @@ def test_explicit_dlib_path_is_validated_before_discovery(tmp_path):
     assert "The -DlibPath file was not found" in result.stderr
 
 
+def test_resolved_dotnet_runtime_version_must_match_exactly(tmp_path):
+    assets = tmp_path / "project.assets.json"
+    runtime_dependency = {
+        "name": "Microsoft.NETCore.App.Runtime.win-arm64",
+        "version": "[10.0.15, 10.0.15]",
+    }
+    assets.write_text(json.dumps({
+        "project": {
+            "frameworks": {
+                "net10.0-windows10.0.26100.0": {
+                    "downloadDependencies": [runtime_dependency],
+                },
+            },
+        },
+    }), encoding="utf-8")
+
+    assert output(
+        "Assert-DotNetRuntimeVersion -AssetsPath $env:MIZAN_TEST_ASSETS "
+        "-Architecture arm64 -ExpectedVersion 10.0.15",
+        assets=assets,
+    ) == ""
+
+    runtime_dependency["version"] = "[10.0.16, 10.0.16]"
+    assets.write_text(json.dumps({
+        "project": {
+            "frameworks": {
+                "net10.0-windows10.0.26100.0": {
+                    "downloadDependencies": [runtime_dependency],
+                },
+            },
+        },
+    }), encoding="utf-8")
+    result = run_tools(
+        "Assert-DotNetRuntimeVersion -AssetsPath $env:MIZAN_TEST_ASSETS "
+        "-Architecture arm64 -ExpectedVersion 10.0.15",
+        assets=assets,
+    )
+    assert result.returncode != 0
+    assert "resolved .NET runtime 10.0.16 for arm64; expected 10.0.15" in result.stderr
+
+
 @pytest.mark.parametrize("exec_path, matches", [
     ("", True),
     ("C:\\Program Files\\Git\\mingw64\\libexec\\git-core", True),
